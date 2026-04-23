@@ -1,0 +1,11 @@
+mb_resolver — proprietary
+
+Copyright (c) 2026 Simon Leischnig. All rights reserved.
+
+This crate is not licensed for redistribution, modification, or public use
+at this time. Its contents are provided for review and internal development
+purposes only.
+
+For the open-source components this project depends on (`hylic`,
+`hylic-pipeline`), see their respective `LICENSE` files — each is
+distributed under the MIT License.
