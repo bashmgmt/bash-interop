@@ -10,6 +10,10 @@
 //! The prelude is self-reliant: every path it needs is baked into it, so a
 //! shell that sources it needs nothing else.
 
+pub mod tool;
+
+pub use tool::{capture_into, Report, ToolError};
+
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -17,12 +21,10 @@ use std::time::Duration;
 
 use indexmap::IndexMap;
 
-use super::asset::{Asset, AssetError};
 use super::capture::Capture;
-use super::control::{self, Reply, Verb};
-use super::instrument::{Codegen, Instrument};
-use super::src::BashSrc;
-use super::wire::{FRAME_LIMIT, Wire};
+use super::codegen::{Asset, AssetError, BashSrc, Codegen};
+use super::instrument::{Instrument, Verb};
+use super::wire::{Reply, Wire, FRAME_LIMIT};
 
 const WIRE_SRC: Asset = Asset::new("rig/wire.bash");
 const CONTROL_SRC: Asset = Asset::new("rig/control.bash");
@@ -78,7 +80,7 @@ pub struct Outcome {
 
 #[derive(Default)]
 pub struct Rig {
-    instruments: Vec<Box<dyn Instrument>>,
+    instruments: Vec<Instrument>,
     env: IndexMap<String, String>,
     debug: bool,
 }
@@ -88,8 +90,8 @@ impl Rig {
         Self::default()
     }
 
-    pub fn with(mut self, instrument: impl Instrument + 'static) -> Self {
-        self.instruments.push(Box::new(instrument));
+    pub fn with(mut self, instrument: impl Into<Instrument>) -> Self {
+        self.instruments.push(instrument.into());
         self
     }
 
@@ -121,7 +123,7 @@ impl Rig {
             BashSrc::raw(WIRE_SRC.fill(&[("POST", codegen.post_unguarded("__bc_origin").as_str())])?),
             BashSrc::raw(CONTROL_SRC.fill(&[("ASK", codegen.ask("__bc_ask").as_str())])?),
         ];
-        parts.extend(self.instruments.iter().map(|one| one.bash(&codegen)));
+        parts.extend(self.instruments.iter().map(|one| one.render(&codegen)));
         Ok(BashSrc::seq(parts))
     }
 
@@ -141,7 +143,7 @@ impl Rig {
         std::fs::write(&prelude_path, self.prelude(dir, wire.up_path())?.as_str())
             .map_err(|cause| RigError::Prelude { path: prelude_path.clone(), cause })?;
 
-        let verbs: Vec<Verb> = self.instruments.iter().flat_map(|one| one.verbs()).collect();
+        let verbs: Vec<&Verb> = self.instruments.iter().flat_map(Instrument::verbs).collect();
 
         let mut command = Command::new("bash");
         command.args(argv).env("BASH_ENV", &prelude_path);
@@ -163,19 +165,29 @@ impl Rig {
             .map(|text| text.lines().map(str::to_string).collect())
             .unwrap_or_default();
 
-        let (lines, damage) = wire.finish();
-        Ok(Outcome { capture: Capture::new(lines, damage), status: status.into(), debug })
+        Ok(Outcome { capture: wire.finish(), status: status.into(), debug })
     }
 
-    fn serve(&self, wire: &mut Wire, verbs: &[Verb]) -> Result<(), RigError> {
+    /// Every answer is decided against the same history, then applied: a
+    /// verb reads what the run has recorded, it does not write to it.
+    fn serve(&self, wire: &mut Wire, verbs: &[&Verb]) -> Result<(), RigError> {
         wire.drain().map_err(RigError::Read)?;
-        for ask in wire.take_asks() {
-            let name = control::verb_of(&ask);
-            let reply = match verbs.iter().find(|verb| verb.name == name) {
-                Some(verb) => verb.answer(&ask),
-                None => Reply::unknown_verb(name),
-            };
-            wire.answer(ask.stamp.pid, reply).map_err(RigError::Reply)?;
+        let asks = wire.take_asks();
+        if !asks.is_empty() {
+            let seen = wire.seen();
+            let answers: Vec<_> = asks
+                .iter()
+                .map(|ask| {
+                    let reply = match verbs.iter().find(|verb| verb.name == ask.verb()) {
+                        Some(verb) => verb.answer(ask, seen),
+                        None => Reply::unknown_verb(ask.verb()),
+                    };
+                    (ask.stamp.pid, reply)
+                })
+                .collect();
+            for (pid, reply) in answers {
+                wire.answer(pid, reply).map_err(RigError::Reply)?;
+            }
         }
         wire.flush().map_err(RigError::Reply)
     }

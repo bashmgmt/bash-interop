@@ -9,14 +9,20 @@
 //! A shell that asks a question gets its own reply pipe, created by that
 //! shell the first time it asks — a shell that only emits never pays for one.
 
+pub mod control;
+pub mod frame;
+pub mod record;
+
+pub use control::{Ask, Reply};
+pub use frame::{Frame, Kind};
+pub use record::{FromRecord, Line, Micros, Pid, Record, Stamp, Stamped, WireError};
+
 use std::collections::HashMap;
 use std::io::{ErrorKind, Read, Write};
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 
-use super::control::Reply;
-use super::frame::{Frame, Kind};
-use super::record::{Line, Pid, Record, Stamp, Stamped, WireError};
+use super::capture::Capture;
 
 /// Below `PIPE_BUF` (4096) with room for the frame header, so every frame is
 /// one atomic write and concurrent shells cannot interleave.
@@ -33,21 +39,13 @@ pub struct Damage {
     pub text: String,
 }
 
-/// A shell is blocked on its reply pipe until this is answered.
-#[derive(Clone, Debug)]
-pub struct Ask {
-    pub stamp: Stamp,
-    pub record: Record,
-}
-
 pub struct Wire {
     dir: PathBuf,
     up_path: PathBuf,
     reader: std::fs::File,
     pending: String,
     partial: HashMap<(Pid, u32), String>,
-    lines: Vec<Line>,
-    damage: Vec<Damage>,
+    capture: Capture,
     asks: Vec<Ask>,
     replies: Vec<(Pid, String)>,
     steps: usize,
@@ -72,8 +70,7 @@ impl Wire {
             reader,
             pending: String::new(),
             partial: HashMap::new(),
-            lines: Vec::new(),
-            damage: Vec::new(),
+            capture: Capture::default(),
             asks: Vec::new(),
             replies: Vec::new(),
             steps: 0,
@@ -128,11 +125,16 @@ impl Wire {
         if frame.kind == Kind::Ask {
             self.asks.push(Ask { stamp: frame.stamp, record: record.clone() });
         }
-        self.lines.push(Stamped { stamp: frame.stamp, value: record });
+        self.capture.lines.push(Stamped { stamp: frame.stamp, value: record });
     }
 
     fn hurt(&mut self, cause: WireError, text: String) {
-        self.damage.push(Damage { reason: cause.to_string(), text });
+        self.capture.damage.push(Damage { reason: cause.to_string(), text });
+    }
+
+    /// Everything recorded so far. What a verb sees when it is asked.
+    pub fn seen(&self) -> &Capture {
+        &self.capture
     }
 
     pub fn take_asks(&mut self) -> Vec<Ask> {
@@ -146,7 +148,7 @@ impl Wire {
             Reply::Source { body } => {
                 self.steps += 1;
                 let path = self.dir.join(format!("step.{pid}.{}.bash", self.steps));
-                std::fs::write(&path, body)?;
+                std::fs::write(&path, body.as_str())?;
                 vec!["source".to_string(), path.to_string_lossy().into_owned()]
             }
             Reply::Continue { status } => vec!["continue".to_string(), status.to_string()],
@@ -184,16 +186,17 @@ impl Wire {
         Ok(())
     }
 
-    pub fn finish(mut self) -> (Vec<Line>, Vec<Damage>) {
+    pub fn finish(mut self) -> Capture {
         if !self.pending.is_empty() {
             let text = std::mem::take(&mut self.pending);
-            self.damage.push(Damage { reason: "truncated frame".into(), text });
+            self.capture.damage.push(Damage { reason: "truncated frame".into(), text });
         }
         for ((pid, seq), text) in std::mem::take(&mut self.partial) {
-            self.damage
+            self.capture
+                .damage
                 .push(Damage { reason: format!("message {pid}.{seq} never completed"), text });
         }
-        (self.lines, self.damage)
+        self.capture
     }
 }
 

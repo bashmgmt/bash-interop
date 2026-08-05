@@ -1,25 +1,17 @@
-//! A mechanism: bash definitions and control verbs.
+//! Generating the bash a rig injects.
 //!
-//! Two contribution points, matching the two things a subject can do — speak
-//! (call a function that ships a message) and ask (call `BC_INSTR`).
-//!
-//! [`Codegen`] is the only way to construct a send, and it always splices the
-//! owner guard, so writing through another shell's descriptor is impossible
-//! by construction rather than by discipline.
+//! [`BashSrc`] composes fragments without quoting hazards, [`Asset`] reads the
+//! real bash files under `bash/`, and [`Codegen`] is the only way to construct
+//! a send: it always splices the owner guard, so writing through another
+//! shell's descriptor is impossible by construction rather than by discipline.
 
-use super::control::Verb;
-use super::frame::Kind;
-use super::src::BashSrc;
+pub mod asset;
+pub mod src;
 
-pub trait Instrument {
-    fn name(&self) -> &str;
+pub use asset::{Asset, AssetError};
+pub use src::BashSrc;
 
-    fn bash(&self, codegen: &Codegen) -> BashSrc;
-
-    fn verbs(&self) -> Vec<Verb> {
-        Vec::new()
-    }
-}
+use super::wire::Kind;
 
 #[derive(Clone, Copy, Default)]
 pub struct Codegen {
@@ -64,9 +56,7 @@ impl Codegen {
             BashSrc::raw("__BC__msg=\"(${__BC__msg% })\""),
         ];
         if self.debug {
-            lines.push(BashSrc::raw(format!(
-                "__BC__log send {marker} {array} ${{#__BC__msg}}"
-            )));
+            lines.push(BashSrc::raw(format!("__BC__log send {marker} {array} ${{#__BC__msg}}")));
         }
         lines.push(BashSrc::raw(format!(
             "if (( ${{#__BC__msg}} <= __BC__limit )); then\n\

@@ -10,35 +10,31 @@
 //! builtins, no exported variables, no global shell state — and there is no
 //! `eval` anywhere.
 //!
-//! A message is one bash array literal, so structure survives the trip in
-//! both directions. Adding a tool is one [`Instrument`] and one
-//! [`FromRecord`].
+//! The four concerns are one directory each:
+//!
+//! | | |
+//! |---|---|
+//! | [`wire`] | the pipes, the framing, and the message codec |
+//! | [`codegen`] | producing the bash that gets injected |
+//! | [`capture`] | reading a run back, and every view over it |
+//! | [`instrument`] | a mechanism, as a value |
+//! | [`run`] | driving a run, and the shape a tool takes |
+//!
+//! Adding a tool is one [`Instrument`] and one [`FromRecord`].
 
-pub mod asset;
 pub mod capture;
-pub mod control;
-pub mod dispatch;
-pub mod frame;
+pub mod codegen;
 pub mod instrument;
-pub mod origin;
-pub mod record;
-pub mod rig;
-pub mod src;
-pub mod steering;
+pub mod run;
 pub mod wire;
 
 #[cfg(test)]
 mod tests;
 
-pub use asset::{Asset, AssetError};
-pub use capture::{Capture, Shell, ShellNode};
-pub use control::{Reply, Verb};
-pub use dispatch::Dispatch;
-
-pub use instrument::{Codegen, Instrument};
-pub use origin::Origin;
-pub use record::{FromRecord, Line, Micros, Pid, Record, Stamp, Stamped, WireError};
-pub use rig::{ExitStatus, Outcome, Rig, RigError};
-pub use src::BashSrc;
-pub use steering::{Ran, Repl, Steering, Turn};
-pub use wire::{Ask, Damage, Wire};
+pub use capture::{Capture, Origin, Shell, ShellNode};
+pub use codegen::{Asset, AssetError, BashSrc, Codegen};
+pub use instrument::{repl, Dispatch, Instrument, Ran, Turn, Verb};
+pub use run::{capture_into, ExitStatus, Outcome, Report, Rig, RigError, ToolError};
+pub use wire::{
+    Ask, Damage, FromRecord, Line, Micros, Pid, Record, Reply, Stamp, Stamped, WireError,
+};

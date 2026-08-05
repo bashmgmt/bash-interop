@@ -3,7 +3,7 @@
 
 use std::fs;
 
-use super::*;
+use super::{Capture, Dispatch, ExitStatus, Rig};
 
 struct Run {
     capture: Capture,

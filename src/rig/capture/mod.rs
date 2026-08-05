@@ -5,9 +5,11 @@
 
 use std::collections::HashMap;
 
-use super::origin::Origin;
-use super::record::{FromRecord, Line, Micros, Pid, Record, Stamp, Stamped};
-use super::wire::Damage;
+use super::wire::{Damage, FromRecord, Line, Micros, Pid, Record, Stamp, Stamped};
+
+pub mod origin;
+
+pub use origin::Origin;
 
 #[derive(Debug, Default)]
 pub struct Capture {
@@ -152,8 +154,7 @@ fn node<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bash::rig::origin::ORIGIN_TAG;
-    use crate::bash::rig::record::{Micros, Record};
+    use super::origin::ORIGIN_TAG;
 
     fn line(at: u64, pid: u32, seq: u32, tag: &str, args: &[&str]) -> Line {
         Stamped {

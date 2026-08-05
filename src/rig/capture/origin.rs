@@ -5,7 +5,7 @@
 use std::fmt;
 use std::path::PathBuf;
 
-use super::record::{FromRecord, Pid, Record};
+use super::super::wire::{FromRecord, Pid, Record};
 
 pub const ORIGIN_TAG: &str = "__ORIGIN__";
 

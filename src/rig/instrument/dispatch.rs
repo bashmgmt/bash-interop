@@ -7,8 +7,8 @@
 
 use indexmap::IndexMap;
 
-use super::instrument::{Codegen, Instrument};
-use super::src::BashSrc;
+use super::Instrument;
+use super::super::codegen::{BashSrc, Codegen};
 
 const RECORD_ARRAY: &str = "__bc_dispatch_rec";
 
@@ -113,17 +113,16 @@ fn body(node: &Node, depth: usize, codegen: &Codegen) -> BashSrc {
     }
 }
 
-impl Instrument for Dispatch {
-    fn name(&self) -> &str {
-        "dispatch"
-    }
-
-    fn bash(&self, codegen: &Codegen) -> BashSrc {
-        BashSrc::seq(
-            self.functions()
-                .iter()
-                .map(|(name, root)| BashSrc::func(name, body(root, 1, codegen))),
-        )
+impl From<Dispatch> for Instrument {
+    fn from(dispatch: Dispatch) -> Self {
+        Instrument::new("dispatch", move |codegen| {
+            BashSrc::seq(
+                dispatch
+                    .functions()
+                    .iter()
+                    .map(|(name, root)| BashSrc::func(name, body(root, 1, codegen))),
+            )
+        })
     }
 }
 
@@ -131,7 +130,7 @@ impl Instrument for Dispatch {
 mod tests {
     use super::*;
     fn render(dispatch: Dispatch) -> String {
-        dispatch.bash(&Codegen::new()).as_str().to_string()
+        Instrument::from(dispatch).render(&Codegen::new()).as_str().to_string()
     }
 
     /// A bare prefix records directly; literal arguments become nested case
