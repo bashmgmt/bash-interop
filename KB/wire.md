@@ -28,12 +28,12 @@ BC_INSTR ask a b c      # ship it, block, and continue with the answer
 
 ```bash
 BC_INSTR() {
-    local __BC__at="${BASH_SOURCE[1]:-}:${BASH_LINENO[0]:-0}:${FUNCNAME[1]:-main}"
-    local __bc_op=${1:-}
-    shift || return 2
-    case "$__bc_op" in
-        say) __bc_say "$@" ;;
-        ask) __bc_ask "$@" ;;
+    local __BC__msg __BC__at
+    [[ -z $__BC__DEBUG ]] || __bc_where
+
+    case "${1-}" in
+        say) shift; [[ $BASHPID == "$__BC__owner" ]] || __bc_join; __bc_send "$@" ;;
+        ask) shift; __bc_ask "$@" ;;
         *)   return 2 ;;
     esac
 }
@@ -105,8 +105,7 @@ __bc_join() {
     __BC__seq=0
     __BC__reply="$__BC__DIR/rep.$BASHPID"
     __BC__replyfd=""
-    __bc_pack __ORIGIN__ parent "$__bc_parent" shlvl "$SHLVL" source "${BASH_SOURCE[-1]:-}"
-    __bc_ship
+    __bc_send __ORIGIN__ parent "$__bc_parent" shlvl "$SHLVL" source "${BASH_SOURCE[-1]:-}"
 }
 ```
 
@@ -132,9 +131,37 @@ which is the fork detector, and it catches both cases that exist:
 *grandparent*. Reading the inherited `__BC__owner` before overwriting it is
 what makes the process forest true.
 
-The guard sits at the top of `__bc_say` and `__bc_ask`, which are the only two
-places a message is sent from, so there is no way to write through a stale
-descriptor by accident.
+The guard sits in `BC_INSTR`'s `say` arm and at the top of `__bc_ask`, which
+are the only two places a message originates, so there is no way to write
+through a stale descriptor by accident. It is deliberately *not* in
+`__bc_send`, which `__bc_join` itself calls — that would be a loop.
+
+### The one-frame lane
+
+`__bc_send` packs and ships, and one atomic write is where it ends:
+
+```bash
+__bc_send() {
+    printf -v __BC__msg '%s ' "${@@Q}"
+    __BC__msg="(${__BC__msg% })"
+    [[ -z $__BC__DEBUG ]] || __bc_log "${#__BC__msg}" "$__BC__at"
+
+    if (( ${#__BC__msg} <= __BC__limit )); then
+        printf '%s %s %s . %s\n' \
+            "$EPOCHREALTIME" "$BASHPID" "$((__BC__seq++))" "$__BC__msg" >&"$__BC__up"
+        return
+    fi
+
+    __bc_split
+}
+```
+
+Packing and shipping are one function because nothing ever wants one without
+the other — `say`, `ask` and `join` all call exactly this. Two things keep the
+common path short: the call site `__BC__at` is three array subscripts that only
+the debug log reads, so it is taken only when something will read it; and a
+message that fits leaves before `__bc_split` is ever reached. See
+[design.md](design.md#the-one-frame-lane).
 
 ## Frames
 
@@ -254,8 +281,7 @@ __bc_ask() {
     }
 
     set -- __ASK__ "$@"
-    __bc_pack "$@"
-    __bc_ship
+    __bc_send "$@"
 
     local __bc_line
     IFS= read -r __bc_line <&"$__BC__replyfd"
