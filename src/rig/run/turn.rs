@@ -29,11 +29,6 @@ impl<'a> Turn<'a> {
         self.asked.stamp
     }
 
-    /// This run's workspace.
-    pub fn dir(&self) -> &Path {
-        self.dir
-    }
-
     /// Writes `body` into the workspace and returns the command that sources
     /// it. The name is fixed by the ask, so it cannot collide.
     pub fn source(&self, body: &BashSrc) -> Result<Reply, RigError> {

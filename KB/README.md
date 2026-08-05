@@ -12,16 +12,20 @@ in the resulting process tree, and answers questions those shells ask. It is
 bidirectional, arglist-based, and knows nothing about what the messages mean.
 
 ```
-KB/mb_resolver/bash/
-  values.md       @Q, @A, BashVal/Schema, the two codecs
-  wire.md         the pipes, the framing, the message and the reply
-  source.md       BashSrc and Asset — the bash a rig injects
-  capture.md      Capture and its views: order, shells, the process forest
-  run.md          the Rig trait, the session, signals, errors
-  design.md       the decisions, and the measurements behind them
-  bashcap.md      the reference tool, end to end
-  managebash.md   the other consumer
+KB/mb_resolver/bash/                  src/bash/
+  values.md       @Q, @A, BashVal/Schema           value/
+  wire.md         pipes, framing, message, reply   rig/wire/
+  source.md       BashSrc, Asset, the prelude      rig/source/
+  capture.md      Capture, and the process forest  rig/capture/
+  run.md          the Rig trait, listen/converse   rig/run/, rig/listen.rs
+  design.md       the decisions and measurements
+  bashcap.md      the reference tool, end to end   utilprog/bashcap/
+  managebash.md   the other consumer               mb/
 ```
+
+The rig's modules are private; `src/bash/rig/mod.rs` carries one re-export
+list and that list is the API. Planning lives in
+[`KB/.plans/`](../../.plans/INDEX.md).
 
 The documents mirror the source directories one for one. `values.md` is the
 layer beneath; `design.md` collects the reasoning that would otherwise be

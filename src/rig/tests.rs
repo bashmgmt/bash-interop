@@ -4,48 +4,27 @@
 use std::fs;
 use std::time::{Duration, Instant};
 
-use super::{BashSrc, Capture, ExitStatus, Line, Reply, Rig, RigError, Setup, Turn, Workspace};
+use super::{converse, listen, BashSrc, Capture, ExitStatus, Reply, Setup, Workspace};
 
 // ── fixtures ─────────────────────────────────────────────────────────
 
-/// Says nothing of its own, and has nothing to answer.
-struct Reporter;
-
-impl Rig for Reporter {
-    type Session = Capture;
-    type Output = (Capture, ExitStatus);
-
-    fn start(&self) -> Result<(Setup, Capture), RigError> {
-        Ok((Setup::new(), Capture::default()))
-    }
-
-    fn heard(&self, seen: &mut Capture, said: Line) -> Result<(), RigError> {
-        seen.lines.push(said);
-        Ok(())
-    }
-
-    fn answer(&self, _seen: &mut Capture, _asked: &Turn) -> Result<Reply, RigError> {
-        Ok(Reply::status(127))
-    }
-
-    fn ended(&self, seen: Capture, status: ExitStatus) -> Result<Self::Output, RigError> {
-        Ok((seen, status))
-    }
+/// The same, for a rig with nothing of its own.
+fn heard(files: &[(&str, &str)]) -> (Capture, ExitStatus) {
+    listen(Setup::new(), &[written(files)]).unwrap_or_else(|error| panic!("{error}"))
 }
 
-/// Writes `files` to a scratch directory and runs the first one.
-fn run<R: Rig>(rig: &R, files: &[(&str, &str)]) -> R::Output {
+fn script(body: &str) -> (Capture, ExitStatus) {
+    heard(&[("main.bash", body)])
+}
+
+fn written(files: &[(&str, &str)]) -> String {
     let temp = tempfile::tempdir().unwrap();
     for (name, body) in files {
         fs::write(temp.path().join(name), body).unwrap();
     }
-
-    let entry = temp.path().join(files[0].0).to_string_lossy().into_owned();
-    rig.run(&[entry]).unwrap_or_else(|error| panic!("{error}"))
-}
-
-fn script(body: &str) -> (Capture, ExitStatus) {
-    run(&Reporter, &[("main.bash", body)])
+    // The scripts are read while bash runs and never after, so the directory
+    // may go when this returns.
+    temp.keep().join(files[0].0).to_string_lossy().into_owned()
 }
 
 /// The words behind `lead` in every message that begins with it, in global
@@ -74,22 +53,19 @@ fn report(capture: &Capture) -> String {
 /// `$PPID` would get wrong inside a subshell.
 #[test]
 fn every_descendant_shell_reaches_the_wire() {
-    let (seen, _) = run(
-        &Reporter,
-        &[
-            (
-                "main.bash",
-                r#"
-                BC_INSTR say REC top
-                ( BC_INSTR say REC paren )
-                value=$( BC_INSTR say REC cmdsubst; echo hi )
-                bash "${BASH_SOURCE[0]%/*}/child.bash"
-                BC_INSTR say REC after
-                "#,
-            ),
-            ("child.bash", "BC_INSTR say REC child\n( BC_INSTR say REC grandchild )\n"),
-        ],
-    );
+    let (seen, _) = heard(&[
+        (
+            "main.bash",
+            r#"
+            BC_INSTR say REC top
+            ( BC_INSTR say REC paren )
+            value=$( BC_INSTR say REC cmdsubst; echo hi )
+            bash "${BASH_SOURCE[0]%/*}/child.bash"
+            BC_INSTR say REC after
+            "#,
+        ),
+        ("child.bash", "BC_INSTR say REC child\n( BC_INSTR say REC grandchild )\n"),
+    ]);
 
     assert_eq!(
         args(&seen, "REC"),
@@ -104,30 +80,27 @@ fn every_descendant_shell_reaches_the_wire() {
 /// interleave, and anything longer is split and rejoined by `(pid, seq)`.
 #[test]
 fn concurrent_writers_never_interleave() {
-    let (seen, _) = run(
-        &Reporter,
-        &[
-            (
-                "main.bash",
-                r#"
-                here="${BASH_SOURCE[0]%/*}"
-                for name in a b c d e f g h; do bash "$here/child.bash" "$name" & done
-                wait
-                "#,
-            ),
-            (
-                "child.bash",
-                r#"
-                small="$(printf 'S%.0s' {1..500})"
-                large="$(printf 'L%.0s' {1..9000})"
-                for index in $(seq 1 40); do
-                    BC_INSTR say REC "$1-$index-$small"
-                    BC_INSTR say REC "$1-$index-$large"
-                done
-                "#,
-            ),
-        ],
-    );
+    let (seen, _) = heard(&[
+        (
+            "main.bash",
+            r#"
+            here="${BASH_SOURCE[0]%/*}"
+            for name in a b c d e f g h; do bash "$here/child.bash" "$name" & done
+            wait
+            "#,
+        ),
+        (
+            "child.bash",
+            r#"
+            small="$(printf 'S%.0s' {1..500})"
+            large="$(printf 'L%.0s' {1..9000})"
+            for index in $(seq 1 40); do
+                BC_INSTR say REC "$1-$index-$small"
+                BC_INSTR say REC "$1-$index-$large"
+            done
+            "#,
+        ),
+    ]);
 
     let records = args(&seen, "REC");
     assert_eq!(records.len(), 8 * 80);
@@ -185,8 +158,9 @@ fn a_signalled_subject_is_reported_and_loses_nothing() {
 #[test]
 fn the_prelude_is_non_invasive_and_self_reliant() {
     let temp = tempfile::tempdir().unwrap();
-    let (setup, _) = Reporter.start().unwrap();
-    let prelude = super::run::prelude(&setup, temp.path(), &temp.path().join("up")).unwrap();
+    let setup = Setup::new();
+    let prelude =
+        super::prelude(&setup.bash, setup.debug, temp.path(), &temp.path().join("up")).unwrap();
     let code: Vec<&str> =
         prelude.as_str().lines().filter(|line| !line.trim_start().starts_with('#')).collect();
     let text = code.join("\n");
@@ -230,94 +204,70 @@ const SOAK_BASH: &str = r#"
 NOTE() { BC_INSTR say NOTE "$@"; }
 "#;
 
-struct Soak;
-
-#[derive(Default)]
-struct Soaking {
-    answered: usize,
-    seen: Capture,
-}
-
-impl Rig for Soak {
-    type Session = Soaking;
-    type Output = (Soaking, ExitStatus);
-
-    fn start(&self) -> Result<(Setup, Soaking), RigError> {
-        Ok((Setup::new().bash(BashSrc::raw(SOAK_BASH)), Soaking::default()))
-    }
-
-    fn heard(&self, session: &mut Soaking, said: Line) -> Result<(), RigError> {
-        session.seen.lines.push(said);
-        Ok(())
-    }
-
-    fn answer(&self, session: &mut Soaking, asked: &Turn) -> Result<Reply, RigError> {
-        session.answered += 1;
-        let step: usize = asked.args().last().and_then(|word| word.parse().ok()).unwrap_or(0);
-
-        Ok(match step % 7 {
-            0 => Reply::status(0),
-            1 => Reply::of(["declare", "-g", &format!("mark_{step}=set")]),
-            2 => Reply::eval(&format!("NOTE eval {step}")),
-            3 => Reply::of(["NOTE", "call", &step.to_string()]),
-            4 => asked.source(&BashSrc::raw(format!("NOTE source {step}")))?,
-            5 => {
-                std::thread::sleep(Duration::from_millis(2));
-                Reply::status(0)
-            }
-            _ => Reply::status(3),
-        })
-    }
-
-    fn ended(&self, session: Soaking, status: ExitStatus) -> Result<Self::Output, RigError> {
-        Ok((session, status))
-    }
-}
-
 /// Every reply form in turn, one deliberately slow, mixed with saying and
 /// with a message too wide for one frame, from two shells asking
 /// independently. `NOTE` is this rig's own word, called by the operator.
 #[test]
 fn a_session_survives_every_way_of_answering() {
-    let (soaked, status) = run(
-        &Soak,
-        &[
-            (
-                "main.bash",
-                r#"
-                declare -i i=0
-                while (( i < 56 )); do
-                    BC_INSTR say REC tick "$i"
-                    BC_INSTR ask step "$i" || BC_INSTR say REC refused "$i"
-                    (( i += 1 ))
-                done
+    let mut answered = 0;
+    let entry = written(&[
+        (
+            "main.bash",
+            r#"
+            declare -i i=0
+            while (( i < 56 )); do
+                BC_INSTR say REC tick "$i"
+                BC_INSTR ask step "$i" || BC_INSTR say REC refused "$i"
+                (( i += 1 ))
+            done
 
-                wide="$(printf 'W%.0s' {1..9000})"
-                BC_INSTR say REC wide "$wide"
+            wide="$(printf 'W%.0s' {1..9000})"
+            BC_INSTR say REC wide "$wide"
 
-                bash "${BASH_SOURCE[0]%/*}/other.bash"
-                BC_INSTR say REC marks "${!mark_@}"
-                "#,
-            ),
-            ("other.bash", "BC_INSTR ask step 4\nBC_INSTR say REC other done\n"),
-        ],
-    );
-    let seen = &soaked.seen;
+            bash "${BASH_SOURCE[0]%/*}/other.bash"
+            BC_INSTR say REC marks "${!mark_@}"
+            "#,
+        ),
+        ("other.bash", "BC_INSTR ask step 4\nBC_INSTR say REC other done\n"),
+    ]);
 
-    assert_eq!(status, ExitStatus::Code(0), "{}", report(seen));
-    assert_eq!(soaked.answered, 57, "56 from the first shell, one from the second");
+    let (seen, status) = converse(
+        Setup::new().bash(BashSrc::raw(SOAK_BASH)),
+        &[entry],
+        |_seen, asked| {
+            answered += 1;
+            let step: usize = asked.args().last().and_then(|w| w.parse().ok()).unwrap_or(0);
 
-    let ticks = args(seen, "REC");
+            Ok(match step % 7 {
+                0 => Reply::status(0),
+                1 => Reply::of(["declare", "-g", &format!("mark_{step}=set")]),
+                2 => Reply::of(["eval", &format!("NOTE eval {step}")]),
+                3 => Reply::of(["NOTE", "call", &step.to_string()]),
+                4 => asked.source(&BashSrc::raw(format!("NOTE source {step}")))?,
+                5 => {
+                    std::thread::sleep(Duration::from_millis(2));
+                    Reply::status(0)
+                }
+                _ => Reply::status(3),
+            })
+        },
+    )
+    .unwrap_or_else(|error| panic!("{error}"));
+
+    assert_eq!(status, ExitStatus::Code(0), "{}", report(&seen));
+    assert_eq!(answered, 57, "56 from the first shell, one from the second");
+
+    let ticks = args(&seen, "REC");
     assert_eq!(ticks.iter().filter(|line| line.starts_with("tick ")).count(), 56);
     assert_eq!(ticks.iter().filter(|line| line.starts_with("refused ")).count(), 8);
     assert!(ticks.iter().any(|line| line.len() > 9000), "the wide message survived");
     assert!(ticks.iter().any(|line| line == "other done"));
 
     // Every form that leaves a trace left one.
-    let notes = args(seen, "NOTE");
-    assert!(notes.iter().any(|note| note.starts_with("eval ")), "{}", report(seen));
-    assert!(notes.iter().any(|note| note.starts_with("call ")), "{}", report(seen));
-    assert!(notes.iter().any(|note| note.starts_with("source ")), "{}", report(seen));
+    let notes = args(&seen, "NOTE");
+    assert!(notes.iter().any(|note| note.starts_with("eval ")), "{}", report(&seen));
+    assert!(notes.iter().any(|note| note.starts_with("call ")), "{}", report(&seen));
+    assert!(notes.iter().any(|note| note.starts_with("source ")), "{}", report(&seen));
 
     // `declare -g` reached the subject's own scope, and the names are still
     // there at the end of the run.
@@ -356,29 +306,6 @@ fn a_shell_left_asking_does_not_outlive_the_run() {
 /// from the run, so the subject writes its own pid to a file before asking.
 #[test]
 fn a_panicking_answer_kills_the_subject() {
-    struct Exploding;
-
-    impl Rig for Exploding {
-        type Session = ();
-        type Output = ExitStatus;
-
-        fn start(&self) -> Result<(Setup, ()), RigError> {
-            Ok((Setup::new(), ()))
-        }
-
-        fn heard(&self, _session: &mut (), _said: Line) -> Result<(), RigError> {
-            Ok(())
-        }
-
-        fn answer(&self, _session: &mut (), _asked: &Turn) -> Result<Reply, RigError> {
-            panic!("answer blew up")
-        }
-
-        fn ended(&self, _session: (), status: ExitStatus) -> Result<ExitStatus, RigError> {
-            Ok(status)
-        }
-    }
-
     let temp = tempfile::tempdir().unwrap();
     let marker = temp.path().join("pid");
     let entry = temp.path().join("main.bash");
@@ -388,7 +315,9 @@ fn a_panicking_answer_kills_the_subject() {
 
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
-    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| Exploding.run(&argv)));
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        converse(Setup::new(), &argv, |_, _| panic!("answer blew up"))
+    }));
     std::panic::set_hook(previous);
 
     assert!(outcome.is_err(), "the panic must propagate rather than be swallowed");
@@ -407,35 +336,17 @@ fn a_panicking_answer_kills_the_subject() {
 /// trace — a file rather than the wire, so it survives the wire failing.
 #[test]
 fn a_kept_workspace_holds_the_prelude_the_steps_and_the_trace() {
-    struct Kept(std::path::PathBuf);
-
-    impl Rig for Kept {
-        type Session = ();
-        type Output = ExitStatus;
-
-        fn start(&self) -> Result<(Setup, ()), RigError> {
-            Ok((Setup::new().debug(true).workspace(Workspace::At(self.0.clone())), ()))
-        }
-
-        fn heard(&self, _session: &mut (), _said: Line) -> Result<(), RigError> {
-            Ok(())
-        }
-
-        fn answer(&self, _session: &mut (), asked: &Turn) -> Result<Reply, RigError> {
-            asked.source(&BashSrc::raw("BC_INSTR say REC sourced"))
-        }
-
-        fn ended(&self, _session: (), status: ExitStatus) -> Result<ExitStatus, RigError> {
-            Ok(status)
-        }
-    }
-
     let temp = tempfile::tempdir().unwrap();
     let kept = temp.path().join("run");
     let entry = temp.path().join("main.bash");
     fs::write(&entry, "BC_INSTR ask something\n( BC_INSTR say REC subshell )\n").unwrap();
 
-    let status = Kept(kept.clone()).run(&[entry.to_string_lossy().into_owned()]).unwrap();
+    let (_, status) = converse(
+        Setup::new().debug(true).workspace(Workspace::At(kept.clone())),
+        &[entry.to_string_lossy().into_owned()],
+        |_, asked| asked.source(&BashSrc::raw("BC_INSTR say REC sourced")),
+    )
+    .unwrap();
     assert_eq!(status, ExitStatus::Code(0));
     assert!(kept.join("prelude.bash").is_file(), "the prelude survived the run");
 

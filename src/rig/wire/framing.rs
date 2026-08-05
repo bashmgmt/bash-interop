@@ -24,7 +24,7 @@
 
 use std::collections::HashMap;
 
-use super::record::{Line, Micros, Pid, Record, Stamp, Stamped};
+use super::message::{Line, Micros, Pid, Record, Stamp, Stamped};
 use crate::bash::rig::error::{Doing, RigError};
 
 /// Below `PIPE_BUF` (4096) with room for the header, so every frame is one

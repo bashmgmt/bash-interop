@@ -12,6 +12,7 @@ use std::process::{Child, Command};
 
 use super::{Rig, Setup, Turn, Workspace};
 use crate::bash::rig::error::{Doing, RigError};
+use crate::bash::rig::source;
 use crate::bash::rig::wire::Wire;
 
 pub(crate) fn run<R: Rig>(rig: &R, argv: &[String]) -> Result<R::Output, RigError> {
@@ -21,7 +22,8 @@ pub(crate) fn run<R: Rig>(rig: &R, argv: &[String]) -> Result<R::Output, RigErro
 
     let mut wire = Wire::create(dir)?;
     let written = dir.join("prelude.bash");
-    fs::write(&written, super::prelude(&setup, dir, wire.up_path())?.as_str())
+    let bash = source::prelude(&setup.bash, setup.debug, dir, wire.up_path())?;
+    fs::write(&written, bash.as_str())
         .doing(|| format!("writing the prelude to {}", written.display()))?;
 
     let mut subject = Subject::spawn(argv, &written, &setup)?;

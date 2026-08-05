@@ -32,11 +32,6 @@ impl Reply {
         Self::of(["source", &path.to_string_lossy()])
     }
 
-    /// For an interim answer not worth a file.
-    pub fn eval(code: &str) -> Self {
-        Self::of(["eval", code])
-    }
-
     pub fn words(&self) -> &[String] {
         &self.0
     }

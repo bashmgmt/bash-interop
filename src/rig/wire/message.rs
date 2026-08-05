@@ -55,7 +55,7 @@ impl Stamp {
 }
 
 /// How `BC_INSTR ask` marks a question; one of the two reserved words, the
-/// other being [`ORIGIN_TAG`](crate::bash::rig::capture::origin::ORIGIN_TAG).
+/// other being [`ORIGIN_TAG`](crate::bash::rig::ORIGIN_TAG).
 pub const ASK_TAG: &str = "__ASK__";
 
 /// The words the subject passed, in order, an empty arglist included. The rig

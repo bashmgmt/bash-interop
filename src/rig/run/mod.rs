@@ -6,13 +6,11 @@ pub mod turn;
 pub use turn::Turn;
 
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::bash::rig::error::RigError;
-use crate::bash::rig::source::{Asset, BashSrc};
-use crate::bash::rig::wire::{Line, Reply, FRAME_LIMIT};
-
-const WIRE_SRC: Asset = Asset::new("rig/wire.bash");
+use crate::bash::rig::source::BashSrc;
+use crate::bash::rig::wire::{Line, Reply};
 
 /// How a run is performed: the description, and the hooks that drive it.
 ///
@@ -49,20 +47,6 @@ pub trait Rig {
     {
         drive::run(self, argv)
     }
-}
-
-/// The bash every participating shell sources, folded in this order.
-pub fn prelude(setup: &Setup, dir: &Path, up: &Path) -> Result<BashSrc, RigError> {
-    let quote = |path: &Path| crate::bash::value::emit_scalar(&path.to_string_lossy());
-
-    Ok(BashSrc::seq([
-        BashSrc::raw(format!("__BC__UP={}", quote(up))),
-        BashSrc::raw(format!("__BC__DIR={}", quote(dir))),
-        BashSrc::raw(format!("__BC__limit={FRAME_LIMIT}")),
-        BashSrc::raw(format!("__BC__DEBUG={}", if setup.debug { "1" } else { "" })),
-        WIRE_SRC.read()?,
-        setup.bash.clone(),
-    ]))
 }
 
 /// How a run starts. A pure value: no I/O happens until the runtime uses it.

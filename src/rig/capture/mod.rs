@@ -1,32 +1,17 @@
 //! Everything read from a run, flat and in read order. Ordering, per-shell
 //! grouping, the process forest and typed decoding are all views over it.
 
-pub mod origin;
+mod forest;
+mod origin;
 
-pub use origin::Origin;
-
-use std::collections::HashMap;
+pub use forest::{Shell, ShellNode};
+pub use origin::{Origin, ORIGIN_TAG};
 
 use crate::bash::rig::wire::{FromRecord, Line, Micros, Pid, Record, Stamp, Stamped};
 
 #[derive(Debug, Default)]
 pub struct Capture {
     pub lines: Vec<Line>,
-}
-
-/// The `__ORIGIN__` that opened a shell, and everything it wrote after.
-#[derive(Clone, Debug)]
-pub struct Shell<'a> {
-    pub pid: Pid,
-    pub opened_at: Stamp,
-    pub origin: Option<Origin>,
-    pub lines: Vec<&'a Line>,
-}
-
-#[derive(Clone, Debug)]
-pub struct ShellNode<'a> {
-    pub shell: Shell<'a>,
-    pub children: Vec<ShellNode<'a>>,
 }
 
 impl Capture {
@@ -56,46 +41,6 @@ impl Capture {
         ordered
     }
 
-    /// A record tagged `__ORIGIN__` opens a shell; later records join the
-    /// most recent shell with the same pid.
-    pub fn shells(&self) -> Vec<Shell<'_>> {
-        let mut shells: Vec<Shell<'_>> = Vec::new();
-        let mut newest: HashMap<Pid, usize> = HashMap::new();
-
-        for line in self.chronological() {
-            let pid = line.stamp.pid;
-            let origin = Origin::from_record(&line.value);
-            match newest.get(&pid) {
-                Some(&index) if origin.is_none() => shells[index].lines.push(line),
-                _ => {
-                    newest.insert(pid, shells.len());
-                    shells.push(Shell {
-                        pid,
-                        opened_at: line.stamp,
-                        origin: origin.and_then(Result::ok),
-                        lines: vec![line],
-                    });
-                }
-            }
-        }
-        shells
-    }
-
-    /// Roots are shells whose parent never emitted. A child attaches to the
-    /// newest shell of its parent pid that opened no later than it did.
-    pub fn forest(&self) -> Vec<ShellNode<'_>> {
-        let shells = self.shells();
-        let mut children: HashMap<usize, Vec<usize>> = HashMap::new();
-        let mut roots: Vec<usize> = Vec::new();
-
-        for (index, shell) in shells.iter().enumerate() {
-            match parent_of(&shells, index, shell) {
-                Some(parent) => children.entry(parent).or_default().push(index),
-                None => roots.push(index),
-            }
-        }
-        roots.into_iter().map(|index| node(&shells, &children, index)).collect()
-    }
 
     /// Every record the family recognised, successes and failures alike.
     pub fn of<T: FromRecord>(&self) -> impl Iterator<Item = Stamped<Result<T, T::Err>>> + '_ {
@@ -108,36 +53,6 @@ impl Capture {
         self.of::<T>().filter_map(|entry| {
             entry.value.ok().map(|value| Stamped { stamp: entry.stamp, value })
         })
-    }
-}
-
-fn parent_of(shells: &[Shell<'_>], index: usize, shell: &Shell<'_>) -> Option<usize> {
-    let parent_pid = shell.origin.as_ref()?.parent?;
-    shells
-        .iter()
-        .enumerate()
-        .filter(|(other, candidate)| {
-            *other != index
-                && candidate.pid == parent_pid
-                && candidate.opened_at.at <= shell.opened_at.at
-        })
-        .max_by_key(|(_, candidate)| candidate.opened_at.at)
-        .map(|(other, _)| other)
-}
-
-fn node<'a>(
-    shells: &[Shell<'a>],
-    children: &HashMap<usize, Vec<usize>>,
-    index: usize,
-) -> ShellNode<'a> {
-    ShellNode {
-        shell: shells[index].clone(),
-        children: children
-            .get(&index)
-            .into_iter()
-            .flatten()
-            .map(|&child| node(shells, children, child))
-            .collect(),
     }
 }
 
