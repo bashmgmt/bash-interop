@@ -34,7 +34,7 @@ pub use asset::{Asset, AssetError};
 pub use capture::{Capture, Shell, ShellNode};
 pub use control::{Reply, Verb};
 pub use dispatch::Dispatch;
-pub use frame::{Frame, Kind};
+
 pub use instrument::{Codegen, Instrument};
 pub use origin::Origin;
 pub use record::{FromRecord, Line, Micros, Pid, Record, Stamp, Stamped, WireError};
