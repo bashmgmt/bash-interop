@@ -8,7 +8,7 @@
 use indexmap::IndexMap;
 
 use super::Instrument;
-use super::super::codegen::{BashSrc, Codegen};
+use crate::bash::rig::codegen::{BashSrc, Codegen};
 
 const RECORD_ARRAY: &str = "__bc_dispatch_rec";
 

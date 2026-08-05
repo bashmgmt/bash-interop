@@ -11,7 +11,7 @@ pub mod src;
 pub use asset::{Asset, AssetError};
 pub use src::BashSrc;
 
-use super::wire::Kind;
+use crate::bash::rig::wire::Kind;
 
 #[derive(Clone, Copy, Default)]
 pub struct Codegen {

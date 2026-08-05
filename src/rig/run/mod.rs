@@ -21,10 +21,10 @@ use std::time::Duration;
 
 use indexmap::IndexMap;
 
-use super::capture::Capture;
-use super::codegen::{Asset, AssetError, BashSrc, Codegen};
-use super::instrument::Instrument;
-use super::wire::{Ask, Reply, Wire, FRAME_LIMIT};
+use crate::bash::rig::capture::Capture;
+use crate::bash::rig::codegen::{Asset, AssetError, BashSrc, Codegen};
+use crate::bash::rig::instrument::Instrument;
+use crate::bash::rig::wire::{Ask, Reply, Wire, FRAME_LIMIT};
 
 /// Answers every `BC_INSTR`. Total: a question always gets an answer, and a
 /// client that wants refusal expresses it as an answer the subject runs.

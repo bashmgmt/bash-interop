@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use super::wire::{Damage, FromRecord, Line, Micros, Pid, Record, Stamp, Stamped};
+use crate::bash::rig::wire::{Damage, FromRecord, Line, Micros, Pid, Record, Stamp, Stamped};
 
 pub mod origin;
 

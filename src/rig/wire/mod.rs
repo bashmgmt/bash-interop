@@ -20,9 +20,10 @@ pub use record::{field, FromRecord, Line, Micros, Pid, Record, Stamp, Stamped, W
 use std::collections::HashMap;
 use std::io::{ErrorKind, Read, Write};
 use std::os::fd::AsRawFd;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
-use super::capture::Capture;
+use crate::bash::rig::capture::Capture;
 
 /// Below `PIPE_BUF` (4096) with room for the frame header, so every frame is
 /// one atomic write and concurrent shells cannot interleave.
@@ -195,5 +196,3 @@ impl Wire {
         self.capture
     }
 }
-
-use std::os::unix::fs::OpenOptionsExt;
