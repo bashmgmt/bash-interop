@@ -88,7 +88,7 @@ mod tests {
     /// leaves the client's environment alone.
     #[test]
     fn assets_read_and_export_nothing() {
-        for name in ["rig/wire.bash", "rig/control.bash", "rig/repl.bash", "mb/mb.bash"] {
+        for name in ["rig/wire.bash", "rig/control.bash", "mb/mb.bash"] {
             let body = Asset::new(name).read().unwrap_or_else(|error| panic!("{error}"));
             assert!(!body.trim().is_empty(), "{name} is empty");
             for line in body.lines().filter(|line| !line.trim_start().starts_with('#')) {

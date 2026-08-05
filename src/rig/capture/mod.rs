@@ -74,15 +74,15 @@ impl Capture {
 
         for line in self.chronological() {
             let pid = line.stamp.pid;
-            let opens = line.value.tag == Origin::TAG;
+            let origin = Origin::from_record(&line.value);
             match newest.get(&pid) {
-                Some(&index) if !opens => shells[index].lines.push(line),
+                Some(&index) if origin.is_none() => shells[index].lines.push(line),
                 _ => {
                     newest.insert(pid, shells.len());
                     shells.push(Shell {
                         pid,
                         opened_at: line.stamp,
-                        origin: opens.then(|| Origin::from_record(&line.value).ok()).flatten(),
+                        origin: origin.and_then(Result::ok),
                         lines: vec![line],
                     });
                 }
@@ -107,11 +107,12 @@ impl Capture {
         roots.into_iter().map(|index| node(&shells, &children, index)).collect()
     }
 
+    /// Every record this family recognised, decoded — successes and failures
+    /// alike. A record it declined is not one of its own and is simply absent.
     pub fn of<T: FromRecord>(&self) -> impl Iterator<Item = Stamped<Result<T, T::Err>>> + '_ {
-        self.chronological()
-            .into_iter()
-            .filter(|line| line.value.tag == T::TAG)
-            .map(|line| Stamped { stamp: line.stamp, value: T::from_record(&line.value) })
+        self.chronological().into_iter().filter_map(|line| {
+            T::from_record(&line.value).map(|value| Stamped { stamp: line.stamp, value })
+        })
     }
 
     pub fn decoded<T: FromRecord>(&self) -> impl Iterator<Item = Stamped<T>> + '_ {
@@ -156,10 +157,10 @@ mod tests {
     use super::*;
     use super::origin::ORIGIN_TAG;
 
-    fn line(at: u64, pid: u32, seq: u32, tag: &str, args: &[&str]) -> Line {
+    fn line(at: u64, pid: u32, seq: u32, lead: &str, rest: &[&str]) -> Line {
         Stamped {
             stamp: Stamp { at: Micros(at), pid: Pid(pid), seq },
-            value: Record::new(tag, args.iter().map(|arg| arg.to_string())),
+            value: Record::new(std::iter::once(lead).chain(rest.iter().copied())),
         }
     }
 
@@ -184,7 +185,7 @@ mod tests {
         );
 
         let tags: Vec<&str> =
-            capture.chronological().iter().map(|line| line.value.tag.as_str()).collect();
+            capture.chronological().iter().map(|line| line.value.words[0].as_str()).collect();
         assert_eq!(tags, [ORIGIN_TAG, "A", ORIGIN_TAG, "B", ORIGIN_TAG, ORIGIN_TAG]);
 
         let shells = capture.shells();

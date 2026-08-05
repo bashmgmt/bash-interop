@@ -13,12 +13,14 @@ struct Run {
 }
 
 impl Run {
-    fn args(&self, tag: &str) -> Vec<String> {
+    /// The words behind `lead` in every message that begins with it, in
+    /// global time order.
+    fn args(&self, lead: &str) -> Vec<String> {
         self.capture
             .chronological()
             .into_iter()
-            .filter(|line| line.value.tag == tag)
-            .map(|line| line.value.args.join(" "))
+            .filter_map(|line| line.value.behind(lead))
+            .map(|rest| rest.join(" "))
             .collect()
     }
 
@@ -27,7 +29,7 @@ impl Run {
             .capture
             .chronological()
             .into_iter()
-            .map(|line| format!("  {} {}", line.stamp.pid, line.value.words().join(" ")))
+            .map(|line| format!("  {} {}", line.stamp.pid, line.value.words.join(" ")))
             .collect();
         format!("capture:\n{}\ndebug:\n  {}", lines.join("\n"), self.debug.join("\n  "))
     }
@@ -131,6 +133,17 @@ fn concurrent_writers_never_interleave() {
 fn exit_status_is_reported_and_untouched() {
     assert_eq!(script("REC one\nexit 7", |rig| rig.with(recorder())).status, ExitStatus::Code(7));
     assert_eq!(script("REC one", |rig| rig.with(recorder())).status, ExitStatus::Code(0));
+}
+
+/// A signalled subject is reported as signalled rather than flattened into a
+/// code, and everything it said before the signal is still there — the rig
+/// installs no handler and needs none, because nothing was being held back.
+#[test]
+fn a_signalled_subject_is_reported_and_loses_nothing() {
+    let result = script("REC before\nkill -TERM $$\nREC never", |rig| rig.with(recorder()));
+    assert_eq!(result.status, ExitStatus::Signal(15));
+    assert_eq!(result.status.code(), 143, "128 + signal, the shell convention");
+    assert_eq!(result.args("REC"), ["before"], "{}", result.report());
 }
 
 /// Messages written immediately before the last writer exits must still be

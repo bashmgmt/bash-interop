@@ -10,14 +10,19 @@
 //! builtins, no exported variables, no global shell state — and there is no
 //! `eval` anywhere.
 //!
-//! The four concerns are one directory each:
+//! A message in either direction is an **arglist**. The rig reads no position
+//! of one and attaches no meaning to any word; a leading discriminator is a
+//! convention a tool opts into with [`Record::behind`], not something the
+//! transport knows about.
+//!
+//! The five concerns are one directory each:
 //!
 //! | | |
 //! |---|---|
 //! | [`wire`] | the pipes, the framing, and the message codec |
 //! | [`codegen`] | producing the bash that gets injected |
 //! | [`capture`] | reading a run back, and every view over it |
-//! | [`instrument`] | a mechanism, as a value |
+//! | [`instrument`] | a bash contribution, as a value |
 //! | [`run`] | driving a run, and the shape a tool takes |
 //!
 //! Adding a tool is one [`Instrument`] and one [`FromRecord`].
@@ -33,8 +38,8 @@ mod tests;
 
 pub use capture::{Capture, Origin, Shell, ShellNode};
 pub use codegen::{Asset, AssetError, BashSrc, Codegen};
-pub use instrument::{repl, Dispatch, Instrument, Ran, Turn, Verb};
+pub use instrument::{Dispatch, Instrument};
 pub use run::{capture_into, ExitStatus, Outcome, Report, Rig, RigError, ToolError};
 pub use wire::{
-    Ask, Damage, FromRecord, Line, Micros, Pid, Record, Reply, Stamp, Stamped, WireError,
+    field, Ask, Damage, FromRecord, Line, Micros, Pid, Record, Reply, Stamp, Stamped, WireError,
 };

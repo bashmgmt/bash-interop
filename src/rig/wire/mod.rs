@@ -13,9 +13,9 @@ pub mod control;
 pub mod frame;
 pub mod record;
 
-pub use control::{Ask, Reply};
+pub use control::{Ask, Reply, ASK_TAG};
 pub use frame::{Frame, Kind};
-pub use record::{FromRecord, Line, Micros, Pid, Record, Stamp, Stamped, WireError};
+pub use record::{field, FromRecord, Line, Micros, Pid, Record, Stamp, Stamped, WireError};
 
 use std::collections::HashMap;
 use std::io::{ErrorKind, Read, Write};
@@ -123,7 +123,8 @@ impl Wire {
             Err(cause) => return self.hurt(cause, message),
         };
         if frame.kind == Kind::Ask {
-            self.asks.push(Ask { stamp: frame.stamp, record: record.clone() });
+            let args = record.behind(ASK_TAG).unwrap_or(&record.words).to_vec();
+            self.asks.push(Ask { stamp: frame.stamp, args });
         }
         self.capture.lines.push(Stamped { stamp: frame.stamp, value: record });
     }
@@ -152,13 +153,8 @@ impl Wire {
                 vec!["source".to_string(), path.to_string_lossy().into_owned()]
             }
             Reply::Continue { status } => vec!["continue".to_string(), status.to_string()],
-            Reply::Fail { message, status } => {
-                vec!["fail".to_string(), message, status.to_string()]
-            }
         };
-        let mut words = words.into_iter();
-        let reply = Record::new(words.next().expect("a reply always names its form"), words);
-        self.replies.push((pid, format!("{}\n", reply.to_message())));
+        self.replies.push((pid, format!("{}\n", Record::new(words).to_message())));
         Ok(())
     }
 

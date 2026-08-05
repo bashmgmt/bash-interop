@@ -23,8 +23,15 @@ use indexmap::IndexMap;
 
 use super::capture::Capture;
 use super::codegen::{Asset, AssetError, BashSrc, Codegen};
-use super::instrument::{Instrument, Verb};
-use super::wire::{Reply, Wire, FRAME_LIMIT};
+use super::instrument::Instrument;
+use super::wire::{Ask, Reply, Wire, FRAME_LIMIT};
+
+/// Answers every `BC_INSTR`. Total: a question always gets an answer, and a
+/// client that wants refusal expresses it as an answer the subject runs.
+type Answering = Box<dyn Fn(&Ask, &Capture) -> Reply + Send + Sync>;
+
+/// What a rig with no answer tells a shell that asks anyway.
+const UNANSWERED: i32 = 127;
 
 const WIRE_SRC: Asset = Asset::new("rig/wire.bash");
 const CONTROL_SRC: Asset = Asset::new("rig/control.bash");
@@ -81,6 +88,7 @@ pub struct Outcome {
 #[derive(Default)]
 pub struct Rig {
     instruments: Vec<Instrument>,
+    answering: Option<Answering>,
     env: IndexMap<String, String>,
     debug: bool,
 }
@@ -92,6 +100,17 @@ impl Rig {
 
     pub fn with(mut self, instrument: impl Into<Instrument>) -> Self {
         self.instruments.push(instrument.into());
+        self
+    }
+
+    /// How every `BC_INSTR` is answered. One function, seeing the question
+    /// and everything the run has recorded — a controlled session has nowhere
+    /// else for its state to live, and needs nowhere else.
+    pub fn answering(
+        mut self,
+        answer: impl Fn(&Ask, &Capture) -> Reply + Send + Sync + 'static,
+    ) -> Self {
+        self.answering = Some(Box::new(answer));
         self
     }
 
@@ -143,8 +162,6 @@ impl Rig {
         std::fs::write(&prelude_path, self.prelude(dir, wire.up_path())?.as_str())
             .map_err(|cause| RigError::Prelude { path: prelude_path.clone(), cause })?;
 
-        let verbs: Vec<&Verb> = self.instruments.iter().flat_map(Instrument::verbs).collect();
-
         let mut command = Command::new("bash");
         command.args(argv).env("BASH_ENV", &prelude_path);
         for (key, value) in &self.env {
@@ -153,13 +170,13 @@ impl Rig {
 
         let mut child = command.spawn().map_err(RigError::Spawn)?;
         let status = loop {
-            self.serve(&mut wire, &verbs)?;
+            self.serve(&mut wire)?;
             if let Some(status) = child.try_wait().map_err(RigError::Wait)? {
                 break status;
             }
             std::thread::sleep(SERVICE_INTERVAL);
         };
-        self.serve(&mut wire, &verbs)?;
+        self.serve(&mut wire)?;
 
         let debug = std::fs::read_to_string(dir.join("debug.log"))
             .map(|text| text.lines().map(str::to_string).collect())
@@ -168,9 +185,9 @@ impl Rig {
         Ok(Outcome { capture: wire.finish(), status: status.into(), debug })
     }
 
-    /// Every answer is decided against the same history, then applied: a
-    /// verb reads what the run has recorded, it does not write to it.
-    fn serve(&self, wire: &mut Wire, verbs: &[&Verb]) -> Result<(), RigError> {
+    /// Every answer is decided against the same history, then applied: an
+    /// answer reads what the run has recorded, it does not write to it.
+    fn serve(&self, wire: &mut Wire) -> Result<(), RigError> {
         wire.drain().map_err(RigError::Read)?;
         let asks = wire.take_asks();
         if !asks.is_empty() {
@@ -178,9 +195,9 @@ impl Rig {
             let answers: Vec<_> = asks
                 .iter()
                 .map(|ask| {
-                    let reply = match verbs.iter().find(|verb| verb.name == ask.verb()) {
-                        Some(verb) => verb.answer(ask, seen),
-                        None => Reply::unknown_verb(ask.verb()),
+                    let reply = match &self.answering {
+                        Some(answer) => answer(ask, seen),
+                        None => Reply::Continue { status: UNANSWERED },
                     };
                     (ask.stamp.pid, reply)
                 })

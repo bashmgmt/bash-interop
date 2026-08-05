@@ -5,7 +5,7 @@
 use std::fmt;
 use std::path::PathBuf;
 
-use super::super::wire::{FromRecord, Pid, Record};
+use crate::bash::rig::wire::{field, FromRecord, Pid, Record};
 
 pub const ORIGIN_TAG: &str = "__ORIGIN__";
 
@@ -28,18 +28,19 @@ impl fmt::Display for MissingField {
 impl std::error::Error for MissingField {}
 
 impl FromRecord for Origin {
-    const TAG: &'static str = ORIGIN_TAG;
     type Err = MissingField;
 
-    fn from_record(record: &Record) -> Result<Self, Self::Err> {
-        let optional = |key| record.field(key).filter(|value| !value.is_empty());
-        Ok(Self {
-            parent: optional("parent").and_then(|value| value.parse().ok()).map(Pid),
-            shlvl: optional("shlvl")
-                .and_then(|value| value.parse().ok())
-                .ok_or(MissingField("shlvl"))?,
-            source: optional("source").map(PathBuf::from),
-        })
+    fn from_record(record: &Record) -> Option<Result<Self, Self::Err>> {
+        let claimed = record.behind(ORIGIN_TAG)?;
+        let set = |key| field(claimed, key).filter(|value| !value.is_empty());
+        Some(Ok(Self {
+            parent: set("parent").and_then(|value| value.parse().ok()).map(Pid),
+            shlvl: match set("shlvl").and_then(|value| value.parse().ok()) {
+                Some(shlvl) => shlvl,
+                None => return Some(Err(MissingField("shlvl"))),
+            },
+            source: set("source").map(PathBuf::from),
+        }))
     }
 }
 
@@ -48,21 +49,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn origin_decodes_and_treats_an_empty_parent_as_absent() {
-        let record = Record::new(
-            ORIGIN_TAG,
-            ["parent".into(), String::new(), "shlvl".into(), "6".into(), "source".into(), "/x.bash".into()],
-        );
-        let origin = Origin::from_record(&record).unwrap();
-        assert_eq!(origin.parent, None);
+    fn origin_decodes_its_own_and_declines_the_rest() {
+        let record = Record::new([ORIGIN_TAG, "parent", "", "shlvl", "6", "source", "/x.bash"]);
+        let origin = Origin::from_record(&record).unwrap().unwrap();
+        assert_eq!(origin.parent, None, "an empty parent is absent, not zero");
         assert_eq!(origin.shlvl, 6);
         assert_eq!(origin.source, Some(PathBuf::from("/x.bash")));
-    }
 
-    #[test]
-    fn origin_requires_shlvl() {
-        let record = Record::new(ORIGIN_TAG, ["parent".into(), "3".into()]);
-        assert_eq!(Origin::from_record(&record), Err(MissingField("shlvl")));
+        let short = Record::new([ORIGIN_TAG, "parent", "3"]);
+        assert_eq!(Origin::from_record(&short), Some(Err(MissingField("shlvl"))));
+        assert!(Origin::from_record(&Record::new(["OTHER"])).is_none());
     }
-
 }
