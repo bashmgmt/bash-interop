@@ -1,13 +1,22 @@
 //! Bytes in, whole messages out.
 //!
 //! ```text
-//! <at> <pid> <seq> <marker> <chunk>
+//! <at> <pid> <seq> <marker> <chunk>\n
 //! ```
+//!
+//! **[`DELIMITER`] separates frames and is part of none of them.** It is
+//! appended after a frame is built and consumed before one is parsed, so no
+//! frame and no message ever holds it. Both emitters escape one inside a
+//! value — bash through `@Q`, Rust through
+//! [`emit_q_words`](crate::bash::value::emit_q_words), each rendering it
+//! `$'\n'` — so splitting the stream is exact rather than a heuristic, and a
+//! frame needs no length prefix.
 //!
 //! A shared pipe guarantees only that a write of at most `PIPE_BUF` bytes
 //! lands whole; one byte past it, concurrent shells interleave. So a message
-//! wider than one atomic write arrives as several frames, and rejoining them
-//! is the only reason this layer keeps state. Nothing above it sees a frame.
+//! wider than one atomic write arrives as several frames, each newline
+//! terminated, and rejoining them is the only reason this layer keeps state.
+//! Nothing above it sees a frame.
 //!
 //! The header exists to route a continuation before there is a message to
 //! parse, and does nothing else. Whether a sender is waiting is in the
@@ -22,40 +31,47 @@ use crate::bash::rig::error::{Doing, RigError};
 /// atomic write and concurrent shells cannot interleave.
 pub const FRAME_LIMIT: usize = 3900;
 
+/// Separates frames. Never inside one.
+pub const DELIMITER: char = '\n';
+
 const CONTINUES: &str = "+";
 const ENDS: &str = ".";
 
 /// What has arrived but is not yet whole. Empty between messages.
 #[derive(Default)]
 pub struct Reassembly {
-    /// Bytes without their newline: a read landed mid-frame.
-    line: String,
+    /// Bytes not yet terminated: a read landed mid-frame.
+    pending: String,
 
     /// Frames without their last, keyed by `(pid, seq)`.
     message: HashMap<(Pid, u32), String>,
 }
 
 impl Reassembly {
-    /// Every message these bytes completed.
+    /// Every message these bytes completed. A frame is taken up to the
+    /// delimiter and the delimiter is dropped, so nothing below this line
+    /// ever sees one.
     pub fn feed(&mut self, bytes: &str) -> Result<Vec<Line>, RigError> {
-        self.line.push_str(bytes);
+        self.pending.push_str(bytes);
         let mut whole = Vec::new();
 
-        while let Some(end) = self.line.find('\n') {
-            let framed: String = self.line.drain(..=end).collect();
-            if let Some(line) = self.accept(framed.trim_end_matches('\n'))? {
+        while let Some(end) = self.pending.find(DELIMITER) {
+            let frame: String = self.pending.drain(..end).collect();
+            self.pending.drain(..DELIMITER.len_utf8());
+
+            if let Some(line) = self.accept(&frame)? {
                 whole.push(line);
             }
         }
         Ok(whole)
     }
 
-    /// Errors if a frame lacks its newline or a message its last chunk.
+    /// Errors if a frame lacks its delimiter or a message its last chunk.
     pub fn finish(self) -> Result<(), RigError> {
         let cut = |what: String| Err(RigError::new("draining the instrumentation pipe", what));
 
-        if !self.line.is_empty() {
-            return cut(format!("a frame was cut short: {:?}", self.line));
+        if !self.pending.is_empty() {
+            return cut(format!("a frame was cut short: {:?}", self.pending));
         }
         match self.message.into_iter().next() {
             Some(((pid, seq), text)) => cut(format!("message {pid}.{seq} stopped at {text:?}")),
@@ -161,7 +177,7 @@ mod tests {
     fn nothing_may_be_left_part_way() {
         let mut cut = Reassembly::default();
         cut.feed("1.000000 7 0 . ('A')").unwrap();
-        assert!(cut.finish().is_err(), "a frame without its newline");
+        assert!(cut.finish().is_err(), "a frame without its delimiter");
 
         let mut unfinished = Reassembly::default();
         unfinished.feed("1.000000 7 0 + ('A'\n").unwrap();

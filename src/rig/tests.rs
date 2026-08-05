@@ -165,6 +165,23 @@ fn nothing_is_lost_at_the_end() {
     }
 }
 
+/// A newline delimits frames and appears nowhere else, so a value carrying
+/// one has to arrive whole rather than as two frames of nonsense.
+#[test]
+fn a_newline_inside_a_value_is_escaped_not_framed() {
+    let result = script(
+        "payload=$'first\\nsecond\\tthird\\\\fourth'\nBC_INSTR say REC \"$payload\" plain\n",
+    );
+
+    assert_eq!(
+        result.args("REC"),
+        ["first\nsecond\tthird\\fourth plain"],
+        "{}",
+        result.report()
+    );
+    assert_eq!(result.capture.lines.len(), 2, "one origin and one record, not three");
+}
+
 // ── transparency ─────────────────────────────────────────────────────
 
 #[test]

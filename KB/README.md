@@ -17,7 +17,7 @@ KB/mb_resolver/bash/
   wire.md         the pipes, the framing, the message and the reply
   source.md       BashSrc and Asset — the bash a rig injects
   capture.md      Capture and its views: order, shells, the process forest
-  run.md          the Rig trait, the session, signals, errors, capture_into
+  run.md          the Rig trait, the session, signals, errors
   design.md       the decisions, and the measurements behind them
   bashcap.md      the reference tool, end to end
   managebash.md   the other consumer
@@ -44,7 +44,7 @@ contains **no `eval`** — asserted against the generated text by
 
 ## One way out
 
-A run yields an `Outcome` or a `RigError`. Nothing is carried alongside,
+A run yields an `ExitStatus` or a `RigError`. Nothing is carried alongside,
 nothing is dropped, and nothing half-succeeds: the first thing that cannot be
 read or written ends the run, and the subject's process group is killed on the
 way out. See [run.md](run.md#one-error-one-way-out).

@@ -8,7 +8,7 @@ pub mod framing;
 pub mod record;
 pub mod reply;
 
-pub use framing::{Reassembly, FRAME_LIMIT};
+pub use framing::{Reassembly, DELIMITER, FRAME_LIMIT};
 pub use record::{field, FromRecord, Line, Micros, Pid, Record, Stamp, Stamped, ASK_TAG};
 pub use reply::Reply;
 
@@ -107,8 +107,12 @@ impl Wire {
             }
         };
 
-        let line = format!("{}\n", Record::new(reply.words().to_vec()).to_message());
-        pipe.write_all(line.as_bytes()).doing(|| format!("answering pid {pid}"))
+        // The message, then the delimiter: one write, but the newline is
+        // framing rather than something the message carries.
+        let mut framed = Record::new(reply.words().to_vec()).to_message();
+        framed.push(DELIMITER);
+
+        pipe.write_all(framed.as_bytes()).doing(|| format!("answering pid {pid}"))
     }
 
     pub fn finish(self) -> Result<(), RigError> {

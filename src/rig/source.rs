@@ -1,14 +1,57 @@
+//! The bash a rig injects: fragments that compose, and the files they come
+//! from.
+//!
 //! Bash lives in `bash/` as real files, read when a prelude is built rather
 //! than baked in, so an edit takes effect on the next run. `BC_BASH_DIR`
 //! relocates the tree.
 
+use std::fmt;
 use std::path::PathBuf;
 
-use super::BashSrc;
 use crate::bash::rig::error::{Doing, RigError};
 
 const DEFAULT_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/bash");
 const ROOT_OVERRIDE: &str = "BC_BASH_DIR";
+
+/// Bash source that composes without quoting hazards.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BashSrc(String);
+
+impl BashSrc {
+    pub fn empty() -> Self {
+        Self(String::new())
+    }
+
+    pub fn raw(text: impl Into<String>) -> Self {
+        Self(text.into())
+    }
+
+    /// The only way bash contributions combine. Empty parts are dropped.
+    pub fn seq(parts: impl IntoIterator<Item = BashSrc>) -> Self {
+        Self(
+            parts
+                .into_iter()
+                .filter(|part| !part.is_empty())
+                .map(|part| part.0)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.trim().is_empty()
+    }
+}
+
+impl fmt::Display for BashSrc {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
 
 /// A bash file, named relative to the tree root.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -39,6 +82,13 @@ fn root() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sequencing_drops_empties() {
+        let joined = BashSrc::seq([BashSrc::raw("one"), BashSrc::empty(), BashSrc::raw("two")]);
+        assert_eq!(joined.as_str(), "one\ntwo");
+        assert!(BashSrc::seq([BashSrc::empty()]).is_empty());
+    }
 
     /// No asset may export a variable: the prelude configures itself and
     /// leaves the client's environment alone.

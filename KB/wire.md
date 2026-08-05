@@ -79,9 +79,29 @@ impl Wire {
 }
 ```
 
-**The wire remembers no run.** `drain` hands back what it just read and forgets
-it; accumulating that into a `Capture` is the session's job, which is why the
-transport does not depend on the capture layer at all.
+**The wire remembers no run.** `drain` hands back what it just read and
+forgets it; whether any of it is kept is the rig's business, so the transport
+depends on no layer above it.
+
+Descriptors and reassembly are separate. `Wire` owns the pipes; `framing.rs`
+owns the frame format and the fold that turns bytes into whole messages:
+
+```rust
+#[derive(Default)]
+pub struct Reassembly {
+    pending: String,                       // bytes not yet terminated
+    message: HashMap<(Pid, u32), String>,  // frames without their last
+}
+
+impl Reassembly {
+    pub fn feed(&mut self, bytes: &str) -> Result<Vec<Line>, RigError>;
+    pub fn finish(self) -> Result<(), RigError>;
+}
+```
+
+That split is what lets the split/rejoin path be tested without spawning
+anything: a stream fed one byte at a time must yield what one feed yields, and
+two shells mid-message at once must not bleed into each other.
 
 Both flags on the reader earn their place:
 
@@ -168,8 +188,20 @@ message that fits leaves before `__bc_split` is ever reached. See
 One line, one frame:
 
 ```
-<at> <pid> <seq> <marker> <chunk>
+<at> <pid> <seq> <marker> <chunk>\n
 ```
+
+**The delimiter separates frames and is part of none of them.** It is appended
+after a frame is built and consumed before one is parsed, on both sides: bash
+`printf`s it after the message and `read` consumes it without storing it;
+Rust pushes it onto a built message and drains it off before parsing. No frame
+and no message ever holds one.
+
+That is exact rather than heuristic because both emitters escape a newline
+inside a value — bash through `@Q`, Rust through `emit_q_words`, each
+rendering it `$'\n'` — so a frame needs no length prefix. A value carrying
+newlines still arrives as one record, which
+`a_newline_inside_a_value_is_escaped_not_framed` proves end to end.
 
 ```rust
 pub struct Frame { pub stamp: Stamp, pub partial: bool, pub chunk: String }
