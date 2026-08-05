@@ -1,6 +1,6 @@
 //! What a rig is, and what running one means.
 
-pub mod session;
+pub mod drive;
 pub mod turn;
 
 pub use turn::Turn;
@@ -14,25 +14,40 @@ use crate::bash::rig::wire::{Line, Reply, FRAME_LIMIT};
 
 const WIRE_SRC: Asset = Asset::new("rig/wire.bash");
 
-/// Three functions, mirroring the three moments `BC_INSTR` offers a shell.
+/// How a run is performed: the description, and the hooks that drive it.
+///
+/// A rig is never mutated by running — `&self` throughout. Everything that
+/// changes belongs to `Session`, a plain struct the rig allocates in
+/// [`start`](Rig::start), borrows through the run, and consumes in
+/// [`ended`](Rig::ended). Because both are in scope at every hook, a session
+/// never has to borrow its description.
 pub trait Rig {
-    /// How a run starts.
-    fn setup(&self) -> Result<Setup, RigError>;
+    /// What one run needs while it runs.
+    type Session;
+
+    /// What a finished run comes to.
+    type Output;
+
+    /// How a run is configured, and what it starts with.
+    fn start(&self) -> Result<(Setup, Self::Session), RigError>;
 
     /// `BC_INSTR say`: nothing is waiting, and whether to keep it is yours.
-    fn heard(&mut self, said: Line) -> Result<(), RigError>;
+    fn heard(&self, session: &mut Self::Session, said: Line) -> Result<(), RigError>;
 
     /// `BC_INSTR ask`: what the blocked shell runs next.
-    fn answer(&mut self, asked: &Turn) -> Result<Reply, RigError>;
+    fn answer(&self, session: &mut Self::Session, asked: &Turn) -> Result<Reply, RigError>;
+
+    /// The subject is gone. Release what needs releasing: a failure here is a
+    /// failure of the run rather than something dropped on the floor.
+    fn ended(&self, session: Self::Session, status: ExitStatus) -> Result<Self::Output, RigError>;
 
     /// Runs `bash <argv>` until the subject is gone, and does not let it
-    /// outlive this call by any route. The status is the only thing the core
-    /// learns that `heard` and `answer` did not already hand over.
-    fn run(&mut self, argv: &[String]) -> Result<ExitStatus, RigError>
+    /// outlive this call by any route.
+    fn run(&self, argv: &[String]) -> Result<Self::Output, RigError>
     where
         Self: Sized,
     {
-        session::run(self, argv)
+        drive::run(self, argv)
     }
 }
 

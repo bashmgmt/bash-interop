@@ -1,4 +1,4 @@
-//! Driving one run.
+//! Driving one run: `start`, then every event, then `ended`.
 //!
 //! The subject's exit is a `pidfd`, so one `poll` waits on both it and the
 //! pipe; there is no interval and no timer. Every exit path from here kills
@@ -10,12 +10,12 @@ use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 
-use super::{ExitStatus, Rig, Setup, Turn, Workspace};
+use super::{Rig, Setup, Turn, Workspace};
 use crate::bash::rig::error::{Doing, RigError};
 use crate::bash::rig::wire::Wire;
 
-pub(crate) fn run(rig: &mut impl Rig, argv: &[String]) -> Result<ExitStatus, RigError> {
-    let setup = rig.setup()?;
+pub(crate) fn run<R: Rig>(rig: &R, argv: &[String]) -> Result<R::Output, RigError> {
+    let (setup, mut session) = rig.start()?;
     let site = Site::open(&setup.workspace)?;
     let dir = site.dir();
 
@@ -27,28 +27,34 @@ pub(crate) fn run(rig: &mut impl Rig, argv: &[String]) -> Result<ExitStatus, Rig
     let mut subject = Subject::spawn(argv, &written, &setup)?;
 
     loop {
-        serve(rig, &mut wire, dir)?;
+        serve(rig, &mut session, &mut wire, dir)?;
         match wait_for(wire.reader(), subject.exit())? {
             Ready::Spoke => continue,
             Ready::Exited => break,
         }
     }
     // Whatever the subject said just before it went is still in the pipe.
-    serve(rig, &mut wire, dir)?;
+    serve(rig, &mut session, &mut wire, dir)?;
     wire.finish()?;
 
-    Ok(subject.finish().doing(|| "waiting for bash".into())?.into())
+    let status = subject.finish().doing(|| "waiting for bash".into())?;
+    rig.ended(session, status.into())
 }
 
 /// `say` goes one way and `ask` the other, exactly as in bash.
-fn serve(rig: &mut impl Rig, wire: &mut Wire, dir: &Path) -> Result<(), RigError> {
+fn serve<R: Rig>(
+    rig: &R,
+    session: &mut R::Session,
+    wire: &mut Wire,
+    dir: &Path,
+) -> Result<(), RigError> {
     for line in wire.drain()? {
         let Some(args) = line.value.asked() else {
-            rig.heard(line)?;
+            rig.heard(session, line)?;
             continue;
         };
 
-        let reply = rig.answer(&Turn::new(&line, args, dir))?;
+        let reply = rig.answer(session, &Turn::new(&line, args, dir))?;
         wire.answer(line.stamp.pid, reply)?;
     }
     Ok(())

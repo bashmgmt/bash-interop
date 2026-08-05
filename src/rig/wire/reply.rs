@@ -6,7 +6,6 @@ use std::path::Path;
 /// what `BC_INSTR ask` returns.
 ///
 /// ```text
-/// [":"]                                    nothing
 /// ["return", "1"]                          resume with a status
 /// ["exit", "9"]                            end the shell
 /// ["source", "/…/step.bash"]               run code
@@ -20,11 +19,6 @@ pub struct Reply(Vec<String>);
 impl Reply {
     pub fn of(words: impl IntoIterator<Item = impl Into<String>>) -> Self {
         Self(words.into_iter().map(Into::into).collect())
-    }
-
-    /// Carry on, changing nothing.
-    pub fn nothing() -> Self {
-        Self::of([":"])
     }
 
     /// Return this status from `BC_INSTR ask`.
