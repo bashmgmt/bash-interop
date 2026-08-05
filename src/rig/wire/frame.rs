@@ -1,14 +1,12 @@
-//! The transport layer: one line, one frame.
+//! One line, one frame.
 //!
 //! ```text
 //! <at> <pid> <seq> <marker> <chunk>
 //! ```
 //!
-//! The header sits outside the message because a continuation has to be
-//! routed before there is a message to parse — which is the only thing the
-//! header is for. Whether the sender is waiting for an answer is in the
-//! message, where [`Record::asked`](super::Record::asked) reads it, so the
-//! frame layer knows nothing about what a message means.
+//! The header exists to route a continuation before there is a message to
+//! parse, and does nothing else. Whether a sender is waiting is in the
+//! message, at [`Record::asked`](super::Record::asked).
 
 use super::record::{Micros, Pid, Stamp};
 use crate::bash::rig::error::{Doing, RigError};

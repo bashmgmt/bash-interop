@@ -14,9 +14,7 @@ impl BashSrc {
         Self(text.into())
     }
 
-    /// Concatenation, which is the only way bash contributions combine. Empty
-    /// parts are dropped, so a fragment with nothing to add leaves no blank
-    /// line behind.
+    /// The only way bash contributions combine. Empty parts are dropped.
     pub fn seq(parts: impl IntoIterator<Item = BashSrc>) -> Self {
         Self(
             parts

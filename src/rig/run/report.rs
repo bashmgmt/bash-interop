@@ -1,8 +1,4 @@
 //! What a run comes to, once it has been written down.
-//!
-//! Everything that is the same for every capture tool — where the output
-//! goes, what the exit code is — is here once, so a tool is its bash, its
-//! record family, and one call.
 
 use std::fs;
 use std::io::Write;

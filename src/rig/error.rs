@@ -1,8 +1,4 @@
-//! The one way out.
-//!
-//! A run yields an [`Outcome`](super::Outcome) or this. Nothing is carried
-//! alongside, nothing is dropped, and nothing half-succeeds: the first thing
-//! that goes wrong ends the run, and the subject goes with it.
+//! The one way out: a run yields an [`Outcome`](super::Outcome) or this.
 
 use std::error::Error;
 use std::fmt;

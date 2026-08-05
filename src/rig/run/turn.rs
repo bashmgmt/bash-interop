@@ -7,11 +7,8 @@ use crate::bash::rig::error::{Doing, RigError};
 use crate::bash::rig::source::BashSrc;
 use crate::bash::rig::wire::{Line, Reply, Stamp};
 
-/// What an answer is given: the question, the history behind it, and the
-/// place to put anything the reply needs to refer to.
-///
-/// A turn exists only where a shell is actually blocked, so there is no such
-/// thing as answering something nobody asked.
+/// The question, the history behind it, and where to put what the reply
+/// refers to. Constructible only where a shell is blocked.
 pub struct Turn<'a> {
     asked: &'a Line,
     args: &'a [String],

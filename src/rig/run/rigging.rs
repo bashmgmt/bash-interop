@@ -6,8 +6,7 @@ use crate::bash::rig::wire::Reply;
 
 type Answering = Result<Reply, RigError>;
 
-/// For a rig that is not worth naming. The closure is `FnMut`, so it owns its
-/// state the same way an implementation owns its fields.
+/// For a rig not worth naming. `FnMut`, so the closure owns its state.
 pub struct Rigging {
     setup: Setup,
     answer: Box<dyn FnMut(&Turn) -> Answering>,

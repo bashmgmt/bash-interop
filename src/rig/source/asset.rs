@@ -1,8 +1,6 @@
 //! Bash lives in `bash/` as real files, read when a prelude is built rather
-//! than baked in at compile time. Editing one takes effect on the next run.
-//!
-//! `BC_BASH_DIR` relocates the tree, which is how an installed binary carries
-//! its bash somewhere other than the source checkout.
+//! than baked in, so an edit takes effect on the next run. `BC_BASH_DIR`
+//! relocates the tree.
 
 use std::path::PathBuf;
 

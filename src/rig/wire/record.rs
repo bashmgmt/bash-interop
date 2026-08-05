@@ -44,8 +44,7 @@ impl fmt::Display for Pid {
     }
 }
 
-/// Rig-owned provenance, stamped by the sending shell. The only thing the rig
-/// adds to a message.
+/// Provenance, stamped by the sending shell. The only thing the rig adds.
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct Stamp {
     pub at: Micros,
@@ -59,16 +58,12 @@ impl Stamp {
     }
 }
 
-/// How `BC_INSTR ask` marks a question. One of the two words the transport
-/// reserves — the other is
-/// [`ORIGIN_TAG`](crate::bash::rig::capture::origin::ORIGIN_TAG) — and like
-/// it, this one is the transport describing itself in an ordinary message
-/// rather than a bit in the frame header.
+/// How `BC_INSTR ask` marks a question; one of the two reserved words, the
+/// other being [`ORIGIN_TAG`](crate::bash::rig::capture::origin::ORIGIN_TAG).
 pub const ASK_TAG: &str = "__ASK__";
 
-/// Tool-owned payload: the words the subject passed, in order. The rig reads
-/// no position of them and attaches no meaning to any of them, an empty
-/// arglist included.
+/// The words the subject passed, in order, an empty arglist included. The rig
+/// reads no position of them.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct Record {
@@ -81,9 +76,6 @@ impl Record {
     }
 
     /// The words after `lead`, if that is how they begin.
-    ///
-    /// A leading discriminator is a common convention and no more than that:
-    /// this is the one line a decoder writes to opt into it.
     pub fn behind(&self, lead: &str) -> Option<&[String]> {
         match self.words.split_first() {
             Some((first, rest)) if first == lead => Some(rest),
@@ -91,8 +83,7 @@ impl Record {
         }
     }
 
-    /// What the subject passed after `ask` — and, by being `Some`, the fact
-    /// that a shell is blocked waiting for an answer to it.
+    /// What the subject passed after `ask`; `Some` iff a shell is blocked.
     pub fn asked(&self) -> Option<&[String]> {
         self.behind(ASK_TAG)
     }
@@ -124,20 +115,15 @@ pub struct Stamped<T> {
 
 pub type Line = Stamped<Record>;
 
-/// Typed decode of one record family.
-///
-/// `None` declines: this record is not of this family. That is what lets
-/// several tools share one wire without the rig knowing anything about
-/// either. A tool that wants a leading discriminator gets it from
-/// [`Record::behind`].
+/// Typed decode of one record family. `None` declines the record, which is
+/// what lets several tools share one wire.
 pub trait FromRecord: Sized {
     type Err;
 
     fn from_record(record: &Record) -> Option<Result<Self, Self::Err>>;
 }
 
-/// Value of the first `key value` pair with this key. A convenience for the
-/// commonest payload shape, over the words a decoder has already claimed.
+/// Value of the first `key value` pair with this key.
 pub fn field<'a>(words: &'a [String], key: &str) -> Option<&'a str> {
     words.chunks_exact(2).find(|pair| pair[0] == key).map(|pair| pair[1].as_str())
 }

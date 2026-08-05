@@ -1,26 +1,4 @@
-//! Composable bash instrumentation.
-//!
-//! A [`Rig`] is a tool folded into one bash prelude that runs before user code
-//! in every participating shell. There are exactly three moments: setup writes
-//! the prelude, then the subject *says* something or *asks* something — the two
-//! operations of `BC_INSTR`, the only name client code ever calls.
-//!
-//! Nothing is injected behind the subject's back — no traps, no shadowed
-//! builtins, no exported variables, no global shell state — and there is no
-//! `eval` anywhere.
-//!
-//! A message in either direction is an **arglist**. The rig reads no position
-//! of one and attaches no meaning to any word; a leading discriminator is a
-//! convention a tool opts into with [`Record::behind`], not something the
-//! transport knows about. Only [`ASK_TAG`] and
-//! [`ORIGIN_TAG`](capture::origin::ORIGIN_TAG) are reserved, and both are the
-//! transport describing itself in an ordinary message.
-//!
-//! A run yields an [`Outcome`] or a [`RigError`]. There is no third channel
-//! and no partial success: the first thing that cannot be read or written
-//! ends the run, and the subject is killed on the way out.
-//!
-//! The concerns are one directory each, over one [`error`]:
+//! Composable bash instrumentation. `KB/mb_resolver/bash/` documents it.
 //!
 //! | | |
 //! |---|---|
@@ -28,8 +6,11 @@
 //! | [`source`] | the bash that gets injected |
 //! | [`capture`] | reading a run back, and every view over it |
 //! | [`run`] | the rig itself, and what running one means |
+//! | [`error`] | [`RigError`], which every fallible path returns |
 //!
-//! Adding a tool is one [`Rig`] and one [`FromRecord`].
+//! `BC_INSTR say` and `BC_INSTR ask` are the whole client surface. A message
+//! is an arglist in both directions; only [`ASK_TAG`] and
+//! [`ORIGIN_TAG`](capture::origin::ORIGIN_TAG) are reserved.
 
 pub mod capture;
 pub mod error;

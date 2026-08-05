@@ -1,12 +1,8 @@
 //! Driving one run.
 //!
-//! There is no polling interval and no timer. The subject's exit is a
-//! readable file descriptor like any other, so one `poll` waits on both the
-//! pipe and the child at once: an ask costs a wakeup and a write.
-//!
-//! A run owns its subject's process group. Every exit path from here — a
-//! clean return, an error, or an unwind — releases it, so no shell is ever
-//! left blocked on a pipe nobody will write to again.
+//! The subject's exit is a `pidfd`, so one `poll` waits on both it and the
+//! pipe; there is no interval and no timer. Every exit path from here kills
+//! the subject's process group.
 
 use std::fs;
 use std::io;
@@ -47,9 +43,8 @@ pub(crate) fn run(rig: &mut impl Rig, argv: &[String]) -> Result<Outcome, RigErr
     Ok(Outcome { capture, status: status.into() })
 }
 
-/// Takes everything the pipe holds, then answers whatever asked. Reading
-/// first is what lets an answer see the question in its own history, and lets
-/// every answer in a pass be decided against the same one.
+/// Reads the pipe, then answers whatever asked, so an answer sees the
+/// question in its own history.
 fn serve(
     rig: &mut impl Rig,
     wire: &mut Wire,
@@ -118,9 +113,8 @@ impl Subject {
             command.env(key, value);
         }
 
-        // Its own group, so releasing the subject releases everything it
-        // started. Killing only the direct child would leave a grandchild
-        // that asked blocked on its reply pipe forever.
+        // Its own group: killing only the direct child would leave a
+        // grandchild that asked blocked on its reply pipe forever.
         command.process_group(0);
 
         let child = command.spawn().doing(|| format!("spawning bash {}", argv.join(" ")))?;
@@ -134,9 +128,8 @@ impl Subject {
         self.exit.as_raw_fd()
     }
 
-    /// Releases the group, then reaps. In that order: while the subject is
-    /// still unreaped its group cannot have been recycled, so the signal
-    /// cannot reach anything else.
+    /// Kills the group, then reaps. In that order: an unreaped subject's
+    /// group cannot have been recycled, so the signal reaches nothing else.
     fn finish(&mut self) -> io::Result<std::process::ExitStatus> {
         self.release();
         match self.child.take() {

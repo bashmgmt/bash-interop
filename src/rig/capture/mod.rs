@@ -1,7 +1,5 @@
-//! Everything read from a run: flat, in read order. Chronological ordering,
-//! per-shell grouping, the process forest, and typed decoding are all views.
-//!
-//! A line that could not be read is not here, because it ended the run.
+//! Everything read from a run, flat and in read order. Ordering, per-shell
+//! grouping, the process forest and typed decoding are all views over it.
 
 pub mod origin;
 
@@ -16,8 +14,7 @@ pub struct Capture {
     pub lines: Vec<Line>,
 }
 
-/// One emitting shell: the `__ORIGIN__` that opened it and everything it
-/// wrote afterwards.
+/// The `__ORIGIN__` that opened a shell, and everything it wrote after.
 #[derive(Clone, Debug)]
 pub struct Shell<'a> {
     pub pid: Pid,
@@ -33,8 +30,8 @@ pub struct ShellNode<'a> {
 }
 
 impl Capture {
-    /// Records that did not come from a shell — read from a file, say. They
-    /// carry pid 0 so their provenance never claims one produced them.
+    /// Records that came from no shell. Stamped pid 0, so their provenance
+    /// never claims one produced them.
     pub fn literal(records: impl IntoIterator<Item = Record>) -> Self {
         Self {
             lines: records
@@ -48,7 +45,7 @@ impl Capture {
         }
     }
 
-    /// Appending is all there is to it: order is a view, so nothing merges.
+    /// Order is a view, so this only appends.
     pub fn concat(parts: impl IntoIterator<Item = Capture>) -> Self {
         Self { lines: parts.into_iter().flat_map(|part| part.lines).collect() }
     }
@@ -100,8 +97,7 @@ impl Capture {
         roots.into_iter().map(|index| node(&shells, &children, index)).collect()
     }
 
-    /// Every record this family recognised, decoded — successes and failures
-    /// alike. A record it declined is not one of its own and is simply absent.
+    /// Every record the family recognised, successes and failures alike.
     pub fn of<T: FromRecord>(&self) -> impl Iterator<Item = Stamped<Result<T, T::Err>>> + '_ {
         self.chronological().into_iter().filter_map(|line| {
             T::from_record(&line.value).map(|value| Stamped { stamp: line.stamp, value })

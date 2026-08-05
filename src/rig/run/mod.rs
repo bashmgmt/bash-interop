@@ -1,9 +1,4 @@
 //! What a rig is, and what running one means.
-//!
-//! [`Rig`] is the whole interface: two functions a tool writes, and three
-//! methods derived from them that nothing outside has to reimplement. The
-//! rest of this directory is what those methods need — a [`Turn`] to answer
-//! against, a [`Report`] to hand back, and the session that drives a run.
 
 pub mod report;
 pub mod rigging;
@@ -26,17 +21,12 @@ use crate::bash::rig::wire::{FromRecord, Reply, FRAME_LIMIT};
 
 const WIRE_SRC: Asset = Asset::new("rig/wire.bash");
 
-/// What a rig is.
-///
-/// Two functions: how a run starts, and what a shell that asked runs next.
-/// Everything a rig *does* is derived from those and lives here as a method,
-/// so nothing outside takes a rig as an argument.
+/// Two functions a tool writes; everything a rig *does* is derived from them.
 pub trait Rig {
     /// How a run starts.
     fn setup(&self) -> Result<Setup, RigError>;
 
-    /// What the shell runs next. Always an answer; saying needs none, so
-    /// there is only this one.
+    /// What the shell runs next.
     fn answer(&mut self, turn: &Turn) -> Result<Reply, RigError>;
 
     /// The bash a subject will source, without running anything.
@@ -54,8 +44,8 @@ pub trait Rig {
         ]))
     }
 
-    /// Runs `bash <argv>` under this rig, answering until the subject is
-    /// gone. The subject does not outlive this call by either route.
+    /// Runs `bash <argv>`, answering until the subject is gone. The subject
+    /// does not outlive this call by either route.
     fn run(&mut self, argv: &[String]) -> Result<Outcome, RigError>
     where
         Self: Sized,
@@ -63,9 +53,8 @@ pub trait Rig {
         session::run(self, argv)
     }
 
-    /// Runs `argv` and writes every decoded `T`, with its provenance, as one
-    /// JSON object per line. The destination is always given: a wrapper must
-    /// not compete for the wrapped program's own output.
+    /// Writes every decoded `T`, with its provenance, as one JSON object per
+    /// line. The destination is always given, never guessed.
     fn capture_into<T>(&mut self, argv: &[String], into: &Path) -> Result<Report, RigError>
     where
         T: FromRecord + Serialize,
@@ -94,8 +83,7 @@ impl Setup {
         self
     }
 
-    /// Environment for the subject's own code. The rig's own mechanisms use
-    /// none: the prelude carries its configuration baked in.
+    /// For the subject's code only; the prelude carries its own config.
     pub fn env(mut self, key: &str, value: &str) -> Self {
         self.env.push((key.to_string(), value.to_string()));
         self
@@ -106,8 +94,7 @@ impl Setup {
         self
     }
 
-    /// Traces the bash side into `debug.log` in the workspace, which is worth
-    /// pairing with [`Workspace::At`] — a temporary one takes it along.
+    /// Traces the bash side into `debug.log`; pair with [`Workspace::At`].
     pub fn debug(mut self, on: bool) -> Self {
         self.debug = on;
         self
@@ -115,8 +102,6 @@ impl Setup {
 }
 
 /// Where a run keeps its pipe, its prelude, and anything a step wrote.
-/// `Temporary` discards them when the run ends; `At` keeps them, which is
-/// what you want when something went wrong.
 #[derive(Clone, Default, PartialEq, Eq, Debug)]
 pub enum Workspace {
     #[default]
@@ -125,8 +110,7 @@ pub enum Workspace {
     At(PathBuf),
 }
 
-/// How the wrapped bash process ended. No `Option`: a process that did not
-/// exit normally was signalled, and both are reportable.
+/// How the wrapped bash process ended.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum ExitStatus {
     Code(i32),

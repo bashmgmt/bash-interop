@@ -2,12 +2,8 @@
 
 use std::path::Path;
 
-/// One command, as an arglist — the same shape a message has — and its status
-/// is what `BC_INSTR ask` returns.
-///
-/// There is no second form and there never will be: a bash command array can
-/// reach anything the shell knows, so the fidelity comes from the vocabulary
-/// the prelude defined rather than from variants here.
+/// One command, as an arglist — the same shape a message has. Its status is
+/// what `BC_INSTR ask` returns.
 ///
 /// ```text
 /// [":"]                                    nothing
@@ -42,9 +38,7 @@ impl Reply {
         Self::of(["source", &path.to_string_lossy()])
     }
 
-    /// For an interim answer that is not worth a file. The one place `eval`
-    /// appears anywhere in this system, and it is the operator's own words
-    /// rather than anything the subject produced.
+    /// For an interim answer not worth a file.
     pub fn eval(code: &str) -> Self {
         Self::of(["eval", code])
     }

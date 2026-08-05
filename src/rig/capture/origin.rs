@@ -1,6 +1,5 @@
-//! Where a shell came from. An ordinary record — the wire has no special
-//! cases — written by the wire itself as the preamble to a shell's first
-//! utterance.
+//! Where a shell came from: an ordinary record, written by the wire as the
+//! preamble to a shell's first utterance.
 
 use std::fmt;
 use std::path::PathBuf;

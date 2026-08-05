@@ -1,14 +1,8 @@
 //! The transport: one named pipe, joined by name by every shell.
 //!
-//! Every pipe is held open at both ends by its owner. The `up` pipe is the
-//! operator's, so the operator holds it `O_RDWR`: the open never blocks, a
-//! shell exiting never looks like end-of-stream, and the reader can simply
-//! block in `poll` instead of on a timer. A shell's reply pipe is that
-//! shell's, and it holds it `O_RDWR` for the same reasons in mirror — which
-//! is why the operator's write never blocks and never sees `ENXIO`.
-//!
-//! Nothing here remembers a run. Each [`Wire::drain`] hands back the lines it
-//! just read and forgets them; accumulating them is the session's job.
+//! Every pipe is held open at both ends by its owner, so an open never blocks,
+//! a shell exiting never looks like end-of-stream, and a write never sees
+//! `ENXIO`. [`Wire::drain`] hands back what it read and remembers nothing.
 
 pub mod frame;
 pub mod record;
@@ -54,9 +48,8 @@ impl Wire {
 
         nix::unistd::mkfifo(&up_path, nix::sys::stat::Mode::S_IRWXU).doing(named)?;
 
-        // Read-write, so the open never blocks and no shell exiting ever looks
-        // like end-of-stream; non-blocking, because the caller decides when to
-        // wait, with `poll`.
+        // Read-write: the open never blocks and no shell exiting looks like
+        // end-of-stream. Non-blocking: the caller waits with `poll`.
         let reader = OpenOptions::new()
             .read(true)
             .write(true)
@@ -110,8 +103,7 @@ impl Wire {
         Ok(heard)
     }
 
-    /// Answers one shell. Its reply pipe already has a reader — the shell
-    /// holds both ends — so this neither blocks nor fails to find one, and
+    /// The shell holds both ends of its reply pipe, so this never blocks and
     /// the descriptor is opened once however many times that shell asks.
     pub fn answer(&mut self, pid: Pid, reply: Reply) -> Result<(), RigError> {
         let Self { dir, replies, .. } = self;
@@ -132,9 +124,7 @@ impl Wire {
         pipe.write_all(line.as_bytes()).doing(|| format!("answering pid {pid}"))
     }
 
-    /// Nothing may be left half-read. A frame without its newline or a
-    /// message without its last chunk means a writer stopped mid-sentence,
-    /// and a capture that quietly lacks it is worth less than no capture.
+    /// Errors if a frame lacks its newline or a message its last chunk.
     pub fn finish(self) -> Result<(), RigError> {
         let cut = |what: String| Err(RigError::new("draining the instrumentation pipe", what));
 

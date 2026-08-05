@@ -1,8 +1,5 @@
-//! Bash-level proofs. Each spawns real bash and covers one mechanism that
-//! cannot be checked by reading generated source.
-//!
-//! Most of these inject no bash at all: a fixture says what it has to say
-//! through `BC_INSTR say`, which is the whole client surface.
+//! Bash-level proofs: each spawns real bash to cover one mechanism that
+//! cannot be checked by reading the generated source.
 
 use std::fs;
 use std::time::{Duration, Instant};
@@ -70,9 +67,8 @@ fn script(body: &str) -> Run {
 
 // ── the transport ────────────────────────────────────────────────────
 
-/// Each shell joins the pipe by name, so subshells, command substitutions and
-/// child processes all reach it with nothing inherited. The forest follows the
-/// emitting parent, which `$PPID` would get wrong inside a subshell.
+/// Nothing is inherited, and the forest follows the emitting parent — which
+/// `$PPID` would get wrong inside a subshell.
 #[test]
 fn every_descendant_shell_reaches_the_wire() {
     let result = run(
@@ -158,9 +154,8 @@ fn exit_status_is_reported_and_untouched() {
     assert_eq!(script("BC_INSTR say REC one").status, ExitStatus::Code(0));
 }
 
-/// A signalled subject is reported as signalled rather than flattened into a
-/// code, and everything it said before the signal is still there — the rig
-/// installs no handler and needs none, because nothing was being held back.
+/// Reported as signalled rather than flattened into a code, and nothing said
+/// before the signal is lost. The rig installs no handler.
 #[test]
 fn a_signalled_subject_is_reported_and_loses_nothing() {
     let result = script("BC_INSTR say REC before\nkill -TERM $$\nBC_INSTR say REC never");
@@ -215,12 +210,9 @@ fn the_prelude_is_non_invasive_and_self_reliant() {
 
 // ── answering ────────────────────────────────────────────────────────
 
-/// Every way of answering, on one long session: each reply form in turn, one
-/// of them deliberately slow, mixed with plain saying and with a message too
-/// wide for one frame, from two shells that ask independently.
-///
-/// A reply is a command, so its expressiveness is whatever the prelude
-/// defined — `NOTE` below is this rig's own word, and the operator calls it.
+/// Every reply form in turn, one deliberately slow, mixed with saying and
+/// with a message too wide for one frame, from two shells asking
+/// independently. `NOTE` is this rig's own word, called by the operator.
 #[derive(Default)]
 struct Soak {
     answered: usize,
@@ -305,9 +297,8 @@ fn a_session_survives_every_way_of_answering() {
 
 // ── the run owns its subject ─────────────────────────────────────────
 
-/// A shell that asks after the subject has exited can never be answered, so
-/// it must not be left behind to wait for one. The run takes the whole
-/// process group with it.
+/// A shell asking after the subject exited can never be answered, so the run
+/// takes the whole process group with it.
 #[test]
 fn a_shell_left_asking_does_not_outlive_the_run() {
     let started = Instant::now();
@@ -331,11 +322,8 @@ fn a_shell_left_asking_does_not_outlive_the_run() {
     assert!(gone(lingering), "{lingering} outlived the run\n{}", result.report());
 }
 
-/// A panic in an answer is not swallowed — and the subject is still killed on
-/// the way out, rather than left blocked on a reply that will never come.
-///
-/// The capture is lost with the run, so the subject writes its own pid to a
-/// file before asking. That is the only way to name what has to be dead.
+/// The panic propagates and the subject is still killed. The capture goes
+/// with the run, so the subject writes its own pid to a file before asking.
 #[test]
 fn a_panicking_answer_kills_the_subject() {
     struct Exploding;
@@ -374,10 +362,8 @@ fn a_panicking_answer_kills_the_subject() {
 
 // ── the workspace ────────────────────────────────────────────────────
 
-/// Everything a run leaves behind is in one directory, and keeping it is how
-/// you get any of it: the prelude, each step an answer wrote, and the debug
-/// trace — which is a file rather than the wire, so it still says what
-/// happened when the wire is what went wrong.
+/// One directory holds the prelude, each step an answer wrote, and the debug
+/// trace — a file rather than the wire, so it survives the wire failing.
 #[test]
 fn a_kept_workspace_holds_the_prelude_the_steps_and_the_trace() {
     struct Kept(std::path::PathBuf);
@@ -409,15 +395,13 @@ fn a_kept_workspace_holds_the_prelude_the_steps_and_the_trace() {
         .count();
     assert_eq!(steps, 1, "the step the answer wrote");
 
-    // Every message, with where it was sent from — which `BC_INSTR` takes at
-    // its own root, where FUNCNAME[1] is still the client.
+    // Every message, with the call site `__bc_where` took.
     let trace = fs::read_to_string(kept.join("debug.log")).expect("the trace");
     assert!(trace.contains("main.bash"), "{trace}");
     assert!(trace.lines().count() >= 4, "{trace}");
 }
 
-/// Waits briefly for a pid to disappear: the kill is immediate, but the
-/// reaping is init's and takes a moment.
+/// The kill is immediate; the reaping is init's and takes a moment.
 fn gone(pid: i32) -> bool {
     for _ in 0..100 {
         if unsafe { libc::kill(pid, 0) } != 0 {
