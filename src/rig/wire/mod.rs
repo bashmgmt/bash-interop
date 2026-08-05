@@ -4,11 +4,11 @@
 //! a shell exiting never looks like end-of-stream, and a write never sees
 //! `ENXIO`. [`Wire::drain`] hands back what it read and remembers nothing.
 
-pub mod frame;
+pub mod framing;
 pub mod record;
 pub mod reply;
 
-pub use frame::Frame;
+pub use framing::{Reassembly, FRAME_LIMIT};
 pub use record::{field, FromRecord, Line, Micros, Pid, Record, Stamp, Stamped, ASK_TAG};
 pub use reply::Reply;
 
@@ -22,10 +22,6 @@ use std::path::{Path, PathBuf};
 
 use crate::bash::rig::error::{Doing, RigError};
 
-/// Below `PIPE_BUF` (4096) with room for the frame header, so every frame is
-/// one atomic write and concurrent shells cannot interleave.
-pub const FRAME_LIMIT: usize = 3900;
-
 const READ_CHUNK: usize = 64 * 1024;
 
 pub struct Wire {
@@ -33,12 +29,7 @@ pub struct Wire {
     up_path: PathBuf,
     reader: File,
     replies: HashMap<Pid, File>,
-
-    /// Bytes read but not yet terminated by a newline.
-    pending: String,
-
-    /// Messages whose frames are still arriving, keyed by `(pid, seq)`.
-    partial: HashMap<(Pid, u32), String>,
+    incoming: Reassembly,
 }
 
 impl Wire {
@@ -62,8 +53,7 @@ impl Wire {
             up_path,
             reader,
             replies: HashMap::new(),
-            pending: String::new(),
-            partial: HashMap::new(),
+            incoming: Reassembly::default(),
         })
     }
 
@@ -87,11 +77,8 @@ impl Wire {
             match self.reader.read(&mut buffer) {
                 Ok(0) => break,
                 Ok(count) => {
-                    self.pending.push_str(&String::from_utf8_lossy(&buffer[..count]));
-                    while let Some(end) = self.pending.find('\n') {
-                        let raw: String = self.pending.drain(..=end).collect();
-                        self.accept(raw.trim_end_matches('\n'), &mut heard)?;
-                    }
+                    let bytes = String::from_utf8_lossy(&buffer[..count]);
+                    heard.extend(self.incoming.feed(&bytes)?);
                 }
                 Err(cause) => match cause.kind() {
                     io::ErrorKind::WouldBlock => break,
@@ -124,33 +111,7 @@ impl Wire {
         pipe.write_all(line.as_bytes()).doing(|| format!("answering pid {pid}"))
     }
 
-    /// Errors if a frame lacks its newline or a message its last chunk.
     pub fn finish(self) -> Result<(), RigError> {
-        let cut = |what: String| Err(RigError::new("draining the instrumentation pipe", what));
-
-        if !self.pending.is_empty() {
-            return cut(format!("a frame was cut short: {:?}", self.pending));
-        }
-        match self.partial.into_iter().next() {
-            Some(((pid, seq), text)) => cut(format!("message {pid}.{seq} stopped at {text:?}")),
-            None => Ok(()),
-        }
-    }
-
-    fn accept(&mut self, raw: &str, heard: &mut Vec<Line>) -> Result<(), RigError> {
-        let frame = Frame::parse(raw)?;
-
-        let key = (frame.stamp.pid, frame.stamp.seq);
-        let message = match self.partial.remove(&key) {
-            Some(head) => head + &frame.chunk,
-            None => frame.chunk,
-        };
-        if frame.partial {
-            self.partial.insert(key, message);
-            return Ok(());
-        }
-
-        heard.push(Stamped { stamp: frame.stamp, value: Record::parse_message(&message)? });
-        Ok(())
+        self.incoming.finish()
     }
 }
