@@ -1,10 +1,13 @@
 //! What a rig is, and what running one means.
 
-pub mod drive;
-pub mod turn;
+mod drive;
+mod plain;
+mod turn;
 
+pub use plain::{converse, listen};
 pub use turn::Turn;
 
+use std::ffi::OsStr;
 use std::fmt;
 use std::path::PathBuf;
 
@@ -41,7 +44,7 @@ pub trait Rig {
 
     /// Runs `bash <argv>` until the subject is gone, and does not let it
     /// outlive this call by any route.
-    fn run(&self, argv: &[String]) -> Result<Self::Output, RigError>
+    fn run<S: AsRef<OsStr>>(&self, argv: &[S]) -> Result<Self::Output, RigError>
     where
         Self: Sized,
     {

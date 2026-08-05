@@ -41,7 +41,6 @@ impl Capture {
         ordered
     }
 
-
     /// Every record the family recognised, successes and failures alike.
     pub fn of<T: FromRecord>(&self) -> impl Iterator<Item = Stamped<Result<T, T::Err>>> + '_ {
         self.chronological().into_iter().filter_map(|line| {
@@ -59,7 +58,6 @@ impl Capture {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::origin::ORIGIN_TAG;
 
     fn line(at: u64, pid: u32, seq: u32, lead: &str, rest: &[&str]) -> Line {
         Stamped {

@@ -44,7 +44,7 @@ selects which of the two it wants. Nothing else enters a running shell: the
 rig installs **no traps**, shadows
 **no builtin**, exports **no variable**, mutates **no global shell state**, and
 contains **no `eval`** — asserted against the generated text by
-`src/bash/rig/tests/mod.rs::the_prelude_is_non_invasive_and_self_reliant`.
+`tests/proofs.rs::the_prelude_is_non_invasive_and_self_reliant`.
 
 ## One way out
 
@@ -88,10 +88,10 @@ the control channel are inherited.
 A tool that only reports needs no Rust on the bash side at all: its script
 says what it has to say through `BC_INSTR say`.
 
-`tests/example_tests/` builds six of them, smallest first. `make examples`.
+`tests/examples/` builds six of them, smallest first. `make examples`.
 
 ## Reading order
 
 New to this: **README → run.md → wire.md**, then whichever concern you need.
 Changing the transport: **wire.md → design.md**. Writing a tool:
-**source.md → bashcap.md**, with `tests/example_tests/own_tool.rs` open.
+**source.md → bashcap.md**, with `tests/examples/own_tool.rs` open.

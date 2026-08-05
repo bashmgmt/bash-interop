@@ -1,4 +1,4 @@
-//! The one way out: a run yields an [`ExitStatus`](super::ExitStatus) or this.
+//! The one way out: a run yields its `Output` or this.
 
 use std::error::Error;
 use std::fmt;

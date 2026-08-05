@@ -4,6 +4,7 @@
 //! pipe; there is no interval and no timer. Every exit path from here kills
 //! the subject's process group.
 
+use std::ffi::OsStr;
 use std::fs;
 use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
@@ -15,7 +16,7 @@ use crate::bash::rig::error::{Doing, RigError};
 use crate::bash::rig::source;
 use crate::bash::rig::wire::Wire;
 
-pub(crate) fn run<R: Rig>(rig: &R, argv: &[String]) -> Result<R::Output, RigError> {
+pub(crate) fn run<R: Rig, S: AsRef<OsStr>>(rig: &R, argv: &[S]) -> Result<R::Output, RigError> {
     let (setup, mut session) = rig.start()?;
     let site = Site::open(&setup.workspace)?;
     let dir = site.dir();
@@ -104,7 +105,7 @@ struct Subject {
 }
 
 impl Subject {
-    fn spawn(argv: &[String], prelude: &Path, setup: &Setup) -> Result<Self, RigError> {
+    fn spawn<S: AsRef<OsStr>>(argv: &[S], prelude: &Path, setup: &Setup) -> Result<Self, RigError> {
         use std::os::unix::process::CommandExt;
 
         let mut command = Command::new("bash");
@@ -117,7 +118,10 @@ impl Subject {
         // grandchild that asked blocked on its reply pipe forever.
         command.process_group(0);
 
-        let child = command.spawn().doing(|| format!("spawning bash {}", argv.join(" ")))?;
+        let child = command.spawn().doing(|| {
+            let words: Vec<_> = argv.iter().map(|word| word.as_ref().to_string_lossy()).collect();
+            format!("spawning bash {}", words.join(" "))
+        })?;
         let group = child.id() as libc::pid_t;
         let exit = pidfd(group).doing(|| format!("watching bash {group}"))?;
 
