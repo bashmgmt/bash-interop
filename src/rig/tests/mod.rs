@@ -180,8 +180,8 @@ fn the_prelude_is_non_invasive_and_self_reliant() {
         );
     }
 
-    let result = script("trap 'echo mine' EXIT\nREC one", |rig| rig.with(recorder()));
-    assert_eq!(result.args("REC"), ["one"]);
+    let result = script("trap 'echo mine' EXIT\nIFS=,\nREC one two", |rig| rig.with(recorder()));
+    assert_eq!(result.args("REC"), ["one two"], "{}", result.report());
 }
 
 /// The debug side channel is a file, not the wire, so it still says what

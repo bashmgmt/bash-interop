@@ -57,7 +57,12 @@ impl Codegen {
 
     fn send(&self, array: &str, kind: Kind) -> BashSrc {
         let marker = kind.marker();
-        let mut lines = vec![BashSrc::raw(format!("__BC__msg=\"(${{{array}[*]@Q}})\""))];
+        // `${a[*]@Q}` would join on the client's IFS and collapse the message
+        // into one word; printf joins on its own format instead.
+        let mut lines = vec![
+            BashSrc::raw(format!("printf -v __BC__msg '%s ' \"${{{array}[@]@Q}}\"")),
+            BashSrc::raw("__BC__msg=\"(${__BC__msg% })\""),
+        ];
         if self.debug {
             lines.push(BashSrc::raw(format!(
                 "__BC__log send {marker} {array} ${{#__BC__msg}}"
