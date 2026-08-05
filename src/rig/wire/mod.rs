@@ -1,13 +1,11 @@
 //! The transport: one named pipe, joined by name by every shell.
 //!
-//! Nothing is inherited. Each shell opens the pipe itself from a path baked
-//! into the prelude, so no descriptor has to survive a fork and there is no
-//! bash-version surface at all. The reader holds the pipe `O_RDWR`, which is
-//! what keeps a writer from ever blocking on open and the reader from seeing
-//! a spurious end-of-file between shells.
-//!
-//! A shell that asks a question gets its own reply pipe, created by that
-//! shell the first time it asks — a shell that only emits never pays for one.
+//! Every pipe is held open at both ends by its owner. The `up` pipe is the
+//! operator's, so the operator holds it `O_RDWR`: the open never blocks, a
+//! shell exiting never looks like end-of-stream, and the reader can simply
+//! block in `read` instead of polling. A shell's reply pipe is that shell's,
+//! and it holds it `O_RDWR` for the same reasons in mirror — which is why the
+//! operator's write never blocks and never sees `ENXIO`.
 
 pub mod control;
 pub mod frame;
@@ -18,9 +16,9 @@ pub use frame::{Frame, Kind};
 pub use record::{field, FromRecord, Line, Micros, Pid, Record, Stamp, Stamped, WireError};
 
 use std::collections::HashMap;
-use std::io::{ErrorKind, Read, Write};
+use std::fs::{File, OpenOptions};
+use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 use crate::bash::rig::capture::Capture;
@@ -43,13 +41,11 @@ pub struct Damage {
 pub struct Wire {
     dir: PathBuf,
     up_path: PathBuf,
-    reader: std::fs::File,
+    reader: File,
+    replies: HashMap<Pid, File>,
     pending: String,
     partial: HashMap<(Pid, u32), String>,
     capture: Capture,
-    asks: Vec<Ask>,
-    replies: Vec<(Pid, String)>,
-    steps: usize,
 }
 
 impl Wire {
@@ -57,9 +53,12 @@ impl Wire {
         let up_path = dir.join("up");
         nix::unistd::mkfifo(&up_path, nix::sys::stat::Mode::S_IRWXU)?;
 
-        let reader = std::fs::OpenOptions::new().read(true).write(true).open(&up_path)?;
-        let raw = reader.as_raw_fd();
+        // Held read-write, so the open never blocks and no shell exiting
+        // ever looks like end-of-stream; non-blocking, because the caller
+        // decides when to wait, with `poll`.
+        let reader = OpenOptions::new().read(true).write(true).open(&up_path)?;
         unsafe {
+            let raw = reader.as_raw_fd();
             libc::fcntl(raw, libc::F_SETPIPE_SZ, PIPE_CAPACITY);
             let flags = libc::fcntl(raw, libc::F_GETFL);
             libc::fcntl(raw, libc::F_SETFL, flags | libc::O_NONBLOCK);
@@ -69,12 +68,10 @@ impl Wire {
             dir: dir.to_path_buf(),
             up_path,
             reader,
+            replies: HashMap::new(),
             pending: String::new(),
             partial: HashMap::new(),
             capture: Capture::default(),
-            asks: Vec::new(),
-            replies: Vec::new(),
-            steps: 0,
         })
     }
 
@@ -82,28 +79,73 @@ impl Wire {
         &self.up_path
     }
 
-    /// Reads everything currently buffered, turning complete messages into
-    /// lines and questions into pending asks.
-    pub fn drain(&mut self) -> std::io::Result<()> {
+    /// Everything recorded so far. What an answer sees when it is asked.
+    pub fn seen(&self) -> &Capture {
+        &self.capture
+    }
+
+    /// The descriptor to wait on. Readable exactly when the subject has
+    /// said something.
+    pub fn reader(&self) -> std::os::fd::RawFd {
+        self.reader.as_raw_fd()
+    }
+
+    /// Takes everything the pipe currently holds, and hands back whoever is
+    /// now blocked waiting for an answer.
+    pub fn drain(&mut self) -> std::io::Result<Vec<Ask>> {
         let mut buffer = [0u8; READ_CHUNK];
+        let mut asks = Vec::new();
+
         loop {
             match self.reader.read(&mut buffer) {
-                Ok(0) => return Ok(()),
+                Ok(0) => break,
                 Ok(count) => {
                     self.pending.push_str(&String::from_utf8_lossy(&buffer[..count]));
                     while let Some(end) = self.pending.find('\n') {
                         let raw: String = self.pending.drain(..=end).collect();
-                        self.accept(raw.trim_end_matches('\n'));
+                        self.accept(raw.trim_end_matches('\n'), &mut asks);
                     }
                 }
-                Err(error) if error.kind() == ErrorKind::WouldBlock => return Ok(()),
-                Err(error) if error.kind() == ErrorKind::Interrupted => {}
-                Err(error) => return Err(error),
+                Err(cause) => match cause.kind() {
+                    std::io::ErrorKind::WouldBlock => break,
+                    std::io::ErrorKind::Interrupted => continue,
+                    _ => return Err(cause),
+                },
             }
         }
+        Ok(asks)
     }
 
-    fn accept(&mut self, raw: &str) {
+    /// Answers one shell. Its reply pipe already has a reader — the shell
+    /// holds both ends — so this neither blocks nor fails to find one, and
+    /// the descriptor is opened once however many times that shell asks.
+    pub fn answer(&mut self, pid: Pid, reply: Reply) -> std::io::Result<()> {
+        let line = format!("{}\n", Record::new(reply.words().to_vec()).to_message());
+        let dir = &self.dir;
+
+        let pipe = match self.replies.entry(pid) {
+            std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert(OpenOptions::new().write(true).open(dir.join(format!("rep.{pid}")))?)
+            }
+        };
+        pipe.write_all(line.as_bytes())
+    }
+
+    pub fn finish(mut self) -> Capture {
+        if !self.pending.is_empty() {
+            let text = std::mem::take(&mut self.pending);
+            self.capture.damage.push(Damage { reason: "truncated frame".into(), text });
+        }
+        for ((pid, seq), text) in std::mem::take(&mut self.partial) {
+            self.capture
+                .damage
+                .push(Damage { reason: format!("message {pid}.{seq} never completed"), text });
+        }
+        self.capture
+    }
+
+    fn accept(&mut self, raw: &str, asks: &mut Vec<Ask>) {
         let frame = match Frame::parse(raw) {
             Ok(frame) => frame,
             Err(cause) => return self.hurt(cause, raw.to_string()),
@@ -125,74 +167,12 @@ impl Wire {
         };
         if frame.kind == Kind::Ask {
             let args = record.behind(ASK_TAG).unwrap_or(&record.words).to_vec();
-            self.asks.push(Ask { stamp: frame.stamp, args });
+            asks.push(Ask { stamp: frame.stamp, args });
         }
         self.capture.lines.push(Stamped { stamp: frame.stamp, value: record });
     }
 
     fn hurt(&mut self, cause: WireError, text: String) {
         self.capture.damage.push(Damage { reason: cause.to_string(), text });
-    }
-
-    /// Everything recorded so far. What a verb sees when it is asked.
-    pub fn seen(&self) -> &Capture {
-        &self.capture
-    }
-
-    pub fn take_asks(&mut self) -> Vec<Ask> {
-        std::mem::take(&mut self.asks)
-    }
-
-    /// Queues an answer. A step body is written out here so the asking shell
-    /// only ever has to source a path.
-    pub fn answer(&mut self, pid: Pid, reply: Reply) -> std::io::Result<()> {
-        let words = match reply {
-            Reply::Source { body } => {
-                self.steps += 1;
-                let path = self.dir.join(format!("step.{pid}.{}.bash", self.steps));
-                std::fs::write(&path, body.as_str())?;
-                vec!["source".to_string(), path.to_string_lossy().into_owned()]
-            }
-            Reply::Continue { status } => vec!["continue".to_string(), status.to_string()],
-        };
-        self.replies.push((pid, format!("{}\n", Record::new(words).to_message())));
-        Ok(())
-    }
-
-    /// Writes what it can. A reply pipe with no reader yet yields `ENXIO`;
-    /// that answer simply stays queued for the next turn.
-    pub fn flush(&mut self) -> std::io::Result<()> {
-        let queued = std::mem::take(&mut self.replies);
-        for (pid, line) in queued {
-            let path = self.dir.join(format!("rep.{pid}"));
-            match std::fs::OpenOptions::new()
-                .write(true)
-                .custom_flags(libc::O_NONBLOCK)
-                .open(&path)
-            {
-                Ok(mut pipe) => pipe.write_all(line.as_bytes())?,
-                Err(error)
-                    if matches!(error.raw_os_error(), Some(libc::ENXIO))
-                        || error.kind() == ErrorKind::NotFound =>
-                {
-                    self.replies.push((pid, line));
-                }
-                Err(error) => return Err(error),
-            }
-        }
-        Ok(())
-    }
-
-    pub fn finish(mut self) -> Capture {
-        if !self.pending.is_empty() {
-            let text = std::mem::take(&mut self.pending);
-            self.capture.damage.push(Damage { reason: "truncated frame".into(), text });
-        }
-        for ((pid, seq), text) in std::mem::take(&mut self.partial) {
-            self.capture
-                .damage
-                .push(Damage { reason: format!("message {pid}.{seq} never completed"), text });
-        }
-        self.capture
     }
 }

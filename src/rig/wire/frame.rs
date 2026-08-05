@@ -15,8 +15,10 @@ use super::record::{Micros, Pid, Stamp, WireError};
 pub enum Kind {
     /// More chunks follow.
     Continues,
+
     /// Last chunk. Fire and forget.
     Post,
+
     /// Last chunk. The sender is blocked on its reply pipe.
     Ask,
 }
@@ -77,7 +79,7 @@ mod tests {
         assert_eq!(Frame::parse("1.000000 42 7 . ()").unwrap().kind, Kind::Post);
         assert_eq!(Frame::parse("1.000000 42 7 + (").unwrap().kind, Kind::Continues);
 
-        for bad in ["", "x 1 0 . ()", "1.0 x 0 . ()", "1.0 1 x . ()", "1.0 1 0 ! ()", "1.0 1 0 ."] {
+        for bad in ["", "x 1 0 . ()", "1.0 x 0 . ()", "1.0 1 x . ()", "1.0 1 0 @ ()", "1.0 1 0 ."] {
             assert!(Frame::parse(bad).is_err(), "{bad:?} should not parse");
         }
     }

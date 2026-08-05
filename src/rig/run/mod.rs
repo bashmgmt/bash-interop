@@ -1,33 +1,127 @@
-//! The needle's eye: one behaviour folded into one bash prelude, evaluated
-//! before user code in every participating shell.
+//! The needle's eye: one rig folded into one bash prelude, evaluated before
+//! user code in every participating shell.
 //!
 //! Three moments and no others. **Setup** writes the prelude. **Say** and
 //! **ask** are the two operations `BC_INSTR` offers the subject. Nothing is
 //! injected behind the subject's back, so the rig installs no traps, shadows
 //! no builtin, exports nothing, and mutates no global shell state.
-//!
-//! The prelude is self-reliant: every path it needs is baked into it, so a
-//! shell that sources it needs nothing else.
 
-pub mod behaviour;
+pub mod rigging;
+pub mod session;
 pub mod tool;
+pub mod turn;
 
-pub use behaviour::Behaviour;
-pub use tool::{capture_into, Report, ToolError};
+pub use rigging::Rigging;
+pub use tool::{Report, ToolError};
+pub use turn::Turn;
 
 use std::fmt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::time::Duration;
 
-use indexmap::IndexMap;
+use serde::Serialize;
 
 use crate::bash::rig::capture::Capture;
 use crate::bash::rig::source::{Asset, AssetError, BashSrc};
-use crate::bash::rig::wire::{Wire, FRAME_LIMIT};
+use crate::bash::rig::wire::{FromRecord, Reply, FRAME_LIMIT};
 
 const WIRE_SRC: Asset = Asset::new("rig/wire.bash");
-const SERVICE_INTERVAL: Duration = Duration::from_micros(200);
+
+/// What a rig is.
+///
+/// Two functions: how a run starts, and what a shell that asked runs next.
+/// Everything a rig *does* is derived from those and lives here as a method,
+/// so nothing outside takes a rig as an argument.
+pub trait Rig {
+    /// How a run starts.
+    fn setup(&self) -> Setup;
+
+    /// What the shell runs next. Always an answer; saying needs none, so
+    /// there is only this one.
+    fn answer(&mut self, turn: &Turn) -> Reply;
+
+    /// The bash a subject will source, without running anything.
+    fn prelude(&self, dir: &Path, up: &Path) -> Result<BashSrc, RigError> {
+        let setup = self.setup();
+        let quote = |path: &Path| crate::bash::value::emit_scalar(&path.to_string_lossy());
+
+        Ok(BashSrc::seq([
+            BashSrc::raw(format!("__BC__UP={}", quote(up))),
+            BashSrc::raw(format!("__BC__DIR={}", quote(dir))),
+            BashSrc::raw(format!("__BC__limit={FRAME_LIMIT}")),
+            BashSrc::raw(format!("__BC__DEBUG={}", if setup.debug { "1" } else { "" })),
+            WIRE_SRC.read()?,
+            setup.bash,
+        ]))
+    }
+
+    /// Runs `bash <argv>` under this rig, answering until the subject is gone.
+    fn run(&mut self, argv: &[String]) -> Result<Outcome, RigError>
+    where
+        Self: Sized,
+    {
+        session::run(self, argv)
+    }
+
+    /// Runs `argv` and writes every decoded `T`, with its provenance, as one
+    /// JSON object per line. The destination is always given: a wrapper must
+    /// not compete for the wrapped program's own output.
+    fn capture_into<T>(&mut self, argv: &[String], into: &Path) -> Result<Report, ToolError>
+    where
+        T: FromRecord + Serialize,
+        Self: Sized,
+    {
+        tool::capture_into::<T, Self>(self, argv, into)
+    }
+}
+
+/// How a run starts. A pure value: no I/O happens until the runtime uses it.
+#[derive(Clone, Default)]
+pub struct Setup {
+    pub bash: BashSrc,
+    pub env: Vec<(String, String)>,
+    pub workspace: Workspace,
+    pub debug: bool,
+}
+
+impl Setup {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn bash(mut self, bash: BashSrc) -> Self {
+        self.bash = bash;
+        self
+    }
+
+    /// Environment for the subject's own code. The rig's own mechanisms use
+    /// none: the prelude carries its configuration baked in.
+    pub fn env(mut self, key: &str, value: &str) -> Self {
+        self.env.push((key.to_string(), value.to_string()));
+        self
+    }
+
+    pub fn in_workspace(mut self, workspace: Workspace) -> Self {
+        self.workspace = workspace;
+        self
+    }
+
+    /// Traces the bash side into `debug.log`, surfaced as `Outcome::debug`.
+    pub fn debug(mut self, on: bool) -> Self {
+        self.debug = on;
+        self
+    }
+}
+
+/// Where a run keeps its pipe, its prelude, and anything a step wrote.
+/// `Temporary` discards them when the run ends; `At` keeps them, which is
+/// what you want when something went wrong.
+#[derive(Clone, Default, PartialEq, Eq, Debug)]
+pub enum Workspace {
+    #[default]
+    Temporary,
+
+    At(PathBuf),
+}
 
 /// How the wrapped bash process ended. No `Option`: a process that did not
 /// exit normally was signalled, and both are reportable.
@@ -38,7 +132,6 @@ pub enum ExitStatus {
 }
 
 impl ExitStatus {
-
     /// Shell convention: a signalled process reports `128 + signal`.
     pub fn code(self) -> i32 {
         match self {
@@ -60,6 +153,7 @@ impl fmt::Display for ExitStatus {
 impl From<std::process::ExitStatus> for ExitStatus {
     fn from(status: std::process::ExitStatus) -> Self {
         use std::os::unix::process::ExitStatusExt;
+
         match (status.code(), status.signal()) {
             (Some(code), _) => Self::Code(code),
             (None, Some(signal)) => Self::Signal(signal),
@@ -73,108 +167,9 @@ impl From<std::process::ExitStatus> for ExitStatus {
 pub struct Outcome {
     pub capture: Capture,
     pub status: ExitStatus,
-    /// The bash side's own trace, when the rig was built with `debug(true)`.
+
+    /// The bash side's own trace, when the setup asked for it.
     pub debug: Vec<String>,
-}
-
-#[derive(Default)]
-pub struct Rig {
-    behaviour: Behaviour,
-    env: IndexMap<String, String>,
-    debug: bool,
-}
-
-impl Rig {
-    /// A rig is its behaviour. Everything that determines what happens is in
-    /// this one argument; what follows only configures the surroundings.
-    pub fn new(behaviour: Behaviour) -> Self {
-        Self { behaviour, env: IndexMap::new(), debug: false }
-    }
-
-    /// Environment for the client's own code. The rig's own mechanisms use
-    /// none: the prelude carries its configuration itself.
-    pub fn env(mut self, key: &str, value: &str) -> Self {
-        self.env.insert(key.to_string(), value.to_string());
-        self
-    }
-
-    /// Traces the bash side into `debug.log`, surfaced as `Outcome::debug`.
-    pub fn debug(mut self, on: bool) -> Self {
-        self.debug = on;
-        self
-    }
-
-    /// Configuration, the transport, then the behaviour's own bash. Public and
-    /// pure, so what a subject will source can be read without running it.
-    pub fn prelude(&self, dir: &Path, up: &Path) -> Result<BashSrc, RigError> {
-        let quote = |path: &Path| crate::bash::value::emit_scalar(&path.to_string_lossy());
-        Ok(BashSrc::seq([
-            BashSrc::raw(format!("__BC__UP={}", quote(up))),
-            BashSrc::raw(format!("__BC__DIR={}", quote(dir))),
-            BashSrc::raw(format!("__BC__limit={FRAME_LIMIT}")),
-            BashSrc::raw(format!("__BC__DEBUG={}", if self.debug { "1" } else { "" })),
-            WIRE_SRC.read()?,
-            self.behaviour.bash().clone(),
-        ]))
-    }
-
-    /// Runs `bash <argv>` with the prelude injected through `BASH_ENV`, so it
-    /// re-runs in every descendant bash process, draining the wire and
-    /// answering questions until the child exits.
-    ///
-    /// Reading stops once the direct child is gone and the pipe holds nothing
-    /// more. A writer that outlives the run is not waited for; the
-    /// alternative is waiting on an orphan forever.
-    pub fn run(&self, argv: &[String]) -> Result<Outcome, RigError> {
-        let workspace = tempfile::tempdir().map_err(RigError::Workspace)?;
-        let dir = workspace.path();
-
-        let mut wire = Wire::create(dir).map_err(RigError::Pipe)?;
-        let prelude_path = dir.join("prelude.bash");
-        std::fs::write(&prelude_path, self.prelude(dir, wire.up_path())?.as_str())
-            .map_err(|cause| RigError::Prelude { path: prelude_path.clone(), cause })?;
-
-        let mut command = Command::new("bash");
-        command.args(argv).env("BASH_ENV", &prelude_path);
-        for (key, value) in &self.env {
-            command.env(key, value);
-        }
-
-        let mut child = command.spawn().map_err(RigError::Spawn)?;
-        let status = loop {
-            self.serve(&mut wire)?;
-            if let Some(status) = child.try_wait().map_err(RigError::Wait)? {
-                break status;
-            }
-            std::thread::sleep(SERVICE_INTERVAL);
-        };
-        self.serve(&mut wire)?;
-
-        let debug = std::fs::read_to_string(dir.join("debug.log"))
-            .map(|text| text.lines().map(str::to_string).collect())
-            .unwrap_or_default();
-
-        Ok(Outcome { capture: wire.finish(), status: status.into(), debug })
-    }
-
-    /// Every answer is decided against the same history, then applied: an
-    /// answer reads what the run has recorded, it does not write to it.
-    fn serve(&self, wire: &mut Wire) -> Result<(), RigError> {
-        wire.drain().map_err(RigError::Read)?;
-        let asks = wire.take_asks();
-        if !asks.is_empty() {
-            let seen = wire.seen();
-            let answers: Vec<_> = asks
-                .iter()
-                .map(|ask| (ask.stamp.pid, self.behaviour.reply(ask, seen)))
-                .collect();
-            for (pid, reply) in answers {
-                wire.answer(pid, reply).map_err(RigError::Reply)?;
-            }
-        }
-        wire.flush().map_err(RigError::Reply)
-    }
-
 }
 
 #[derive(Debug)]

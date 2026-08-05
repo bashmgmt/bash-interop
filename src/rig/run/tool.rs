@@ -1,12 +1,12 @@
-//! The shape a capture tool takes, as one function.
+//! The shape a capture tool takes.
 //!
-//! A tool is its instruments plus the record family it decodes; everything
-//! else — where the output goes, what the exit code is, what happens to
-//! records that would not decode — is the same for all of them.
+//! Everything that is the same for all of them — where the output goes, what
+//! the exit code is, what happens to records that would not decode — is here
+//! once, so a tool is its bash, its record family, and one call.
 
 use std::fs;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
@@ -22,7 +22,7 @@ pub struct Report {
 #[derive(Debug)]
 pub enum ToolError {
     Run(RigError),
-    Output { path: std::path::PathBuf, cause: std::io::Error },
+    Output { path: PathBuf, cause: std::io::Error },
     Encode(serde_json::Error),
 }
 
@@ -36,14 +36,24 @@ impl std::fmt::Display for ToolError {
     }
 }
 
-impl std::error::Error for ToolError {}
+impl std::error::Error for ToolError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Run(cause) => Some(cause),
+            Self::Output { cause, .. } => Some(cause),
+            Self::Encode(cause) => Some(cause),
+        }
+    }
+}
 
-/// Runs `argv` under `rig` and writes every decoded `T`, with its provenance,
-/// as one JSON object per line. The destination is always given: a wrapper
-/// must not compete for the wrapped program's own output, so it never guesses.
-pub fn capture_into<T>(rig: &Rig, argv: &[String], into: &Path) -> Result<Report, ToolError>
+pub(crate) fn capture_into<T, R>(
+    rig: &mut R,
+    argv: &[String],
+    into: &Path,
+) -> Result<Report, ToolError>
 where
     T: FromRecord + Serialize,
+    R: Rig,
 {
     let outcome = rig.run(argv).map_err(ToolError::Run)?;
     let fail = |cause| ToolError::Output { path: into.to_path_buf(), cause };

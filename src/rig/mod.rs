@@ -35,7 +35,9 @@ pub mod wire;
 mod tests;
 
 pub use capture::{Capture, Origin, Shell, ShellNode};
-pub use run::{capture_into, Behaviour, ExitStatus, Outcome, Report, Rig, RigError, ToolError};
+pub use run::{
+    ExitStatus, Outcome, Report, Rig, Rigging, RigError, Setup, ToolError, Turn, Workspace,
+};
 pub use source::{Asset, AssetError, BashSrc};
 pub use wire::{
     field, Ask, Damage, FromRecord, Line, Micros, Pid, Record, Reply, Stamp, Stamped, WireError,
