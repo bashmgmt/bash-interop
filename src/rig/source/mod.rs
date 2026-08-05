@@ -4,5 +4,5 @@
 pub mod asset;
 pub mod text;
 
-pub use asset::{Asset, AssetError};
+pub use asset::Asset;
 pub use text::BashSrc;

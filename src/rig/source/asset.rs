@@ -4,10 +4,10 @@
 //! `BC_BASH_DIR` relocates the tree, which is how an installed binary carries
 //! its bash somewhere other than the source checkout.
 
-use std::fmt;
 use std::path::PathBuf;
 
 use super::BashSrc;
+use crate::bash::rig::error::{Doing, RigError};
 
 const DEFAULT_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/bash");
 const ROOT_OVERRIDE: &str = "BC_BASH_DIR";
@@ -25,30 +25,18 @@ impl Asset {
         root().join(self.0)
     }
 
-    pub fn read(self) -> Result<BashSrc, AssetError> {
-        std::fs::read_to_string(self.path())
+    pub fn read(self) -> Result<BashSrc, RigError> {
+        let path = self.path();
+
+        std::fs::read_to_string(&path)
             .map(BashSrc::raw)
-            .map_err(|cause| AssetError { asset: self, cause })
+            .doing(|| format!("reading the bash asset {}", path.display()))
     }
 }
 
 fn root() -> PathBuf {
     std::env::var_os(ROOT_OVERRIDE).map_or_else(|| PathBuf::from(DEFAULT_ROOT), PathBuf::from)
 }
-
-#[derive(Debug)]
-pub struct AssetError {
-    pub asset: Asset,
-    pub cause: std::io::Error,
-}
-
-impl fmt::Display for AssetError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "bash asset {}: {}", self.asset.path().display(), self.cause)
-    }
-}
-
-impl std::error::Error for AssetError {}
 
 #[cfg(test)]
 mod tests {

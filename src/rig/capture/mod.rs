@@ -1,20 +1,19 @@
 //! Everything read from a run: flat, in read order. Chronological ordering,
 //! per-shell grouping, the process forest, and typed decoding are all views.
 //!
-//! Lines that failed to decode are carried in `damage` rather than dropped.
-
-use std::collections::HashMap;
-
-use crate::bash::rig::wire::{Damage, FromRecord, Line, Micros, Pid, Record, Stamp, Stamped};
+//! A line that could not be read is not here, because it ended the run.
 
 pub mod origin;
 
 pub use origin::Origin;
 
+use std::collections::HashMap;
+
+use crate::bash::rig::wire::{FromRecord, Line, Micros, Pid, Record, Stamp, Stamped};
+
 #[derive(Debug, Default)]
 pub struct Capture {
     pub lines: Vec<Line>,
-    pub damage: Vec<Damage>,
 }
 
 /// One emitting shell: the `__ORIGIN__` that opened it and everything it
@@ -34,30 +33,24 @@ pub struct ShellNode<'a> {
 }
 
 impl Capture {
-    pub fn new(lines: Vec<Line>, damage: Vec<Damage>) -> Self {
-        Self { lines, damage }
-    }
-
     /// Records that did not come from a shell — read from a file, say. They
     /// carry pid 0 so their provenance never claims one produced them.
     pub fn literal(records: impl IntoIterator<Item = Record>) -> Self {
-        let lines = records
-            .into_iter()
-            .enumerate()
-            .map(|(index, value)| Stamped {
-                stamp: Stamp { at: Micros(0), pid: Pid(0), seq: index as u32 },
-                value,
-            })
-            .collect();
-        Self { lines, damage: Vec::new() }
+        Self {
+            lines: records
+                .into_iter()
+                .enumerate()
+                .map(|(index, value)| Stamped {
+                    stamp: Stamp { at: Micros(0), pid: Pid(0), seq: index as u32 },
+                    value,
+                })
+                .collect(),
+        }
     }
 
+    /// Appending is all there is to it: order is a view, so nothing merges.
     pub fn concat(parts: impl IntoIterator<Item = Capture>) -> Self {
-        parts.into_iter().fold(Self::default(), |mut all, part| {
-            all.lines.extend(part.lines);
-            all.damage.extend(part.damage);
-            all
-        })
+        Self { lines: parts.into_iter().flat_map(|part| part.lines).collect() }
     }
 
     pub fn chronological(&self) -> Vec<&Line> {
@@ -172,8 +165,8 @@ mod tests {
     /// children under a root, plus a later shell reusing the root's pid.
     #[test]
     fn views_over_one_capture() {
-        let capture = Capture::new(
-            vec![
+        let capture = Capture {
+            lines: vec![
                 line(140, 8, 1, "B", &[]),
                 origin(100, 7, ""),
                 line(110, 7, 1, "A", &[]),
@@ -181,8 +174,7 @@ mod tests {
                 origin(150, 9, "8"),
                 origin(200, 7, ""),
             ],
-            vec![],
-        );
+        };
 
         let tags: Vec<&str> =
             capture.chronological().iter().map(|line| line.value.words[0].as_str()).collect();

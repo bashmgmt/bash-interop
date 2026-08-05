@@ -9,6 +9,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+use crate::bash::rig::error::{Doing, RigError};
 use crate::bash::value::{self, BashCodec, BashVal, QuotedNest, Schema};
 
 /// Microseconds since the Unix epoch, from bash `$EPOCHREALTIME`. Both radix
@@ -58,8 +59,16 @@ impl Stamp {
     }
 }
 
+/// How `BC_INSTR ask` marks a question. One of the two words the transport
+/// reserves — the other is
+/// [`ORIGIN_TAG`](crate::bash::rig::capture::origin::ORIGIN_TAG) — and like
+/// it, this one is the transport describing itself in an ordinary message
+/// rather than a bit in the frame header.
+pub const ASK_TAG: &str = "__ASK__";
+
 /// Tool-owned payload: the words the subject passed, in order. The rig reads
-/// no position of them and attaches no meaning to any of them.
+/// no position of them and attaches no meaning to any of them, an empty
+/// arglist included.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct Record {
@@ -82,22 +91,22 @@ impl Record {
         }
     }
 
-    pub fn parse_message(literal: &str) -> Result<Self, WireError> {
+    /// What the subject passed after `ask` — and, by being `Some`, the fact
+    /// that a shell is blocked waiting for an answer to it.
+    pub fn asked(&self) -> Option<&[String]> {
+        self.behind(ASK_TAG)
+    }
+
+    pub fn parse_message(literal: &str) -> Result<Self, RigError> {
         let value = QuotedNest
             .parse_literal(literal, &Schema::n_d(1))
-            .map_err(|cause| WireError::Message(cause.to_string()))?;
+            .doing(|| format!("reading the message {literal:?}"))?;
         let BashVal::Arr(items) = value else { unreachable!("n_d(1) yields an array") };
-        let words: Vec<String> = items
-            .into_iter()
-            .map(|item| match item {
-                BashVal::Str(word) => word,
-                BashVal::Arr(_) => unreachable!("n_d(1) yields scalars"),
-            })
-            .collect();
-        if words.is_empty() {
-            return Err(WireError::Message("empty message".into()));
-        }
-        Ok(Self { words })
+
+        Ok(Self::new(items.into_iter().map(|item| match item {
+            BashVal::Str(word) => word,
+            BashVal::Arr(_) => unreachable!("n_d(1) yields scalars"),
+        })))
     }
 
     pub fn to_message(&self) -> String {
@@ -114,23 +123,6 @@ pub struct Stamped<T> {
 }
 
 pub type Line = Stamped<Record>;
-
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub enum WireError {
-    Shape(String),
-    Message(String),
-}
-
-impl fmt::Display for WireError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Shape(what) => write!(f, "malformed frame: {what}"),
-            Self::Message(what) => write!(f, "malformed message: {what}"),
-        }
-    }
-}
-
-impl std::error::Error for WireError {}
 
 /// Typed decode of one record family.
 ///
@@ -167,6 +159,9 @@ mod tests {
         let back = Record::parse_message(&wire).unwrap();
         assert_eq!(back, record);
         assert_eq!(Record::parse_message(&back.words[5]).unwrap().behind("INNER").unwrap(), ["x y"]);
+
+        let empty = Record::new(Vec::<String>::new());
+        assert_eq!(Record::parse_message(&empty.to_message()).unwrap(), empty);
     }
 
     #[test]
@@ -180,5 +175,8 @@ mod tests {
         assert_eq!(record.behind("U"), None);
         assert_eq!(field(claimed, "k"), Some("v"));
         assert_eq!(field(claimed, "missing"), None);
+
+        assert_eq!(record.asked(), None, "a say is not a question");
+        assert_eq!(Record::new([ASK_TAG, "at"]).asked(), Some(&["at".to_string()][..]));
     }
 }

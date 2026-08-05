@@ -1,32 +1,13 @@
-//! The control protocol: what a blocked shell asked, and what it is told.
+//! What a blocked shell is told to do next.
 
 use std::path::Path;
 
-/// How `BC_INSTR` labels a question on the wire, so that an ask is
-/// recognisable in the capture. Stripped before the ask reaches an answer:
-/// it is the transport's word, not the subject's.
-pub const ASK_TAG: &str = "__ASK__";
-
-use super::record::Stamp;
-
-/// A shell blocked on its reply pipe until this is answered.
-///
-/// `args` is exactly what the subject passed after `ask`, in order, with
-/// nothing read into any position. What those words mean is the business of
-/// whoever answers.
-#[derive(Clone, Debug)]
-pub struct Ask {
-    pub stamp: Stamp,
-    pub args: Vec<String>,
-}
-
-/// What the shell runs next.
-///
 /// One command, as an arglist — the same shape a message has — and its status
-/// is what `BC_INSTR ask` returns. There is no second form and there never
-/// will be: a bash command array can reach anything the shell knows, so the
-/// fidelity comes from the vocabulary the prelude defined rather than from
-/// variants here.
+/// is what `BC_INSTR ask` returns.
+///
+/// There is no second form and there never will be: a bash command array can
+/// reach anything the shell knows, so the fidelity comes from the vocabulary
+/// the prelude defined rather than from variants here.
 ///
 /// ```text
 /// [":"]                                    nothing

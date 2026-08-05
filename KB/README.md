@@ -14,10 +14,10 @@ bidirectional, arglist-based, and knows nothing about what the messages mean.
 ```
 KB/mb_resolver/bash/
   values.md       @Q, @A, BashVal/Schema, the two codecs
-  wire.md         the pipes, the framing, the message and control protocol
+  wire.md         the pipes, the framing, the message and the reply
   source.md       BashSrc and Asset — the bash a rig injects
   capture.md      Capture and its views: order, shells, the process forest
-  run.md          the Rig trait, the session, signals, capture_into
+  run.md          the Rig trait, the session, signals, errors, capture_into
   design.md       the decisions, and the measurements behind them
   bashcap.md      the reference tool, end to end
   managebash.md   the other consumer
@@ -41,6 +41,13 @@ rig installs **no traps**, shadows
 **no builtin**, exports **no variable**, mutates **no global shell state**, and
 contains **no `eval`** — asserted against the generated text by
 `src/bash/rig/tests/mod.rs::the_prelude_is_non_invasive_and_self_reliant`.
+
+## One way out
+
+A run yields an `Outcome` or a `RigError`. Nothing is carried alongside,
+nothing is dropped, and nothing half-succeeds: the first thing that cannot be
+read or written ends the run, and the subject's process group is killed on the
+way out. See [run.md](run.md#one-error-one-way-out).
 
 ## A message is an arglist
 

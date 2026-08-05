@@ -7,7 +7,7 @@
 use std::fs;
 use std::time::{Duration, Instant};
 
-use super::{BashSrc, Capture, ExitStatus, Reply, Rig, Setup, Turn, Workspace};
+use super::{BashSrc, Capture, ExitStatus, Reply, Rig, RigError, Setup, Turn, Workspace};
 
 // ── fixtures ─────────────────────────────────────────────────────────
 
@@ -15,19 +15,18 @@ use super::{BashSrc, Capture, ExitStatus, Reply, Rig, Setup, Turn, Workspace};
 struct Reporter;
 
 impl Rig for Reporter {
-    fn setup(&self) -> Setup {
-        Setup::new()
+    fn setup(&self) -> Result<Setup, RigError> {
+        Ok(Setup::new())
     }
 
-    fn answer(&mut self, _turn: &Turn) -> Reply {
-        Reply::status(127)
+    fn answer(&mut self, _turn: &Turn) -> Result<Reply, RigError> {
+        Ok(Reply::status(127))
     }
 }
 
 struct Run {
     capture: Capture,
     status: ExitStatus,
-    debug: Vec<String>,
     _temp: tempfile::TempDir,
 }
 
@@ -44,14 +43,12 @@ impl Run {
     }
 
     fn report(&self) -> String {
-        let lines: Vec<String> = self
-            .capture
+        self.capture
             .chronological()
             .into_iter()
             .map(|line| format!("  {} {}", line.stamp.pid, line.value.words.join(" ")))
-            .collect();
-
-        format!("capture:\n{}\ndebug:\n  {}", lines.join("\n"), self.debug.join("\n  "))
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 }
 
@@ -62,12 +59,9 @@ fn run(rig: &mut impl Rig, files: &[(&str, &str)]) -> Run {
     }
 
     let entry = temp.path().join(files[0].0).to_string_lossy().into_owned();
-    let outcome = rig.run(&[entry]).unwrap();
-    let run =
-        Run { capture: outcome.capture, status: outcome.status, debug: outcome.debug, _temp: temp };
+    let outcome = rig.run(&[entry]).unwrap_or_else(|error| panic!("{error}"));
 
-    assert!(run.capture.damage.is_empty(), "{}", run.report());
-    run
+    Run { capture: outcome.capture, status: outcome.status, _temp: temp }
 }
 
 fn script(body: &str) -> Run {
@@ -237,26 +231,26 @@ NOTE() { BC_INSTR say NOTE "$@"; }
 "#;
 
 impl Rig for Soak {
-    fn setup(&self) -> Setup {
-        Setup::new().bash(BashSrc::raw(SOAK_BASH))
+    fn setup(&self) -> Result<Setup, RigError> {
+        Ok(Setup::new().bash(BashSrc::raw(SOAK_BASH)))
     }
 
-    fn answer(&mut self, turn: &Turn) -> Reply {
+    fn answer(&mut self, turn: &Turn) -> Result<Reply, RigError> {
         self.answered += 1;
         let step: usize = turn.args().last().and_then(|word| word.parse().ok()).unwrap_or(0);
 
-        match step % 7 {
+        Ok(match step % 7 {
             0 => Reply::nothing(),
             1 => Reply::of(["declare", "-g", &format!("mark_{step}=set")]),
             2 => Reply::eval(&format!("NOTE eval {step}")),
             3 => Reply::of(["NOTE", "call", &step.to_string()]),
-            4 => turn.source(&BashSrc::raw(format!("NOTE source {step}"))),
+            4 => turn.source(&BashSrc::raw(format!("NOTE source {step}")))?,
             5 => {
                 std::thread::sleep(Duration::from_millis(2));
                 Reply::status(0)
             }
             _ => Reply::status(3),
-        }
+        })
     }
 }
 
@@ -337,25 +331,30 @@ fn a_shell_left_asking_does_not_outlive_the_run() {
     assert!(gone(lingering), "{lingering} outlived the run\n{}", result.report());
 }
 
-/// A panic in an answer is not swallowed — and it still releases the subject,
-/// which would otherwise sit on its reply pipe forever.
+/// A panic in an answer is not swallowed — and the subject is still killed on
+/// the way out, rather than left blocked on a reply that will never come.
+///
+/// The capture is lost with the run, so the subject writes its own pid to a
+/// file before asking. That is the only way to name what has to be dead.
 #[test]
-fn a_panicking_answer_releases_the_subject() {
+fn a_panicking_answer_kills_the_subject() {
     struct Exploding;
 
     impl Rig for Exploding {
-        fn setup(&self) -> Setup {
-            Setup::new()
+        fn setup(&self) -> Result<Setup, RigError> {
+            Ok(Setup::new())
         }
 
-        fn answer(&mut self, _turn: &Turn) -> Reply {
+        fn answer(&mut self, _turn: &Turn) -> Result<Reply, RigError> {
             panic!("answer blew up")
         }
     }
 
     let temp = tempfile::tempdir().unwrap();
+    let marker = temp.path().join("pid");
     let entry = temp.path().join("main.bash");
-    fs::write(&entry, "BC_INSTR ask anything\n").unwrap();
+    fs::write(&entry, format!("echo $BASHPID > {}\nBC_INSTR ask anything\n", marker.display()))
+        .unwrap();
     let argv = [entry.to_string_lossy().into_owned()];
 
     let previous = std::panic::take_hook();
@@ -364,24 +363,31 @@ fn a_panicking_answer_releases_the_subject() {
     std::panic::set_hook(previous);
 
     assert!(outcome.is_err(), "the panic must propagate rather than be swallowed");
-    // Nothing is left blocked: the shell that asked is gone with the run.
-    assert!(std::process::Command::new("true").status().is_ok());
+
+    let blocked: i32 = fs::read_to_string(&marker)
+        .expect("the subject reported its pid before asking")
+        .trim()
+        .parse()
+        .unwrap();
+    assert!(gone(blocked), "{blocked} was left waiting for an answer that will never come");
 }
 
 // ── the workspace ────────────────────────────────────────────────────
 
-/// A run's artifacts are worth keeping when something went wrong, so where
-/// they live is part of what a rig describes.
+/// Everything a run leaves behind is in one directory, and keeping it is how
+/// you get any of it: the prelude, each step an answer wrote, and the debug
+/// trace — which is a file rather than the wire, so it still says what
+/// happened when the wire is what went wrong.
 #[test]
-fn a_workspace_can_be_kept() {
+fn a_kept_workspace_holds_the_prelude_the_steps_and_the_trace() {
     struct Kept(std::path::PathBuf);
 
     impl Rig for Kept {
-        fn setup(&self) -> Setup {
-            Setup::new().debug(true).in_workspace(Workspace::At(self.0.clone()))
+        fn setup(&self) -> Result<Setup, RigError> {
+            Ok(Setup::new().debug(true).workspace(Workspace::At(self.0.clone())))
         }
 
-        fn answer(&mut self, turn: &Turn) -> Reply {
+        fn answer(&mut self, turn: &Turn) -> Result<Reply, RigError> {
             turn.source(&BashSrc::raw("BC_INSTR say REC sourced"))
         }
     }
@@ -389,43 +395,25 @@ fn a_workspace_can_be_kept() {
     let temp = tempfile::tempdir().unwrap();
     let kept = temp.path().join("run");
     let entry = temp.path().join("main.bash");
-    fs::write(&entry, "BC_INSTR ask something\n").unwrap();
+    fs::write(&entry, "BC_INSTR ask something\n( BC_INSTR say REC subshell )\n").unwrap();
 
     let outcome = Kept(kept.clone()).run(&[entry.to_string_lossy().into_owned()]).unwrap();
     assert_eq!(outcome.status, ExitStatus::Code(0));
-
     assert!(kept.join("prelude.bash").is_file(), "the prelude survived the run");
-    assert!(kept.join("debug.log").is_file(), "so did the trace");
-    let steps: Vec<_> = fs::read_dir(&kept)
+
+    let steps = fs::read_dir(&kept)
         .unwrap()
-        .filter_map(|entry| entry.ok())
-        .filter(|entry| entry.file_name().to_string_lossy().starts_with("step."))
-        .collect();
-    assert_eq!(steps.len(), 1, "and the step the answer wrote");
-}
+        .filter(|entry| {
+            entry.as_ref().is_ok_and(|it| it.file_name().to_string_lossy().starts_with("step."))
+        })
+        .count();
+    assert_eq!(steps, 1, "the step the answer wrote");
 
-// ── the debug channel ────────────────────────────────────────────────
-
-/// It is a file, not the wire, so it still says what happened when the wire is
-/// what went wrong — including where each message was sent from, which
-/// `BC_INSTR` takes at its own root.
-#[test]
-fn the_debug_channel_records_where_each_message_came_from() {
-    struct Traced;
-
-    impl Rig for Traced {
-        fn setup(&self) -> Setup {
-            Setup::new().debug(true)
-        }
-
-        fn answer(&mut self, _turn: &Turn) -> Reply {
-            Reply::status(127)
-        }
-    }
-
-    let result = run(&mut Traced, &[("main.bash", "BC_INSTR say REC one\n( BC_INSTR say REC two )")]);
-    assert!(result.debug.iter().any(|line| line.contains("main.bash")), "{}", result.report());
-    assert!(result.debug.len() >= 3, "{}", result.report());
+    // Every message, with where it was sent from — which `BC_INSTR` takes at
+    // its own root, where FUNCNAME[1] is still the client.
+    let trace = fs::read_to_string(kept.join("debug.log")).expect("the trace");
+    assert!(trace.contains("main.bash"), "{trace}");
+    assert!(trace.lines().count() >= 4, "{trace}");
 }
 
 /// Waits briefly for a pid to disappear: the kill is immediate, but the

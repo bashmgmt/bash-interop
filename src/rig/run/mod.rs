@@ -1,18 +1,17 @@
-//! The needle's eye: one rig folded into one bash prelude, evaluated before
-//! user code in every participating shell.
+//! What a rig is, and what running one means.
 //!
-//! Three moments and no others. **Setup** writes the prelude. **Say** and
-//! **ask** are the two operations `BC_INSTR` offers the subject. Nothing is
-//! injected behind the subject's back, so the rig installs no traps, shadows
-//! no builtin, exports nothing, and mutates no global shell state.
+//! [`Rig`] is the whole interface: two functions a tool writes, and three
+//! methods derived from them that nothing outside has to reimplement. The
+//! rest of this directory is what those methods need — a [`Turn`] to answer
+//! against, a [`Report`] to hand back, and the session that drives a run.
 
+pub mod report;
 pub mod rigging;
 pub mod session;
-pub mod tool;
 pub mod turn;
 
+pub use report::Report;
 pub use rigging::Rigging;
-pub use tool::{Report, ToolError};
 pub use turn::Turn;
 
 use std::fmt;
@@ -21,7 +20,8 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 use crate::bash::rig::capture::Capture;
-use crate::bash::rig::source::{Asset, AssetError, BashSrc};
+use crate::bash::rig::error::RigError;
+use crate::bash::rig::source::{Asset, BashSrc};
 use crate::bash::rig::wire::{FromRecord, Reply, FRAME_LIMIT};
 
 const WIRE_SRC: Asset = Asset::new("rig/wire.bash");
@@ -33,15 +33,15 @@ const WIRE_SRC: Asset = Asset::new("rig/wire.bash");
 /// so nothing outside takes a rig as an argument.
 pub trait Rig {
     /// How a run starts.
-    fn setup(&self) -> Setup;
+    fn setup(&self) -> Result<Setup, RigError>;
 
     /// What the shell runs next. Always an answer; saying needs none, so
     /// there is only this one.
-    fn answer(&mut self, turn: &Turn) -> Reply;
+    fn answer(&mut self, turn: &Turn) -> Result<Reply, RigError>;
 
     /// The bash a subject will source, without running anything.
     fn prelude(&self, dir: &Path, up: &Path) -> Result<BashSrc, RigError> {
-        let setup = self.setup();
+        let setup = self.setup()?;
         let quote = |path: &Path| crate::bash::value::emit_scalar(&path.to_string_lossy());
 
         Ok(BashSrc::seq([
@@ -54,7 +54,8 @@ pub trait Rig {
         ]))
     }
 
-    /// Runs `bash <argv>` under this rig, answering until the subject is gone.
+    /// Runs `bash <argv>` under this rig, answering until the subject is
+    /// gone. The subject does not outlive this call by either route.
     fn run(&mut self, argv: &[String]) -> Result<Outcome, RigError>
     where
         Self: Sized,
@@ -65,12 +66,12 @@ pub trait Rig {
     /// Runs `argv` and writes every decoded `T`, with its provenance, as one
     /// JSON object per line. The destination is always given: a wrapper must
     /// not compete for the wrapped program's own output.
-    fn capture_into<T>(&mut self, argv: &[String], into: &Path) -> Result<Report, ToolError>
+    fn capture_into<T>(&mut self, argv: &[String], into: &Path) -> Result<Report, RigError>
     where
         T: FromRecord + Serialize,
         Self: Sized,
     {
-        tool::capture_into::<T, Self>(self, argv, into)
+        report::capture_into::<T, Self>(self, argv, into)
     }
 }
 
@@ -100,12 +101,13 @@ impl Setup {
         self
     }
 
-    pub fn in_workspace(mut self, workspace: Workspace) -> Self {
+    pub fn workspace(mut self, workspace: Workspace) -> Self {
         self.workspace = workspace;
         self
     }
 
-    /// Traces the bash side into `debug.log`, surfaced as `Outcome::debug`.
+    /// Traces the bash side into `debug.log` in the workspace, which is worth
+    /// pairing with [`Workspace::At`] — a temporary one takes it along.
     pub fn debug(mut self, on: bool) -> Self {
         self.debug = on;
         self
@@ -162,47 +164,10 @@ impl From<std::process::ExitStatus> for ExitStatus {
     }
 }
 
+/// Everything a finished run has to say.
 #[must_use]
 #[derive(Debug)]
 pub struct Outcome {
     pub capture: Capture,
     pub status: ExitStatus,
-
-    /// The bash side's own trace, when the setup asked for it.
-    pub debug: Vec<String>,
-}
-
-#[derive(Debug)]
-pub enum RigError {
-    Workspace(std::io::Error),
-    Asset(AssetError),
-    Prelude { path: PathBuf, cause: std::io::Error },
-    Pipe(std::io::Error),
-    Spawn(std::io::Error),
-    Wait(std::io::Error),
-    Read(std::io::Error),
-    Reply(std::io::Error),
-}
-
-impl fmt::Display for RigError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Workspace(cause) => write!(f, "run workspace: {cause}"),
-            Self::Asset(cause) => write!(f, "{cause}"),
-            Self::Prelude { path, cause } => write!(f, "prelude {}: {cause}", path.display()),
-            Self::Pipe(cause) => write!(f, "instrumentation pipe: {cause}"),
-            Self::Spawn(cause) => write!(f, "spawn bash: {cause}"),
-            Self::Wait(cause) => write!(f, "wait for bash: {cause}"),
-            Self::Read(cause) => write!(f, "read the pipe: {cause}"),
-            Self::Reply(cause) => write!(f, "answer a question: {cause}"),
-        }
-    }
-}
-
-impl std::error::Error for RigError {}
-
-impl From<AssetError> for RigError {
-    fn from(cause: AssetError) -> Self {
-        Self::Asset(cause)
-    }
 }

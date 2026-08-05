@@ -1,67 +1,54 @@
 //! The transport layer: one line, one frame.
 //!
 //! ```text
-//! <at> <pid> <seq> <kind> <chunk>
+//! <at> <pid> <seq> <marker> <chunk>
 //! ```
 //!
 //! The header sits outside the message because a continuation has to be
-//! routed before there is a message to parse. `kind` carries whether the
-//! sender is waiting, so the obligation to reply is a property of the parsed
-//! type rather than something inferred from the payload.
+//! routed before there is a message to parse — which is the only thing the
+//! header is for. Whether the sender is waiting for an answer is in the
+//! message, where [`Record::asked`](super::Record::asked) reads it, so the
+//! frame layer knows nothing about what a message means.
 
-use super::record::{Micros, Pid, Stamp, WireError};
+use super::record::{Micros, Pid, Stamp};
+use crate::bash::rig::error::{Doing, RigError};
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
-pub enum Kind {
-    /// More chunks follow.
-    Continues,
-
-    /// Last chunk. Fire and forget.
-    Post,
-
-    /// Last chunk. The sender is blocked on its reply pipe.
-    Ask,
-}
-
-impl Kind {
-    pub fn marker(self) -> char {
-        match self {
-            Self::Continues => '+',
-            Self::Post => '.',
-            Self::Ask => '?',
-        }
-    }
-
-    fn parse(text: &str) -> Option<Self> {
-        match text {
-            "+" => Some(Self::Continues),
-            "." => Some(Self::Post),
-            "?" => Some(Self::Ask),
-            _ => None,
-        }
-    }
-}
+const CONTINUES: &str = "+";
+const ENDS: &str = ".";
 
 #[derive(Clone, Debug)]
 pub struct Frame {
     pub stamp: Stamp,
-    pub kind: Kind,
+
+    /// Further chunks of this message follow, to be rejoined by `(pid, seq)`.
+    pub partial: bool,
+
     pub chunk: String,
 }
 
 impl Frame {
-    pub fn parse(raw: &str) -> Result<Self, WireError> {
+    pub fn parse(raw: &str) -> Result<Self, RigError> {
+        Self::read(raw).doing(|| format!("reading the frame {raw:?}"))
+    }
+
+    fn read(raw: &str) -> Result<Self, &'static str> {
         let mut fields = raw.splitn(5, ' ');
-        let shape = |what: &str| WireError::Shape(what.to_string());
 
-        let at = fields.next().and_then(Micros::parse_epoch).ok_or_else(|| shape("timestamp"))?;
-        let pid =
-            fields.next().and_then(|raw| raw.parse().ok()).map(Pid).ok_or_else(|| shape("pid"))?;
-        let seq = fields.next().and_then(|raw| raw.parse().ok()).ok_or_else(|| shape("seq"))?;
-        let kind = fields.next().and_then(Kind::parse).ok_or_else(|| shape("kind"))?;
-        let chunk = fields.next().ok_or_else(|| shape("missing message"))?.to_string();
+        let at = fields.next().and_then(Micros::parse_epoch).ok_or("bad timestamp")?;
+        let pid = fields.next().and_then(|raw| raw.parse().ok()).map(Pid).ok_or("bad pid")?;
+        let seq = fields.next().and_then(|raw| raw.parse().ok()).ok_or("bad sequence number")?;
+        let partial = fields.next().and_then(continues).ok_or("bad marker")?;
+        let chunk = fields.next().ok_or("no message")?.to_string();
 
-        Ok(Self { stamp: Stamp { at, pid, seq }, kind, chunk })
+        Ok(Self { stamp: Stamp { at, pid, seq }, partial, chunk })
+    }
+}
+
+fn continues(marker: &str) -> Option<bool> {
+    match marker {
+        CONTINUES => Some(true),
+        ENDS => Some(false),
+        _ => None,
     }
 }
 
@@ -70,16 +57,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn kinds_and_shapes() {
-        let frame = Frame::parse("1.000000 42 7 ? ('a')").unwrap();
-        assert_eq!(frame.kind, Kind::Ask);
+    fn markers_and_shapes() {
+        let frame = Frame::parse("1.000000 42 7 . ('a')").unwrap();
+        assert!(!frame.partial);
         assert_eq!(frame.stamp.pid, Pid(42));
         assert_eq!(frame.chunk, "('a')");
 
-        assert_eq!(Frame::parse("1.000000 42 7 . ()").unwrap().kind, Kind::Post);
-        assert_eq!(Frame::parse("1.000000 42 7 + (").unwrap().kind, Kind::Continues);
+        assert!(Frame::parse("1.000000 42 7 + (").unwrap().partial);
 
-        for bad in ["", "x 1 0 . ()", "1.0 x 0 . ()", "1.0 1 x . ()", "1.0 1 0 @ ()", "1.0 1 0 ."] {
+        for bad in ["", "x 1 0 . ()", "1.0 x 0 . ()", "1.0 1 x . ()", "1.0 1 0 ? ()", "1.0 1 0 ."] {
             assert!(Frame::parse(bad).is_err(), "{bad:?} should not parse");
         }
     }

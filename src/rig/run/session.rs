@@ -8,50 +8,61 @@
 //! clean return, an error, or an unwind — releases it, so no shell is ever
 //! left blocked on a pipe nobody will write to again.
 
+use std::fs;
 use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 
-use super::{Outcome, Rig, RigError, Setup, Turn, Workspace};
+use super::{Outcome, Rig, Setup, Turn, Workspace};
+use crate::bash::rig::capture::Capture;
+use crate::bash::rig::error::{Doing, RigError};
 use crate::bash::rig::wire::Wire;
 
 pub(crate) fn run(rig: &mut impl Rig, argv: &[String]) -> Result<Outcome, RigError> {
-    let setup = rig.setup();
+    let setup = rig.setup()?;
     let site = Site::open(&setup.workspace)?;
     let dir = site.dir();
 
-    let mut wire = Wire::create(dir).map_err(RigError::Pipe)?;
+    let mut wire = Wire::create(dir)?;
     let prelude = dir.join("prelude.bash");
-    std::fs::write(&prelude, rig.prelude(dir, wire.up_path())?.as_str())
-        .map_err(|cause| RigError::Prelude { path: prelude.clone(), cause })?;
+    fs::write(&prelude, rig.prelude(dir, wire.up_path())?.as_str())
+        .doing(|| format!("writing the prelude to {}", prelude.display()))?;
 
     let mut subject = Subject::spawn(argv, &prelude, &setup)?;
+    let mut capture = Capture::default();
 
     loop {
-        serve(rig, &mut wire, dir)?;
-        match wait_for(wire.reader(), subject.exit()).map_err(RigError::Read)? {
+        serve(rig, &mut wire, &mut capture, dir)?;
+        match wait_for(wire.reader(), subject.exit())? {
             Ready::Spoke => continue,
             Ready::Exited => break,
         }
     }
     // Whatever the subject said just before it went is still in the pipe.
-    serve(rig, &mut wire, dir)?;
+    serve(rig, &mut wire, &mut capture, dir)?;
+    wire.finish()?;
 
-    let status = subject.finish().map_err(RigError::Wait)?;
-    let debug = std::fs::read_to_string(dir.join("debug.log"))
-        .map(|text| text.lines().map(str::to_string).collect())
-        .unwrap_or_default();
-
-    Ok(Outcome { capture: wire.finish(), status: status.into(), debug })
+    let status = subject.finish().doing(|| "waiting for bash".into())?;
+    Ok(Outcome { capture, status: status.into() })
 }
 
-/// Takes everything the pipe holds and answers whatever asked. Every answer
-/// in a pass is decided against the same history, then applied.
-fn serve(rig: &mut impl Rig, wire: &mut Wire, dir: &Path) -> Result<(), RigError> {
-    for ask in wire.drain().map_err(RigError::Read)? {
-        let reply = rig.answer(&Turn::new(&ask, wire.seen(), dir));
-        wire.answer(ask.stamp.pid, reply).map_err(RigError::Reply)?;
+/// Takes everything the pipe holds, then answers whatever asked. Reading
+/// first is what lets an answer see the question in its own history, and lets
+/// every answer in a pass be decided against the same one.
+fn serve(
+    rig: &mut impl Rig,
+    wire: &mut Wire,
+    capture: &mut Capture,
+    dir: &Path,
+) -> Result<(), RigError> {
+    let arrived = capture.lines.len();
+    capture.lines.extend(wire.drain()?);
+
+    for index in arrived..capture.lines.len() {
+        let Some(turn) = Turn::over(&capture.lines[index], capture, dir) else { continue };
+        let reply = rig.answer(&turn)?;
+        wire.answer(turn.stamp().pid, reply)?;
     }
     Ok(())
 }
@@ -63,7 +74,7 @@ enum Ready {
 
 /// Blocks until the subject says something or ends. Nothing else can wake it,
 /// so there is no interval to tune and nothing to miss.
-fn wait_for(pipe: RawFd, exit: RawFd) -> io::Result<Ready> {
+fn wait_for(pipe: RawFd, exit: RawFd) -> Result<Ready, RigError> {
     loop {
         let mut watching = [
             libc::pollfd { fd: pipe, events: libc::POLLIN, revents: 0 },
@@ -72,10 +83,10 @@ fn wait_for(pipe: RawFd, exit: RawFd) -> io::Result<Ready> {
 
         if unsafe { libc::poll(watching.as_mut_ptr(), 2, -1) } < 0 {
             let cause = io::Error::last_os_error();
-            match cause.kind() {
-                io::ErrorKind::Interrupted => continue,
-                _ => return Err(cause),
+            if cause.kind() == io::ErrorKind::Interrupted {
+                continue;
             }
+            return Err(cause).doing(|| "waiting for the subject".into());
         }
 
         // The pipe first: what the subject said before exiting is still in it,
@@ -112,9 +123,9 @@ impl Subject {
         // that asked blocked on its reply pipe forever.
         command.process_group(0);
 
-        let child = command.spawn().map_err(RigError::Spawn)?;
+        let child = command.spawn().doing(|| format!("spawning bash {}", argv.join(" ")))?;
         let group = child.id() as libc::pid_t;
-        let exit = pidfd(group).map_err(RigError::Spawn)?;
+        let exit = pidfd(group).doing(|| format!("watching bash {group}"))?;
 
         Ok(Self { child: Some(child), group, exit })
     }
@@ -166,11 +177,13 @@ enum Site {
 impl Site {
     fn open(workspace: &Workspace) -> Result<Self, RigError> {
         match workspace {
-            Workspace::Temporary => {
-                tempfile::tempdir().map(Self::Temporary).map_err(RigError::Workspace)
-            }
+            Workspace::Temporary => tempfile::tempdir()
+                .map(Self::Temporary)
+                .doing(|| "opening a temporary workspace".into()),
+
             Workspace::At(path) => {
-                std::fs::create_dir_all(path).map_err(RigError::Workspace)?;
+                fs::create_dir_all(path)
+                    .doing(|| format!("opening the workspace {}", path.display()))?;
                 Ok(Self::Kept(path.clone()))
             }
         }

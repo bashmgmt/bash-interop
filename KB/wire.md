@@ -56,38 +56,41 @@ Two kinds, and the difference matters.
 | | `up` — one, shared | `rep.<pid>` — one per asking shell |
 |---|---|---|
 | created by | the operator, in `Wire::create` | the asking shell, on its first ask |
-| the operator holds | `O_RDWR`, `O_NONBLOCK`, 1 MiB buffer | `O_WRONLY`, opened once per shell and cached |
+| the operator holds | `O_RDWR`, `O_NONBLOCK` | `O_WRONLY`, opened once per shell and cached |
 | the shell holds | `exec {__BC__up}>"$__BC__UP"` | `exec {__BC__replyfd}<>"$__BC__reply"` |
 
 ```rust
 impl Wire {
-    pub fn create(dir: &Path) -> std::io::Result<Self>;
+    pub fn create(dir: &Path) -> Result<Self, RigError>;
     pub fn up_path(&self) -> &Path;
 
     /// The descriptor to wait on. Readable exactly when the subject has said
     /// something.
     pub fn reader(&self) -> RawFd;
 
-    /// Takes everything the pipe currently holds, and hands back whoever is
-    /// now blocked waiting for an answer.
-    pub fn drain(&mut self) -> std::io::Result<Vec<Ask>>;
+    /// Everything the pipe currently holds. A shell blocked on an answer is
+    /// one whose record `asked()`.
+    pub fn drain(&mut self) -> Result<Vec<Line>, RigError>;
 
-    pub fn seen(&self) -> &Capture;
-    pub fn answer(&mut self, pid: Pid, reply: Reply) -> std::io::Result<()>;
-    pub fn finish(self) -> Capture;
+    pub fn answer(&mut self, pid: Pid, reply: Reply) -> Result<(), RigError>;
+
+    /// Nothing may be left half-read.
+    pub fn finish(self) -> Result<(), RigError>;
 }
 ```
 
-Each flag earns its place:
+**The wire remembers no run.** `drain` hands back what it just read and forgets
+it; accumulating that into a `Capture` is the session's job, which is why the
+transport does not depend on the capture layer at all.
 
-- **`O_RDWR` on the reader.** A FIFO opened read-only blocks until a writer
-  appears, and returns end-of-file once the last writer closes. Holding a write
-  end ourselves means `create` never blocks, the writer count never reaches
-  zero, and bash's write-only `exec` never blocks either.
-- **`O_NONBLOCK` on the reader.** The caller decides when to wait, with `poll`;
+Both flags on the reader earn their place:
+
+- **`O_RDWR`.** A FIFO opened read-only blocks until a writer appears, and
+  returns end-of-file once the last writer closes. Holding a write end
+  ourselves means `create` never blocks, the writer count never reaches zero,
+  and bash's write-only `exec` never blocks either.
+- **`O_NONBLOCK`, set at open.** The caller decides when to wait, with `poll`;
   `drain` reads until the pipe is empty and returns.
-- **1 MiB pipe buffer.** The subject keeps writing while the operator is busy
-  answering someone else, without stalling on a full pipe.
 
 ### Joining, and the fork guard
 
@@ -101,9 +104,9 @@ __bc_join() {
     __BC__owner=$BASHPID
     __BC__seq=0
     __BC__reply="$__BC__DIR/rep.$BASHPID"
-    set -- __ORIGIN__ parent "$__bc_parent" shlvl "$SHLVL" source "${BASH_SOURCE[-1]:-}"
-    __bc_pack "$@"
-    __bc_ship '.'
+    __BC__replyfd=""
+    __bc_pack __ORIGIN__ parent "$__bc_parent" shlvl "$SHLVL" source "${BASH_SOURCE[-1]:-}"
+    __bc_ship
 }
 ```
 
@@ -138,20 +141,23 @@ descriptor by accident.
 One line, one frame:
 
 ```
-<at> <pid> <seq> <kind> <chunk>
+<at> <pid> <seq> <marker> <chunk>
 ```
 
 ```rust
-pub enum Kind { Continues, Post, Ask }   // '+'  '.'  '?'
-
-pub struct Frame { pub stamp: Stamp, pub kind: Kind, pub chunk: String }
-impl Frame { pub fn parse(raw: &str) -> Result<Self, WireError>; }
+pub struct Frame { pub stamp: Stamp, pub partial: bool, pub chunk: String }
+impl Frame { pub fn parse(raw: &str) -> Result<Self, RigError>; }
 ```
 
 The header sits **outside** the message because a continuation has to be routed
-before there is a message to parse. `kind` carries reply-expectation at the
-transport layer, so "someone is blocked on this" is a property of the parsed
-type rather than something inferred from a payload.
+before there is a message to parse — and routing is the only thing it is for.
+`+` means more chunks follow, `.` means this is the last, and that is the
+header's entire semantic content.
+
+Whether the sender is waiting for an answer is *not* here. It is `__ASK__` in
+the message, where `Record::asked` reads it, so the two reserved words work
+identically and a capture read back from a file still knows which lines were
+questions.
 
 ```rust
 pub const FRAME_LIMIT: usize = 3900;
@@ -159,8 +165,8 @@ pub const FRAME_LIMIT: usize = 3900;
 
 Below `PIPE_BUF` (4096) with room for the header, so every frame is one atomic
 write and concurrent shells cannot interleave. A longer message goes through
-`__bc_split`, which chunks it with `+` and terminates with the real kind,
-reusing one header so every chunk shares a `seq`. That pair is the reassembly
+`__bc_split`, which chunks it with `+` and terminates with `.`, reusing one
+header so every chunk shares a `seq`. That pair is the reassembly
 key in `Wire::accept`.
 
 This is not theoretical: unframed, eight concurrent writers emitting 9000-byte
@@ -178,7 +184,8 @@ pub struct Record { pub words: Vec<String> }
 impl Record {
     pub fn new(words: impl IntoIterator<Item = impl Into<String>>) -> Self;
     pub fn behind(&self, lead: &str) -> Option<&[String]>;
-    pub fn parse_message(literal: &str) -> Result<Self, WireError>;
+    pub fn asked(&self) -> Option<&[String]>;   // behind(ASK_TAG)
+    pub fn parse_message(literal: &str) -> Result<Self, RigError>;
     pub fn to_message(&self) -> String;
 }
 
@@ -187,7 +194,8 @@ impl Record {
 pub fn field<'a>(words: &'a [String], key: &str) -> Option<&'a str>;
 ```
 
-`words` is what the subject passed, in order. The rig reads no position of it.
+`words` is what the subject passed, in order, an empty arglist included. The
+rig reads no position of it.
 `behind` is how a tool opts into the leading-discriminator convention, and
 `field` is a convenience for the commonest payload shape — both entirely
 optional.
@@ -247,16 +255,16 @@ __bc_ask() {
 
     set -- __ASK__ "$@"
     __bc_pack "$@"
-    __bc_ship '?'
+    __bc_ship
 
     local __bc_line
     IFS= read -r __bc_line <&"$__BC__replyfd"
-    declare -a __bc_answer="$__bc_line"
+    local -a __bc_answer="$__bc_line"
     "${__bc_answer[@]}"
 }
 ```
 
-The last line is the whole of continuing: `declare -a` is bash's own parser
+The last line is the whole of continuing: `local -a` is bash's own parser
 unpacking the array literal, and then the shell *runs it*. Its status is the
 function's status, and therefore `BC_INSTR ask`'s.
 
@@ -267,11 +275,6 @@ a `local` in one would not, and is the single thing a step must avoid.
 
 ```rust
 pub const ASK_TAG: &str = "__ASK__";
-
-pub struct Ask {
-    pub stamp: Stamp,
-    pub args: Vec<String>,
-}
 
 /// One command, as an arglist — the same shape a message has.
 pub struct Reply(Vec<String>);
@@ -287,8 +290,10 @@ impl Reply {
 ```
 
 The ask travels up as an ordinary message, so breakpoints appear in the capture
-like anything else; `__ASK__` is stripped before it reaches an answer, because
-it is the transport's word and not the subject's.
+like anything else; `Record::asked` strips `__ASK__` before it reaches an
+answer, because it is the transport's word and not the subject's. It is one of
+exactly two reserved words, the other being `__ORIGIN__`, and both are the
+transport describing itself.
 
 **A reply has no variants and never will.** A bash command array can reach
 anything the shell knows, so the fidelity comes from the vocabulary the prelude
@@ -313,16 +318,16 @@ own streams — anything an answer wants said, the subject says.
 body into the run's workspace and hands back the command that sources it, which
 is the file-free `eval` route's counterpart for anything worth keeping.
 
-## Damage
+## What cannot be read ends the run
 
-```rust
-pub struct Damage { pub reason: String, pub text: String }
-```
+A frame that would not parse, a message that would not decode, a frame without
+its newline, or a message whose last chunk never came: each is a `RigError`,
+raised where it happens. `Wire::finish` is the last of those checks — it takes
+the wire by value and asserts nothing is half-read.
 
-A frame that would not parse, a message that would not decode, and any
-message whose continuation never arrived are carried in `Capture::damage`
-rather than dropped. `Wire::finish` converts leftover framing state into
-damage on the way out.
+There is no side channel of unreadable lines, because a capture that quietly
+lacks something is worth less than no capture. The subject is killed on the way
+out, so nothing is left blocked.
 
 ## See also
 
