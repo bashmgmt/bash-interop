@@ -1,11 +1,42 @@
 # The wire — pipes, frames, messages
 
-`src/bash/rig/wire/`, with its bash in `bash/rig/wire.bash` and
-`bash/rig/control.bash`
+`src/bash/rig/wire/`, with its bash in `bash/rig/wire.bash`
 
 Three things stacked: a named pipe every shell joins by itself, a line-oriented
 frame that carries provenance and routing, and a message that is one bash array
 literal.
+
+## The client surface
+
+One name, two operations:
+
+```bash
+BC_INSTR say a b c      # ship the arglist and return
+BC_INSTR ask a b c      # ship it, block, and continue with the answer
+```
+
+```bash
+BC_INSTR() {
+    local __BC__at="${BASH_SOURCE[1]:-}:${BASH_LINENO[0]:-0}:${FUNCNAME[1]:-main}"
+    local __bc_op=${1:-}
+    shift || return 2
+    case "$__bc_op" in
+        say) __bc_say "$@" ;;
+        ask) __bc_ask "$@" ;;
+        *)   return 2 ;;
+    esac
+}
+```
+
+The leading word is consumed here, in bash, to pick the operation; it never
+reaches Rust, so the arglist an answer sees is what the subject wrote after
+`ask`. That is a different thing from the payload convention described below,
+and it is the only place in the system where a position means something.
+
+`__BC__at` is taken **at the root**, because only here is `FUNCNAME[1]` the
+client rather than one of our own frames. Bash scopes locals dynamically, so
+every subfunction sees it without being handed it. Nothing reports it yet
+beyond the debug log; the mechanism is what a later operation needs.
 
 ## The pipes
 
@@ -48,14 +79,15 @@ Nothing is inherited. Every shell opens the pipe itself, from a path baked into
 the prelude:
 
 ```bash
-__BC__join() {
+__bc_join() {
     local __bc_parent=${__BC__owner:-$PPID}
     exec {__BC__up}>"$__BC__UP"
     __BC__owner=$BASHPID
     __BC__seq=0
     __BC__reply="$__BC__DIR/rep.$BASHPID"
-    declare -a __bc_origin=(__ORIGIN__ parent "$__bc_parent" shlvl "$SHLVL" source "${BASH_SOURCE[-1]:-}")
-    @@POST@@
+    set -- __ORIGIN__ parent "$__bc_parent" shlvl "$SHLVL" source "${BASH_SOURCE[-1]:-}"
+    __bc_pack "$@"
+    __bc_ship '.'
 }
 ```
 
@@ -66,7 +98,7 @@ cannot collide with us.
 Every send is preceded by
 
 ```bash
-[[ $BASHPID == "$__BC__owner" ]] || __BC__join
+[[ $BASHPID == "$__BC__owner" ]] || __bc_join
 ```
 
 which is the fork detector, and it catches both cases that exist:
@@ -81,7 +113,9 @@ which is the fork detector, and it catches both cases that exist:
 *grandparent*. Reading the inherited `__BC__owner` before overwriting it is
 what makes the process forest true.
 
-The guard is never written by hand — see [codegen.md](codegen.md#the-guard).
+The guard sits at the top of `__bc_say` and `__bc_ask`, which are the only two
+places a message is sent from, so there is no way to write through a stale
+descriptor by accident.
 
 ## Frames
 
@@ -109,7 +143,7 @@ pub const FRAME_LIMIT: usize = 3900;
 
 Below `PIPE_BUF` (4096) with room for the header, so every frame is one atomic
 write and concurrent shells cannot interleave. A longer message goes through
-`__BC__split`, which chunks it with `+` and terminates with the real kind,
+`__bc_split`, which chunks it with `+` and terminates with the real kind,
 reusing one header so every chunk shares a `seq`. That pair is the reassembly
 key in `Wire::accept`.
 
@@ -185,15 +219,16 @@ impl FromRecord for Timing {
 
 ## Control
 
-The gateway, in full:
+The ask half, in full:
 
 ```bash
-BC_INSTR() {
-    [[ $BASHPID == "$__BC__owner" ]] || __BC__join
+__bc_ask() {
+    [[ $BASHPID == "$__BC__owner" ]] || __bc_join
     [[ -p $__BC__reply ]] || mkfifo "$__BC__reply"
 
-    declare -a __bc_ask=(__ASK__ "$@")
-    @@ASK@@
+    set -- __ASK__ "$@"
+    __bc_pack "$@"
+    __bc_ship '?'
 
     local __bc_line
     IFS= read -r __bc_line < "$__BC__reply"
@@ -208,8 +243,10 @@ BC_INSTR() {
 
 `read < fifo` blocks in the *open*, until Rust opens the write end — that is
 the rendezvous. `declare -a __bc_answer="$line"` is bash's own parser unpacking
-the array literal, and `source` rather than `eval` means a continuation lands
-in the caller's own scope.
+the array literal, and `source` rather than `eval` means a continuation is
+parsed by bash in the running shell. Assignments in a sourced step are global
+and therefore reach the client; a `local` in one would not, and is the single
+thing a step must avoid.
 
 ```rust
 pub const ASK_TAG: &str = "__ASK__";
@@ -253,4 +290,4 @@ damage on the way out.
 
 - [design.md](design.md) — why a named pipe, why framing, and what it costs
 - [capture.md](capture.md) — what the lines become
-- [codegen.md](codegen.md) — how a send is constructed
+- [source.md](source.md) — the bash this document quotes, and where it lives

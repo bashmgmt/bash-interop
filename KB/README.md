@@ -15,39 +15,41 @@ bidirectional, arglist-based, and knows nothing about what the messages mean.
 KB/mb_resolver/bash/
   values.md       @Q, @A, BashVal/Schema, the two codecs
   wire.md         the pipes, the framing, the message and control protocol
-  codegen.md      BashSrc, Asset, Codegen — producing the injected bash
+  source.md       BashSrc and Asset — the bash a rig injects
   capture.md      Capture and its views: order, shells, the process forest
-  instrument.md   Instrument and Dispatch — a bash contribution as a value
-  run.md          Rig, Outcome, exit status and signals, capture_into
+  run.md          Behaviour, Rig, exit status and signals, capture_into
   design.md       the decisions, and the measurements behind them
   bashcap.md      the reference tool, end to end
+  managebash.md   the other consumer
 ```
 
 The documents mirror the source directories one for one. `values.md` is the
 layer beneath; `design.md` collects the reasoning that would otherwise be
-scattered; `bashcap.md` is a complete worked consumer.
+scattered; the last two are complete worked consumers.
 
 ## Three moments, and no others
 
 | moment | who starts it | what happens |
 |---|---|---|
 | **setup** | the operator, once | the prelude is written and reaches every shell via `BASH_ENV` |
-| **speak** | the subject | it calls a function that ships a message; one-way, cheap |
-| **ask** | the subject | it calls `BC_INSTR`, blocks, and continues with what comes back |
+| **say** | the subject | `BC_INSTR say …` ships a message and returns |
+| **ask** | the subject | `BC_INSTR ask …` ships one, blocks, and continues with what comes back |
 
-Nothing else enters a running shell. The rig installs **no traps**, shadows
+`BC_INSTR` is the only name client code ever calls, and its leading word
+selects which of the two it wants. Nothing else enters a running shell: the
+rig installs **no traps**, shadows
 **no builtin**, exports **no variable**, mutates **no global shell state**, and
 contains **no `eval`** — asserted against the generated text by
 `src/bash/rig/tests/mod.rs::the_prelude_is_non_invasive_and_self_reliant`.
 
 ## A message is an arglist
 
-In both directions. `BC_INSTR a b c` delivers exactly `["a", "b", "c"]`; a
-spoken message is exactly the bash array the instrument built. The rig reads
-no position of either and attaches no meaning to any word.
+In both directions. `BC_INSTR ask a b c` delivers exactly `["a", "b", "c"]`,
+and `BC_INSTR say a b c` puts exactly those three words on the wire. The rig
+reads no position of either and attaches no meaning to any word.
 
-A leading discriminator — `DSL`, `TIMEIT`, `__BASHCAP__` — is a convention a
-tool opts into in one line:
+A leading discriminator — `DSL`, `TIMEIT`, `__BASHCAP__` — is a word the
+*sender* chose, and the decoder opts into in one line:
 
 ```rust
 let words = record.behind("TIMEIT")?;   // None: not this tool's record
@@ -60,10 +62,13 @@ capture. `__ASK__` is stripped before an ask reaches an answer.
 
 ## Adding a tool
 
-One [`Instrument`](instrument.md) for the bash side, one
-[`FromRecord`](wire.md#typed-decoding) for the Rust side. Provenance, global
-ordering, the process forest, subshell capture, concurrent-writer integrity
-and the control channel are inherited.
+One [`Behaviour`](run.md#behaviour) — bash for the subject, and one total
+answer — and one [`FromRecord`](wire.md#typed-decoding) for the Rust side.
+Provenance, global ordering, the process forest, subshell capture,
+concurrent-writer integrity and the control channel are inherited.
+
+A tool that only reports needs no Rust on the bash side at all: its script
+says what it has to say through `BC_INSTR say`.
 
 `tests/example_tests/` builds six of them, smallest first. `make examples`.
 
@@ -71,4 +76,4 @@ and the control channel are inherited.
 
 New to this: **README → run.md → wire.md**, then whichever concern you need.
 Changing the transport: **wire.md → design.md**. Writing a tool:
-**instrument.md → bashcap.md**, with `tests/example_tests/own_tool.rs` open.
+**source.md → bashcap.md**, with `tests/example_tests/own_tool.rs` open.
