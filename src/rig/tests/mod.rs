@@ -1,9 +1,12 @@
 //! Bash-level proofs. Each spawns real bash and covers one mechanism that
 //! cannot be checked by reading generated source.
+//!
+//! Nothing here injects any bash of its own: a fixture says what it has to say
+//! through `BC_INSTR say`, which is the whole client surface.
 
 use std::fs;
 
-use super::{Capture, Dispatch, ExitStatus, Rig};
+use super::{Behaviour, Capture, ExitStatus, Rig};
 
 struct Run {
     capture: Capture,
@@ -13,8 +16,8 @@ struct Run {
 }
 
 impl Run {
-    /// The words behind `lead` in every message that begins with it, in
-    /// global time order.
+    /// The words behind `lead` in every message that begins with it, in global
+    /// time order.
     fn args(&self, lead: &str) -> Vec<String> {
         self.capture
             .chronological()
@@ -35,29 +38,21 @@ impl Run {
     }
 }
 
-fn recorder() -> Dispatch {
-    Dispatch::new().on(&["REC"], "REC")
-}
-
-fn run(files: &[(&str, &str)], build: impl FnOnce(Rig) -> Rig) -> Run {
+fn run(files: &[(&str, &str)]) -> Run {
     let temp = tempfile::tempdir().unwrap();
     for (name, body) in files {
         fs::write(temp.path().join(name), body).unwrap();
     }
     let entry = temp.path().join(files[0].0).to_string_lossy().into_owned();
-    let outcome = build(Rig::new().debug(true)).run(&[entry]).unwrap();
-    let run = Run {
-        capture: outcome.capture,
-        status: outcome.status,
-        debug: outcome.debug,
-        _temp: temp,
-    };
+    let outcome = Rig::new(Behaviour::new()).debug(true).run(&[entry]).unwrap();
+    let run =
+        Run { capture: outcome.capture, status: outcome.status, debug: outcome.debug, _temp: temp };
     assert!(run.capture.damage.is_empty(), "{}", run.report());
     run
 }
 
-fn script(body: &str, build: impl FnOnce(Rig) -> Rig) -> Run {
-    run(&[("main.bash", body)], build)
+fn script(body: &str) -> Run {
+    run(&[("main.bash", body)])
 }
 
 /// Each shell joins the pipe by name, so subshells, command substitutions and
@@ -65,22 +60,19 @@ fn script(body: &str, build: impl FnOnce(Rig) -> Rig) -> Run {
 /// emitting parent, which `$PPID` would get wrong inside a subshell.
 #[test]
 fn every_descendant_shell_reaches_the_wire() {
-    let result = run(
-        &[
-            (
-                "main.bash",
-                r#"
-                REC top
-                ( REC paren )
-                value=$( REC cmdsubst; echo hi )
-                bash "${BASH_SOURCE[0]%/*}/child.bash"
-                REC after
-                "#,
-            ),
-            ("child.bash", "REC child\n( REC grandchild )\n"),
-        ],
-        |rig| rig.with(recorder()),
-    );
+    let result = run(&[
+        (
+            "main.bash",
+            r#"
+            BC_INSTR say REC top
+            ( BC_INSTR say REC paren )
+            value=$( BC_INSTR say REC cmdsubst; echo hi )
+            bash "${BASH_SOURCE[0]%/*}/child.bash"
+            BC_INSTR say REC after
+            "#,
+        ),
+        ("child.bash", "BC_INSTR say REC child\n( BC_INSTR say REC grandchild )\n"),
+    ]);
 
     assert_eq!(
         result.args("REC"),
@@ -95,30 +87,27 @@ fn every_descendant_shell_reaches_the_wire() {
 /// interleave, and anything longer is split and rejoined by `(pid, seq)`.
 #[test]
 fn concurrent_writers_never_interleave() {
-    let result = run(
-        &[
-            (
-                "main.bash",
-                r#"
-                here="${BASH_SOURCE[0]%/*}"
-                for name in a b c d e f g h; do bash "$here/child.bash" "$name" & done
-                wait
-                "#,
-            ),
-            (
-                "child.bash",
-                r#"
-                small="$(printf 'S%.0s' {1..500})"
-                large="$(printf 'L%.0s' {1..9000})"
-                for index in $(seq 1 40); do
-                    REC "$1-$index-$small"
-                    REC "$1-$index-$large"
-                done
-                "#,
-            ),
-        ],
-        |rig| rig.with(recorder()),
-    );
+    let result = run(&[
+        (
+            "main.bash",
+            r#"
+            here="${BASH_SOURCE[0]%/*}"
+            for name in a b c d e f g h; do bash "$here/child.bash" "$name" & done
+            wait
+            "#,
+        ),
+        (
+            "child.bash",
+            r#"
+            small="$(printf 'S%.0s' {1..500})"
+            large="$(printf 'L%.0s' {1..9000})"
+            for index in $(seq 1 40); do
+                BC_INSTR say REC "$1-$index-$small"
+                BC_INSTR say REC "$1-$index-$large"
+            done
+            "#,
+        ),
+    ]);
 
     let records = result.args("REC");
     assert_eq!(records.len(), 8 * 80);
@@ -131,8 +120,8 @@ fn concurrent_writers_never_interleave() {
 
 #[test]
 fn exit_status_is_reported_and_untouched() {
-    assert_eq!(script("REC one\nexit 7", |rig| rig.with(recorder())).status, ExitStatus::Code(7));
-    assert_eq!(script("REC one", |rig| rig.with(recorder())).status, ExitStatus::Code(0));
+    assert_eq!(script("BC_INSTR say REC one\nexit 7").status, ExitStatus::Code(7));
+    assert_eq!(script("BC_INSTR say REC one").status, ExitStatus::Code(0));
 }
 
 /// A signalled subject is reported as signalled rather than flattened into a
@@ -140,7 +129,7 @@ fn exit_status_is_reported_and_untouched() {
 /// installs no handler and needs none, because nothing was being held back.
 #[test]
 fn a_signalled_subject_is_reported_and_loses_nothing() {
-    let result = script("REC before\nkill -TERM $$\nREC never", |rig| rig.with(recorder()));
+    let result = script("BC_INSTR say REC before\nkill -TERM $$\nBC_INSTR say REC never");
     assert_eq!(result.status, ExitStatus::Signal(15));
     assert_eq!(result.status.code(), 143, "128 + signal, the shell convention");
     assert_eq!(result.args("REC"), ["before"], "{}", result.report());
@@ -151,9 +140,7 @@ fn a_signalled_subject_is_reported_and_loses_nothing() {
 #[test]
 fn nothing_is_lost_at_the_end() {
     for _ in 0..10 {
-        let result = script("for i in $(seq 1 200); do REC \"r$i\"; done\nexit 3", |rig| {
-            rig.with(recorder())
-        });
+        let result = script("for i in $(seq 1 200); do BC_INSTR say REC \"r$i\"; done\nexit 3");
         assert_eq!(result.args("REC").len(), 200);
         assert_eq!(result.status, ExitStatus::Code(3));
     }
@@ -164,10 +151,8 @@ fn nothing_is_lost_at_the_end() {
 #[test]
 fn the_prelude_is_non_invasive_and_self_reliant() {
     let temp = tempfile::tempdir().unwrap();
-    let prelude = Rig::new()
-        .with(recorder())
-        .prelude(temp.path(), &temp.path().join("up"))
-        .unwrap();
+    let prelude =
+        Rig::new(Behaviour::new()).prelude(temp.path(), &temp.path().join("up")).unwrap();
     let code: Vec<&str> = prelude
         .as_str()
         .lines()
@@ -175,8 +160,18 @@ fn the_prelude_is_non_invasive_and_self_reliant() {
         .collect();
     let text = code.join("\n");
 
-    for forbidden in ["eval", "trap", "export", "set -"] {
+    for forbidden in ["eval", "trap", "export", "shopt"] {
         assert!(!text.contains(forbidden), "prelude must not contain {forbidden:?}:\n{text}");
+    }
+    // `set --` replaces a function's positional parameters and is scoped to
+    // that call; `set -e`, `set -o` and friends change the shell the subject
+    // is running in, and are what this forbids.
+    for line in &code {
+        let after_set = line.split("set -").nth(1);
+        assert!(
+            after_set.is_none_or(|rest| rest.starts_with('-')),
+            "prelude must not change a shell option: {line}"
+        );
     }
     // A line that *starts* with `NAME=value` and nothing further sets a
     // variable that persists. `IFS= read …` is a command prefix: it binds
@@ -193,15 +188,16 @@ fn the_prelude_is_non_invasive_and_self_reliant() {
         );
     }
 
-    let result = script("trap 'echo mine' EXIT\nIFS=,\nREC one two", |rig| rig.with(recorder()));
+    let result = script("trap 'echo mine' EXIT\nIFS=,\nBC_INSTR say REC one two");
     assert_eq!(result.args("REC"), ["one two"], "{}", result.report());
 }
 
 /// The debug side channel is a file, not the wire, so it still says what
-/// happened when the wire is what went wrong.
+/// happened when the wire is what went wrong — including where each message
+/// was sent from, which `BC_INSTR` takes at its own root.
 #[test]
-fn the_debug_channel_records_what_the_shell_did() {
-    let result = script("REC one\n( REC two )", |rig| rig.with(recorder()));
-    assert!(result.debug.iter().any(|line| line.contains("send .")), "{}", result.report());
+fn the_debug_channel_records_where_each_message_came_from() {
+    let result = script("BC_INSTR say REC one\n( BC_INSTR say REC two )");
+    assert!(result.debug.iter().any(|line| line.contains("main.bash")), "{}", result.report());
     assert!(result.debug.len() >= 3, "{}", result.report());
 }

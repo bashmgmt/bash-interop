@@ -1,17 +1,18 @@
-//! The needle's eye: instruments folded into one bash prelude, evaluated
+//! The needle's eye: one behaviour folded into one bash prelude, evaluated
 //! before user code in every participating shell.
 //!
-//! Three moments and no others. **Setup** writes the prelude. **Speak** is a
-//! function the subject calls to ship a message. **Ask** is `BC_INSTR`, where
-//! the subject blocks for a continuation. Nothing is injected behind the
-//! subject's back, so the rig installs no traps, shadows no builtin, exports
-//! nothing, and mutates no global shell state.
+//! Three moments and no others. **Setup** writes the prelude. **Say** and
+//! **ask** are the two operations `BC_INSTR` offers the subject. Nothing is
+//! injected behind the subject's back, so the rig installs no traps, shadows
+//! no builtin, exports nothing, and mutates no global shell state.
 //!
 //! The prelude is self-reliant: every path it needs is baked into it, so a
 //! shell that sources it needs nothing else.
 
+pub mod behaviour;
 pub mod tool;
 
+pub use behaviour::Behaviour;
 pub use tool::{capture_into, Report, ToolError};
 
 use std::fmt;
@@ -22,19 +23,10 @@ use std::time::Duration;
 use indexmap::IndexMap;
 
 use crate::bash::rig::capture::Capture;
-use crate::bash::rig::codegen::{Asset, AssetError, BashSrc, Codegen};
-use crate::bash::rig::instrument::Instrument;
-use crate::bash::rig::wire::{Ask, Reply, Wire, FRAME_LIMIT};
-
-/// Answers every `BC_INSTR`. Total: a question always gets an answer, and a
-/// client that wants refusal expresses it as an answer the subject runs.
-type Answering = Box<dyn Fn(&Ask, &Capture) -> Reply + Send + Sync>;
-
-/// What a rig with no answer tells a shell that asks anyway.
-const UNANSWERED: i32 = 127;
+use crate::bash::rig::source::{Asset, AssetError, BashSrc};
+use crate::bash::rig::wire::{Wire, FRAME_LIMIT};
 
 const WIRE_SRC: Asset = Asset::new("rig/wire.bash");
-const CONTROL_SRC: Asset = Asset::new("rig/control.bash");
 const SERVICE_INTERVAL: Duration = Duration::from_micros(200);
 
 /// How the wrapped bash process ended. No `Option`: a process that did not
@@ -87,31 +79,16 @@ pub struct Outcome {
 
 #[derive(Default)]
 pub struct Rig {
-    instruments: Vec<Instrument>,
-    answering: Option<Answering>,
+    behaviour: Behaviour,
     env: IndexMap<String, String>,
     debug: bool,
 }
 
 impl Rig {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn with(mut self, instrument: impl Into<Instrument>) -> Self {
-        self.instruments.push(instrument.into());
-        self
-    }
-
-    /// How every `BC_INSTR` is answered. One function, seeing the question
-    /// and everything the run has recorded — a controlled session has nowhere
-    /// else for its state to live, and needs nowhere else.
-    pub fn answering(
-        mut self,
-        answer: impl Fn(&Ask, &Capture) -> Reply + Send + Sync + 'static,
-    ) -> Self {
-        self.answering = Some(Box::new(answer));
-        self
+    /// A rig is its behaviour. Everything that determines what happens is in
+    /// this one argument; what follows only configures the surroundings.
+    pub fn new(behaviour: Behaviour) -> Self {
+        Self { behaviour, env: IndexMap::new(), debug: false }
     }
 
     /// Environment for the client's own code. The rig's own mechanisms use
@@ -127,23 +104,18 @@ impl Rig {
         self
     }
 
-    fn codegen(&self) -> Codegen {
-        Codegen::debugging(self.debug)
-    }
-
+    /// Configuration, the transport, then the behaviour's own bash. Public and
+    /// pure, so what a subject will source can be read without running it.
     pub fn prelude(&self, dir: &Path, up: &Path) -> Result<BashSrc, RigError> {
-        let codegen = self.codegen();
         let quote = |path: &Path| crate::bash::value::emit_scalar(&path.to_string_lossy());
-
-        let mut parts = vec![
+        Ok(BashSrc::seq([
             BashSrc::raw(format!("__BC__UP={}", quote(up))),
             BashSrc::raw(format!("__BC__DIR={}", quote(dir))),
             BashSrc::raw(format!("__BC__limit={FRAME_LIMIT}")),
-            BashSrc::raw(WIRE_SRC.fill(&[("POST", codegen.post_unguarded("__bc_origin").as_str())])?),
-            BashSrc::raw(CONTROL_SRC.fill(&[("ASK", codegen.ask("__bc_ask").as_str())])?),
-        ];
-        parts.extend(self.instruments.iter().map(|one| one.render(&codegen)));
-        Ok(BashSrc::seq(parts))
+            BashSrc::raw(format!("__BC__DEBUG={}", if self.debug { "1" } else { "" })),
+            WIRE_SRC.read()?,
+            self.behaviour.bash().clone(),
+        ]))
     }
 
     /// Runs `bash <argv>` with the prelude injected through `BASH_ENV`, so it
@@ -194,13 +166,7 @@ impl Rig {
             let seen = wire.seen();
             let answers: Vec<_> = asks
                 .iter()
-                .map(|ask| {
-                    let reply = match &self.answering {
-                        Some(answer) => answer(ask, seen),
-                        None => Reply::Continue { status: UNANSWERED },
-                    };
-                    (ask.stamp.pid, reply)
-                })
+                .map(|ask| (ask.stamp.pid, self.behaviour.reply(ask, seen)))
                 .collect();
             for (pid, reply) in answers {
                 wire.answer(pid, reply).map_err(RigError::Reply)?;

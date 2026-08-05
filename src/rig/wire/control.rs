@@ -1,7 +1,7 @@
 //! The control protocol: what a blocked shell asked, and what it is told.
 
 use super::record::Stamp;
-use crate::bash::rig::codegen::BashSrc;
+use crate::bash::rig::source::BashSrc;
 
 /// How `BC_INSTR` labels a question on the wire, so that an ask is
 /// recognisable in the capture. Stripped before the ask reaches an answer:
