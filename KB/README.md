@@ -15,7 +15,7 @@ bidirectional, arglist-based, and knows nothing about what the messages mean.
 KB/mb_resolver/bash/                  src/bash/
   values.md       @Q, @A, BashVal/Schema           value/
   wire.md         pipes, framing, message, reply   rig/wire/
-  source.md       BashSrc, Asset, the prelude      rig/source/
+  source.md       BashSrc and the prelude          rig/source/
   capture.md      Capture, and the process forest  rig/capture/
   run.md          the Rig trait, listen/converse   rig/run/, rig/listen.rs
   design.md       the decisions and measurements

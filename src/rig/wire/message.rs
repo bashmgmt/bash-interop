@@ -1,17 +1,10 @@
-//! The message layer.
-//!
-//! A message is one bash array literal — `( 'a' 'b' … )` — which bash
-//! reconstructs with `declare -a` and Rust with the `QuotedNest` codec. The
-//! same shape travels in both directions, and an element may itself be an
-//! array literal, so structure survives the trip without sentinels.
+//! A message is one bash array literal, the same shape both ways.
 
 use std::fmt;
 
 use crate::bash::rig::error::{Doing, RigError};
 use crate::bash::value::{self, BashCodec, BashVal, QuotedNest, Schema};
 
-/// Microseconds since the Unix epoch, from bash `$EPOCHREALTIME`. Both radix
-/// characters are accepted, so no locale has to be forced on the shell.
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct Micros(pub u64);
 
@@ -40,7 +33,6 @@ impl fmt::Display for Pid {
     }
 }
 
-/// Provenance, stamped by the sending shell. The only thing the rig adds.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub struct Stamp {
     pub at: Micros,
@@ -54,12 +46,8 @@ impl Stamp {
     }
 }
 
-/// How `BC_INSTR ask` marks a question; one of the two reserved words, the
-/// other being [`ORIGIN_TAG`](crate::bash::rig::ORIGIN_TAG).
 pub const ASK_TAG: &str = "__ASK__";
 
-/// The words the subject passed, in order, an empty arglist included. The rig
-/// reads no position of them.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Record {
     pub words: Vec<String>,
@@ -70,7 +58,6 @@ impl Record {
         Self { words: words.into_iter().map(Into::into).collect() }
     }
 
-    /// The words after `lead`, if that is how they begin.
     pub fn behind(&self, lead: &str) -> Option<&[String]> {
         match self.words.split_first() {
             Some((first, rest)) if first == lead => Some(rest),
@@ -78,7 +65,6 @@ impl Record {
         }
     }
 
-    /// What the subject passed after `ask`; `Some` iff a shell is blocked.
     pub fn asked(&self) -> Option<&[String]> {
         self.behind(ASK_TAG)
     }
@@ -96,8 +82,12 @@ impl Record {
     }
 
     pub fn to_message(&self) -> String {
-        format!("({})", value::emit_q_words(&self.words))
+        literal(&self.words)
     }
+}
+
+pub(crate) fn literal(words: &[String]) -> String {
+    format!("({})", value::emit_q_words(words))
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -108,15 +98,12 @@ pub struct Stamped<T> {
 
 pub type Line = Stamped<Record>;
 
-/// Typed decode of one record family. `None` declines the record, which is
-/// what lets several tools share one wire.
 pub trait FromRecord: Sized {
     type Err;
 
     fn from_record(record: &Record) -> Option<Result<Self, Self::Err>>;
 }
 
-/// Value of the first `key value` pair with this key.
 pub fn field<'a>(words: &'a [String], key: &str) -> Option<&'a str> {
     words.chunks_exact(2).find(|pair| pair[0] == key).map(|pair| pair[1].as_str())
 }
@@ -125,8 +112,6 @@ pub fn field<'a>(words: &'a [String], key: &str) -> Option<&'a str> {
 mod tests {
     use super::*;
 
-    /// A message survives everything bash can put in a word, and nesting
-    /// survives because an element may itself be a literal.
     #[test]
     fn messages_round_trip() {
         let inner = Record::new(["INNER", "x y"]).to_message();

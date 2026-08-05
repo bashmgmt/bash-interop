@@ -5,7 +5,6 @@ use std::collections::HashMap;
 use super::{Capture, Origin};
 use crate::bash::rig::wire::{FromRecord, Line, Pid, Stamp};
 
-/// The `__ORIGIN__` that opened a shell, and everything it wrote after.
 #[derive(Clone, Debug)]
 pub struct Shell<'a> {
     pub pid: Pid,
@@ -21,8 +20,6 @@ pub struct ShellNode<'a> {
 }
 
 impl Capture {
-    /// A record tagged `__ORIGIN__` opens a shell; later records join the
-    /// most recent shell with the same pid.
     pub fn shells(&self) -> Vec<Shell<'_>> {
         let mut shells: Vec<Shell<'_>> = Vec::new();
         let mut newest: HashMap<Pid, usize> = HashMap::new();
@@ -46,8 +43,6 @@ impl Capture {
         shells
     }
 
-    /// Roots are shells whose parent never emitted. A child attaches to the
-    /// newest shell of its parent pid that opened no later than it did.
     pub fn forest(&self) -> Vec<ShellNode<'_>> {
         let shells = self.shells();
         let mut children: HashMap<usize, Vec<usize>> = HashMap::new();

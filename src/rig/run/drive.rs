@@ -1,8 +1,4 @@
-//! Driving one run: `start`, then every event, then `ended`.
-//!
-//! The subject's exit is a `pidfd`, so one `poll` waits on both it and the
-//! pipe; there is no interval and no timer. Every exit path from here kills
-//! the subject's process group.
+//! Driving one run: start, every event, then ended.
 
 use std::ffi::OsStr;
 use std::fs;
@@ -36,7 +32,6 @@ pub(crate) fn run<R: Rig, S: AsRef<OsStr>>(rig: &R, argv: &[S]) -> Result<R::Out
             Ready::Exited => break,
         }
     }
-    // Whatever the subject said just before it went is still in the pipe.
     serve(rig, &mut session, &mut wire, dir)?;
     wire.finish()?;
 
@@ -44,7 +39,6 @@ pub(crate) fn run<R: Rig, S: AsRef<OsStr>>(rig: &R, argv: &[S]) -> Result<R::Out
     rig.ended(session, status.into())
 }
 
-/// `say` goes one way and `ask` the other, exactly as in bash.
 fn serve<R: Rig>(
     rig: &R,
     session: &mut R::Session,
@@ -68,8 +62,6 @@ enum Ready {
     Exited,
 }
 
-/// Blocks until the subject says something or ends. Nothing else can wake it,
-/// so there is no interval to tune and nothing to miss.
 fn wait_for(pipe: RawFd, exit: RawFd) -> Result<Ready, RigError> {
     loop {
         let mut watching = [
@@ -85,8 +77,6 @@ fn wait_for(pipe: RawFd, exit: RawFd) -> Result<Ready, RigError> {
             return Err(cause).doing(|| "waiting for the subject".into());
         }
 
-        // The pipe first: what the subject said before exiting is still in it,
-        // and it has to be read before the run is allowed to end.
         if watching[0].revents & libc::POLLIN != 0 {
             return Ok(Ready::Spoke);
         }
@@ -96,8 +86,6 @@ fn wait_for(pipe: RawFd, exit: RawFd) -> Result<Ready, RigError> {
     }
 }
 
-/// The subject, its process group, and the descriptor that becomes readable
-/// when it ends.
 struct Subject {
     child: Option<Child>,
     group: libc::pid_t,
@@ -114,8 +102,6 @@ impl Subject {
             command.env(key, value);
         }
 
-        // Its own group: killing only the direct child would leave a
-        // grandchild that asked blocked on its reply pipe forever.
         command.process_group(0);
 
         let child = command.spawn().doing(|| {
@@ -132,8 +118,6 @@ impl Subject {
         self.exit.as_raw_fd()
     }
 
-    /// Kills the group, then reaps. In that order: an unreaped subject's
-    /// group cannot have been recycled, so the signal reaches nothing else.
     fn finish(&mut self) -> io::Result<std::process::ExitStatus> {
         self.release();
         match self.child.take() {
@@ -165,7 +149,6 @@ fn pidfd(pid: libc::pid_t) -> io::Result<OwnedFd> {
     Ok(unsafe { OwnedFd::from_raw_fd(raw as RawFd) })
 }
 
-/// Where a run keeps its files, once the description has been acted on.
 enum Site {
     Temporary(tempfile::TempDir),
     Kept(PathBuf),

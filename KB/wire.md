@@ -1,21 +1,15 @@
 # The wire — pipes, frames, messages
 
-`src/bash/rig/wire/`, with its bash in `bash/rig/wire.bash`
+`src/bash/rig/wire/`, with its bash in `src/bash/rig/source/wire.bash`
 
-Three things stacked: a named pipe every shell joins by itself, a line-oriented
-frame that carries provenance and routing, and a message that is one bash array
-literal.
+A named pipe every shell joins by itself, a line-oriented frame carrying
+provenance and routing, and a message that is one bash array literal.
 
-One rule shapes all of it:
-
-> **Every pipe is held open at both ends by its owner.**
-
-The `up` pipe is the operator's, so the operator holds it `O_RDWR` — the open
-never blocks, a shell exiting never looks like end-of-stream, and the reader
-can wait on it with `poll` rather than a timer. A shell's reply pipe is that
-shell's, and it holds it `O_RDWR` for the same reasons in mirror, which is why
-the operator's write never blocks and never sees `ENXIO`. Breaking that
-symmetry on the reply pipe used to cost 200 µs per ask.
+**Every pipe is held open at both ends by its owner.** The operator holds `up`
+`O_RDWR`, so the open never blocks, a shell exiting never looks like
+end-of-stream, and the reader waits with `poll` rather than a timer. A shell
+holds its own reply pipe `O_RDWR` for the same reasons, so the operator's write
+never blocks and never sees `ENXIO`.
 
 ## The client surface
 
@@ -39,19 +33,15 @@ BC_INSTR() {
 }
 ```
 
-The leading word is consumed here, in bash, to pick the operation; it never
-reaches Rust, so the arglist an answer sees is what the subject wrote after
-`ask`. That is a different thing from the payload convention described below,
-and it is the only place in the system where a position means something.
+The leading word is consumed in bash and never reaches Rust, so the arglist an
+answer sees is what the subject wrote after `ask`.
 
-`__BC__at` is taken **at the root**, because only here is `FUNCNAME[1]` the
-client rather than one of our own frames. Bash scopes locals dynamically, so
-every subfunction sees it without being handed it. Nothing reports it yet
-beyond the debug log; the mechanism is what a later operation needs.
+`__BC__at` is taken one frame out, in `__bc_where`, because only there is
+`FUNCNAME[2]` the client rather than one of our own frames. Bash scopes locals
+dynamically, so every subfunction sees it without being handed it. Only the
+debug log reads it, which is why it is taken only when debugging.
 
 ## The pipes
-
-Two kinds, and the difference matters.
 
 | | `up` — one, shared | `rep.<pid>` — one per asking shell |
 |---|---|---|

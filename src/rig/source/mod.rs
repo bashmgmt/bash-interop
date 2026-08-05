@@ -1,15 +1,11 @@
-//! The bash a rig injects: fragments that compose, the files they come from,
-//! and the prelude they are folded into.
+//! The bash a rig injects.
 
-mod asset;
 mod prelude;
 
-pub use asset::Asset;
 pub use prelude::prelude;
 
 use std::fmt;
 
-/// Bash source that composes without quoting hazards.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BashSrc(String);
 
@@ -18,7 +14,6 @@ impl BashSrc {
         Self(text.into())
     }
 
-    /// The only way bash contributions combine. Empty parts are dropped.
     pub fn seq(parts: impl IntoIterator<Item = BashSrc>) -> Self {
         Self(
             parts

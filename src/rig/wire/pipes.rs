@@ -1,8 +1,4 @@
 //! One named pipe, joined by name by every shell.
-//!
-//! Every pipe is held open at both ends by its owner, so an open never blocks,
-//! a shell exiting never looks like end-of-stream, and a write never sees
-//! `ENXIO`. [`Wire::drain`] hands back what it read and remembers nothing.
 
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
@@ -12,7 +8,7 @@ use std::os::fd::{AsRawFd, RawFd};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
-use super::{Line, Pid, Reassembly, Record, Reply, DELIMITER};
+use super::{framing, Line, Pid, Reassembly, Reply};
 use crate::bash::rig::error::{Doing, RigError};
 
 const READ_CHUNK: usize = 64 * 1024;
@@ -32,8 +28,6 @@ impl Wire {
 
         nix::unistd::mkfifo(&up_path, nix::sys::stat::Mode::S_IRWXU).doing(named)?;
 
-        // Read-write: the open never blocks and no shell exiting looks like
-        // end-of-stream. Non-blocking: the caller waits with `poll`.
         let reader = OpenOptions::new()
             .read(true)
             .write(true)
@@ -54,14 +48,10 @@ impl Wire {
         &self.up_path
     }
 
-    /// The descriptor to wait on. Readable exactly when the subject has
-    /// said something.
     pub fn reader(&self) -> RawFd {
         self.reader.as_raw_fd()
     }
 
-    /// Every message the pipe currently holds. A shell blocked on an answer
-    /// is one whose record [`asked`](Record::asked).
     pub fn drain(&mut self) -> Result<Vec<Line>, RigError> {
         let mut buffer = [0u8; READ_CHUNK];
         let mut heard = Vec::new();
@@ -83,8 +73,6 @@ impl Wire {
         Ok(heard)
     }
 
-    /// The shell holds both ends of its reply pipe, so this never blocks and
-    /// the descriptor is opened once however many times that shell asks.
     pub fn answer(&mut self, pid: Pid, reply: Reply) -> Result<(), RigError> {
         let Self { dir, replies, .. } = self;
 
@@ -100,11 +88,7 @@ impl Wire {
             }
         };
 
-        // The message, then the delimiter: one write, but the newline is
-        // framing rather than something the message carries.
-        let mut framed = Record::new(reply.words().to_vec()).to_message();
-        framed.push(DELIMITER);
-
+        let framed = framing::frame(&reply.to_message());
         pipe.write_all(framed.as_bytes()).doing(|| format!("answering pid {pid}"))
     }
 

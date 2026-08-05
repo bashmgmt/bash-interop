@@ -1,5 +1,4 @@
-//! Where a shell came from: an ordinary record, written by the wire as the
-//! preamble to a shell's first utterance.
+//! Where a shell came from.
 
 use std::fmt;
 use std::path::PathBuf;
@@ -10,13 +9,10 @@ pub const ORIGIN_TAG: &str = "__ORIGIN__";
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Origin {
-    /// The shell that emitted before this one, which a subshell has and the
-    /// first shell of a run does not.
     pub parent: Option<Pid>,
 
     pub shlvl: u32,
 
-    /// `BASH_SOURCE[-1]`, absent under `bash -c`.
     pub source: Option<PathBuf>,
 }
 

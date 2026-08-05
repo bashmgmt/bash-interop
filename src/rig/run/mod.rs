@@ -15,35 +15,19 @@ use crate::bash::rig::error::RigError;
 use crate::bash::rig::source::BashSrc;
 use crate::bash::rig::wire::{Line, Reply};
 
-/// How a run is performed: the description, and the hooks that drive it.
-///
-/// A rig is never mutated by running — `&self` throughout. Everything that
-/// changes belongs to `Session`, a plain struct the rig allocates in
-/// [`start`](Rig::start), borrows through the run, and consumes in
-/// [`ended`](Rig::ended). Because both are in scope at every hook, a session
-/// never has to borrow its description.
 pub trait Rig {
-    /// What one run needs while it runs.
     type Session;
 
-    /// What a finished run comes to.
     type Output;
 
-    /// How a run is configured, and what it starts with.
     fn start(&self) -> Result<(Setup, Self::Session), RigError>;
 
-    /// `BC_INSTR say`: nothing is waiting, and whether to keep it is yours.
     fn heard(&self, session: &mut Self::Session, said: Line) -> Result<(), RigError>;
 
-    /// `BC_INSTR ask`: what the blocked shell runs next.
     fn answer(&self, session: &mut Self::Session, asked: &Turn) -> Result<Reply, RigError>;
 
-    /// The subject is gone. Release what needs releasing: a failure here is a
-    /// failure of the run rather than something dropped on the floor.
     fn ended(&self, session: Self::Session, status: ExitStatus) -> Result<Self::Output, RigError>;
 
-    /// Runs `bash <argv>` until the subject is gone, and does not let it
-    /// outlive this call by any route.
     fn run<S: AsRef<OsStr>>(&self, argv: &[S]) -> Result<Self::Output, RigError>
     where
         Self: Sized,
@@ -52,7 +36,6 @@ pub trait Rig {
     }
 }
 
-/// How a run starts. A pure value: no I/O happens until the runtime uses it.
 #[derive(Clone, Default)]
 pub struct Setup {
     pub bash: BashSrc,
@@ -71,7 +54,6 @@ impl Setup {
         self
     }
 
-    /// For the subject's code only; the prelude carries its own config.
     pub fn env(mut self, key: &str, value: &str) -> Self {
         self.env.push((key.to_string(), value.to_string()));
         self
@@ -82,14 +64,12 @@ impl Setup {
         self
     }
 
-    /// Traces the bash side into `debug.log`; pair with [`Workspace::At`].
     pub fn debug(mut self, on: bool) -> Self {
         self.debug = on;
         self
     }
 }
 
-/// Where a run keeps its pipe, its prelude, and anything a step wrote.
 #[derive(Clone, Default, PartialEq, Eq, Debug)]
 pub enum Workspace {
     #[default]
@@ -98,7 +78,6 @@ pub enum Workspace {
     At(PathBuf),
 }
 
-/// How the wrapped bash process ended.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum ExitStatus {
     Code(i32),
@@ -106,7 +85,6 @@ pub enum ExitStatus {
 }
 
 impl ExitStatus {
-    /// Shell convention: a signalled process reports `128 + signal`.
     pub fn code(self) -> i32 {
         match self {
             Self::Code(code) => code,

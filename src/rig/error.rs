@@ -1,11 +1,10 @@
-//! The one way out: a run yields its `Output` or this.
+//! One error for everything that stops a run.
 
 use std::error::Error;
 use std::fmt;
 
 type Cause = Box<dyn Error + Send + Sync>;
 
-/// What was being attempted, and what went wrong doing it.
 #[derive(Debug)]
 pub struct RigError {
     doing: String,
@@ -30,8 +29,6 @@ impl Error for RigError {
     }
 }
 
-/// `….doing(|| "reading the frobnicator")?` — says what the failure was in
-/// aid of, lazily, and turns anything at all into a [`RigError`].
 pub trait Doing<T> {
     fn doing(self, what: impl FnOnce() -> String) -> Result<T, RigError>;
 }

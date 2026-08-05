@@ -1,5 +1,4 @@
-//! Everything read from a run, flat and in read order. Ordering, per-shell
-//! grouping, the process forest and typed decoding are all views over it.
+//! What a rig kept, in arrival order.
 
 mod forest;
 mod origin;
@@ -15,8 +14,6 @@ pub struct Capture {
 }
 
 impl Capture {
-    /// Records that came from no shell. Stamped pid 0, so their provenance
-    /// never claims one produced them.
     pub fn literal(records: impl IntoIterator<Item = Record>) -> Self {
         Self {
             lines: records
@@ -30,7 +27,6 @@ impl Capture {
         }
     }
 
-    /// Order is a view, so this only appends.
     pub fn concat(parts: impl IntoIterator<Item = Capture>) -> Self {
         Self { lines: parts.into_iter().flat_map(|part| part.lines).collect() }
     }
@@ -41,9 +37,8 @@ impl Capture {
         ordered
     }
 
-    /// Every record the family recognised, successes and failures alike.
     pub fn of<T: FromRecord>(&self) -> impl Iterator<Item = Stamped<Result<T, T::Err>>> + '_ {
-        self.chronological().into_iter().filter_map(|line| {
+        self.lines.iter().filter_map(|line| {
             T::from_record(&line.value).map(|value| Stamped { stamp: line.stamp, value })
         })
     }
@@ -70,8 +65,6 @@ mod tests {
         line(at, pid, 0, ORIGIN_TAG, &["parent", parent, "shlvl", "5", "source", "/s.bash"])
     }
 
-    /// Ordering, grouping, pid reuse, and the forest share one fixture: two
-    /// children under a root, plus a later shell reusing the root's pid.
     #[test]
     fn views_over_one_capture() {
         let capture = Capture {
