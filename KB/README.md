@@ -17,7 +17,7 @@ KB/mb_resolver/bash/
   wire.md         the pipes, the framing, the message and control protocol
   source.md       BashSrc and Asset — the bash a rig injects
   capture.md      Capture and its views: order, shells, the process forest
-  run.md          Behaviour, Rig, exit status and signals, capture_into
+  run.md          the Rig trait, the session, signals, capture_into
   design.md       the decisions, and the measurements behind them
   bashcap.md      the reference tool, end to end
   managebash.md   the other consumer
@@ -55,6 +55,12 @@ A leading discriminator — `DSL`, `TIMEIT`, `__BASHCAP__` — is a word the
 let words = record.behind("TIMEIT")?;   // None: not this tool's record
 ```
 
+The **answer** is an arglist too, and it is a command the shell runs. That is
+the whole of continuing: `["return", "1"]`, `["source", path]`,
+`["declare", "-g", "x=1"]`, `["exit", "9"]`, or any word the prelude defined.
+There are no variants, because a bash command array can already reach anything
+the shell knows.
+
 Two words are reserved, and both are the transport describing itself rather
 than a tool describing its payload: `__ORIGIN__`, which opens each shell's
 stream, and `__ASK__`, which labels a question so it is visible in the
@@ -62,10 +68,11 @@ capture. `__ASK__` is stripped before an ask reaches an answer.
 
 ## Adding a tool
 
-One [`Behaviour`](run.md#behaviour) — bash for the subject, and one total
-answer — and one [`FromRecord`](wire.md#typed-decoding) for the Rust side.
-Provenance, global ordering, the process forest, subshell capture,
-concurrent-writer integrity and the control channel are inherited.
+One [`Rig`](run.md#a-rig-is-two-functions) — `setup` says how a run starts,
+`answer` says what a shell that asked runs next — and one
+[`FromRecord`](wire.md#typed-decoding) for the Rust side. Provenance, global
+ordering, the process forest, subshell capture, concurrent-writer integrity and
+the control channel are inherited.
 
 A tool that only reports needs no Rust on the bash side at all: its script
 says what it has to say through `BC_INSTR say`.

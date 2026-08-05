@@ -6,6 +6,17 @@ Three things stacked: a named pipe every shell joins by itself, a line-oriented
 frame that carries provenance and routing, and a message that is one bash array
 literal.
 
+One rule shapes all of it:
+
+> **Every pipe is held open at both ends by its owner.**
+
+The `up` pipe is the operator's, so the operator holds it `O_RDWR` — the open
+never blocks, a shell exiting never looks like end-of-stream, and the reader
+can wait on it with `poll` rather than a timer. A shell's reply pipe is that
+shell's, and it holds it `O_RDWR` for the same reasons in mirror, which is why
+the operator's write never blocks and never sees `ENXIO`. Breaking that
+symmetry on the reply pipe used to cost 200 µs per ask.
+
 ## The client surface
 
 One name, two operations:
@@ -44,19 +55,25 @@ Two kinds, and the difference matters.
 
 | | `up` — one, shared | `rep.<pid>` — one per asking shell |
 |---|---|---|
-| created by | Rust, in `Wire::create` | the asking shell, `mkfifo`, on its first ask |
-| Rust holds | `O_RDWR`, `O_NONBLOCK`, 1 MiB buffer | opens `O_WRONLY\|O_NONBLOCK` per answer |
-| bash holds | `exec {__BC__up}>"$__BC__UP"` | `read -r … < "$__BC__reply"` |
+| created by | the operator, in `Wire::create` | the asking shell, on its first ask |
+| the operator holds | `O_RDWR`, `O_NONBLOCK`, 1 MiB buffer | `O_WRONLY`, opened once per shell and cached |
+| the shell holds | `exec {__BC__up}>"$__BC__UP"` | `exec {__BC__replyfd}<>"$__BC__reply"` |
 
 ```rust
 impl Wire {
     pub fn create(dir: &Path) -> std::io::Result<Self>;
     pub fn up_path(&self) -> &Path;
-    pub fn drain(&mut self) -> std::io::Result<()>;
+
+    /// The descriptor to wait on. Readable exactly when the subject has said
+    /// something.
+    pub fn reader(&self) -> RawFd;
+
+    /// Takes everything the pipe currently holds, and hands back whoever is
+    /// now blocked waiting for an answer.
+    pub fn drain(&mut self) -> std::io::Result<Vec<Ask>>;
+
     pub fn seen(&self) -> &Capture;
-    pub fn take_asks(&mut self) -> Vec<Ask>;
     pub fn answer(&mut self, pid: Pid, reply: Reply) -> std::io::Result<()>;
-    pub fn flush(&mut self) -> std::io::Result<()>;
     pub fn finish(self) -> Capture;
 }
 ```
@@ -66,12 +83,11 @@ Each flag earns its place:
 - **`O_RDWR` on the reader.** A FIFO opened read-only blocks until a writer
   appears, and returns end-of-file once the last writer closes. Holding a write
   end ourselves means `create` never blocks, the writer count never reaches
-  zero — so a shell exiting never looks like end-of-stream — and bash's
-  write-only `exec` never blocks either, because a reader already exists.
-- **`O_NONBLOCK` on the reader.** `drain` runs inside a poll loop; it must
-  return `WouldBlock` rather than park the loop.
-- **1 MiB pipe buffer.** The subject keeps writing between service passes
-  (200 µs apart) without stalling on a full pipe.
+  zero, and bash's write-only `exec` never blocks either.
+- **`O_NONBLOCK` on the reader.** The caller decides when to wait, with `poll`;
+  `drain` reads until the pipe is empty and returns.
+- **1 MiB pipe buffer.** The subject keeps writing while the operator is busy
+  answering someone else, without stalling on a full pipe.
 
 ### Joining, and the fork guard
 
@@ -224,38 +240,49 @@ The ask half, in full:
 ```bash
 __bc_ask() {
     [[ $BASHPID == "$__BC__owner" ]] || __bc_join
-    [[ -p $__BC__reply ]] || mkfifo "$__BC__reply"
+    [[ -n $__BC__replyfd ]] || {
+        [[ -p $__BC__reply ]] || mkfifo "$__BC__reply"
+        exec {__BC__replyfd}<>"$__BC__reply"
+    }
 
     set -- __ASK__ "$@"
     __bc_pack "$@"
     __bc_ship '?'
 
     local __bc_line
-    IFS= read -r __bc_line < "$__BC__reply"
+    IFS= read -r __bc_line <&"$__BC__replyfd"
     declare -a __bc_answer="$__bc_line"
-
-    case "${__bc_answer[0]}" in
-        source) source "${__bc_answer[1]}" ;;
-        *)      return "${__bc_answer[1]}" ;;
-    esac
+    "${__bc_answer[@]}"
 }
 ```
 
-`read < fifo` blocks in the *open*, until Rust opens the write end — that is
-the rendezvous. `declare -a __bc_answer="$line"` is bash's own parser unpacking
-the array literal, and `source` rather than `eval` means a continuation is
-parsed by bash in the running shell. Assignments in a sourced step are global
-and therefore reach the client; a `local` in one would not, and is the single
-thing a step must avoid.
+The last line is the whole of continuing: `declare -a` is bash's own parser
+unpacking the array literal, and then the shell *runs it*. Its status is the
+function's status, and therefore `BC_INSTR ask`'s.
+
+This shell holds both ends of its own reply pipe, so the descriptor is opened
+once however many times it asks, and `read` blocks on data rather than on the
+open. Assignments in a sourced step are global and therefore reach the client;
+a `local` in one would not, and is the single thing a step must avoid.
 
 ```rust
 pub const ASK_TAG: &str = "__ASK__";
 
-pub struct Ask { pub stamp: Stamp, pub args: Vec<String> }
+pub struct Ask {
+    pub stamp: Stamp,
+    pub args: Vec<String>,
+}
 
-pub enum Reply {
-    Continue { status: i32 },
-    Source { body: BashSrc },
+/// One command, as an arglist — the same shape a message has.
+pub struct Reply(Vec<String>);
+
+impl Reply {
+    pub fn of(words: impl IntoIterator<Item = impl Into<String>>) -> Self;
+    pub fn nothing() -> Self;          // [":"]
+    pub fn status(code: i32) -> Self;  // ["return", "<code>"]
+    pub fn source(path: &Path) -> Self;
+    pub fn eval(code: &str) -> Self;
+    pub fn words(&self) -> &[String];
 }
 ```
 
@@ -263,17 +290,28 @@ The ask travels up as an ordinary message, so breakpoints appear in the capture
 like anything else; `__ASK__` is stripped before it reaches an answer, because
 it is the transport's word and not the subject's.
 
-`Reply` has two variants because a blocked shell can be let go two ways: with a
-status, or with code. There is no third for refusal — refusal is code that says
-what went wrong and returns non-zero, written by the client, which is why the
-rig never writes to the subject's own streams.
+**A reply has no variants and never will.** A bash command array can reach
+anything the shell knows, so the fidelity comes from the vocabulary the prelude
+defined rather than from cases here:
 
-`Wire::answer` writes a `Source` body to `step.<pid>.<n>.bash` so the shell only
-ever has to source a path. `Wire::flush` opens the reply pipe
-`O_WRONLY|O_NONBLOCK`; a shell that has not reached its `read` yet yields
-`ENXIO`, and that answer stays queued for the next pass rather than stalling
-the loop. The shell `mkfifo`s **before** sending, so the pipe always exists by
-the time Rust sees the question.
+```text
+[":"]                                    nothing
+["return", "1"]                          resume with a status
+["exit", "9"]                            end the shell
+["source", "/…/step.bash"]               run code
+["declare", "-g", "picked=elderberry"]   assign
+["eval", "picked=x; note ready"]         interim, for debugging
+["WITH_BASHCAP", "-BCS:probe", "deploy"] a call into the tool's own words
+```
+
+There is no "unanswered" and no "refused": a rig with nothing useful to say
+answers `["return", "127"]`, and a refusal is a command that says what went
+wrong and returns non-zero. That is why the rig never writes to the subject's
+own streams — anything an answer wants said, the subject says.
+
+[`Turn::source`](run.md#turn--one-question-and-everything-around-it) writes a
+body into the run's workspace and hands back the command that sources it, which
+is the file-free `eval` route's counterpart for anything worth keeping.
 
 ## Damage
 
