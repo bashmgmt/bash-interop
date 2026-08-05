@@ -23,6 +23,6 @@ mod tests;
 
 pub use capture::{Capture, Origin, Shell, ShellNode};
 pub use error::{Doing, RigError};
-pub use run::{ExitStatus, Outcome, Report, Rig, Rigging, Setup, Turn, Workspace};
+pub use run::{prelude, ExitStatus, Rig, Setup, Turn, Workspace};
 pub use source::{Asset, BashSrc};
 pub use wire::{field, FromRecord, Line, Micros, Pid, Record, Reply, Stamp, Stamped, ASK_TAG};

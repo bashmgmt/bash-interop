@@ -1,67 +1,53 @@
 //! What a rig is, and what running one means.
 
-pub mod report;
-pub mod rigging;
 pub mod session;
 pub mod turn;
 
-pub use report::Report;
-pub use rigging::Rigging;
 pub use turn::Turn;
 
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use serde::Serialize;
-
-use crate::bash::rig::capture::Capture;
 use crate::bash::rig::error::RigError;
 use crate::bash::rig::source::{Asset, BashSrc};
-use crate::bash::rig::wire::{FromRecord, Reply, FRAME_LIMIT};
+use crate::bash::rig::wire::{Line, Reply, FRAME_LIMIT};
 
 const WIRE_SRC: Asset = Asset::new("rig/wire.bash");
 
-/// Two functions a tool writes; everything a rig *does* is derived from them.
+/// Three functions, mirroring the three moments `BC_INSTR` offers a shell.
 pub trait Rig {
     /// How a run starts.
     fn setup(&self) -> Result<Setup, RigError>;
 
-    /// What the shell runs next.
-    fn answer(&mut self, turn: &Turn) -> Result<Reply, RigError>;
+    /// `BC_INSTR say`: nothing is waiting, and whether to keep it is yours.
+    fn heard(&mut self, said: Line) -> Result<(), RigError>;
 
-    /// The bash a subject will source, without running anything.
-    fn prelude(&self, dir: &Path, up: &Path) -> Result<BashSrc, RigError> {
-        let setup = self.setup()?;
-        let quote = |path: &Path| crate::bash::value::emit_scalar(&path.to_string_lossy());
+    /// `BC_INSTR ask`: what the blocked shell runs next.
+    fn answer(&mut self, asked: &Turn) -> Result<Reply, RigError>;
 
-        Ok(BashSrc::seq([
-            BashSrc::raw(format!("__BC__UP={}", quote(up))),
-            BashSrc::raw(format!("__BC__DIR={}", quote(dir))),
-            BashSrc::raw(format!("__BC__limit={FRAME_LIMIT}")),
-            BashSrc::raw(format!("__BC__DEBUG={}", if setup.debug { "1" } else { "" })),
-            WIRE_SRC.read()?,
-            setup.bash,
-        ]))
-    }
-
-    /// Runs `bash <argv>`, answering until the subject is gone. The subject
-    /// does not outlive this call by either route.
-    fn run(&mut self, argv: &[String]) -> Result<Outcome, RigError>
+    /// Runs `bash <argv>` until the subject is gone, and does not let it
+    /// outlive this call by any route. The status is the only thing the core
+    /// learns that `heard` and `answer` did not already hand over.
+    fn run(&mut self, argv: &[String]) -> Result<ExitStatus, RigError>
     where
         Self: Sized,
     {
         session::run(self, argv)
     }
+}
 
-    /// Writes every decoded `T`, with its provenance, as one JSON object per
-    /// line. The destination is always given, never guessed.
-    fn capture_into<T>(&mut self, argv: &[String], into: &Path) -> Result<Report, RigError>
-    where
-        T: FromRecord + Serialize,
-        Self: Sized,
-    {
-        report::capture_into::<T, Self>(self, argv, into)
-    }
+/// The bash every participating shell sources, folded in this order.
+pub fn prelude(setup: &Setup, dir: &Path, up: &Path) -> Result<BashSrc, RigError> {
+    let quote = |path: &Path| crate::bash::value::emit_scalar(&path.to_string_lossy());
+
+    Ok(BashSrc::seq([
+        BashSrc::raw(format!("__BC__UP={}", quote(up))),
+        BashSrc::raw(format!("__BC__DIR={}", quote(dir))),
+        BashSrc::raw(format!("__BC__limit={FRAME_LIMIT}")),
+        BashSrc::raw(format!("__BC__DEBUG={}", if setup.debug { "1" } else { "" })),
+        WIRE_SRC.read()?,
+        setup.bash.clone(),
+    ]))
 }
 
 /// How a run starts. A pure value: no I/O happens until the runtime uses it.
@@ -146,12 +132,4 @@ impl From<std::process::ExitStatus> for ExitStatus {
             (None, None) => Self::Signal(0),
         }
     }
-}
-
-/// Everything a finished run has to say.
-#[must_use]
-#[derive(Debug)]
-pub struct Outcome {
-    pub capture: Capture,
-    pub status: ExitStatus,
 }

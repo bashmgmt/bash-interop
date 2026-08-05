@@ -7,15 +7,12 @@
 
 use std::fmt;
 
-use serde::{Deserialize, Serialize};
-
 use crate::bash::rig::error::{Doing, RigError};
 use crate::bash::value::{self, BashCodec, BashVal, QuotedNest, Schema};
 
 /// Microseconds since the Unix epoch, from bash `$EPOCHREALTIME`. Both radix
 /// characters are accepted, so no locale has to be forced on the shell.
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
-#[serde(transparent)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct Micros(pub u64);
 
 impl Micros {
@@ -34,8 +31,7 @@ impl Micros {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
-#[serde(transparent)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct Pid(pub u32);
 
 impl fmt::Display for Pid {
@@ -45,7 +41,7 @@ impl fmt::Display for Pid {
 }
 
 /// Provenance, stamped by the sending shell. The only thing the rig adds.
-#[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub struct Stamp {
     pub at: Micros,
     pub pid: Pid,
@@ -64,8 +60,7 @@ pub const ASK_TAG: &str = "__ASK__";
 
 /// The words the subject passed, in order, an empty arglist included. The rig
 /// reads no position of them.
-#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
-#[serde(transparent)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Record {
     pub words: Vec<String>,
 }
@@ -105,11 +100,9 @@ impl Record {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Stamped<T> {
-    #[serde(flatten)]
     pub stamp: Stamp,
-    #[serde(flatten)]
     pub value: T,
 }
 

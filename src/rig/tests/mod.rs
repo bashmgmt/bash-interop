@@ -4,20 +4,39 @@
 use std::fs;
 use std::time::{Duration, Instant};
 
-use super::{BashSrc, Capture, ExitStatus, Reply, Rig, RigError, Setup, Turn, Workspace};
+use super::{BashSrc, Capture, ExitStatus, Line, Reply, Rig, RigError, Setup, Turn, Workspace};
 
 // ── fixtures ─────────────────────────────────────────────────────────
 
+/// Every fixture keeps what it hears, so assertions can read it back.
+trait Keeps: Rig {
+    fn take(&mut self) -> Capture;
+}
+
 /// Says nothing of its own, and has nothing to answer.
-struct Reporter;
+#[derive(Default)]
+struct Reporter {
+    seen: Capture,
+}
 
 impl Rig for Reporter {
     fn setup(&self) -> Result<Setup, RigError> {
         Ok(Setup::new())
     }
 
-    fn answer(&mut self, _turn: &Turn) -> Result<Reply, RigError> {
+    fn heard(&mut self, said: Line) -> Result<(), RigError> {
+        self.seen.lines.push(said);
+        Ok(())
+    }
+
+    fn answer(&mut self, _asked: &Turn) -> Result<Reply, RigError> {
         Ok(Reply::status(127))
+    }
+}
+
+impl Keeps for Reporter {
+    fn take(&mut self) -> Capture {
+        std::mem::take(&mut self.seen)
     }
 }
 
@@ -49,20 +68,20 @@ impl Run {
     }
 }
 
-fn run(rig: &mut impl Rig, files: &[(&str, &str)]) -> Run {
+fn run(rig: &mut impl Keeps, files: &[(&str, &str)]) -> Run {
     let temp = tempfile::tempdir().unwrap();
     for (name, body) in files {
         fs::write(temp.path().join(name), body).unwrap();
     }
 
     let entry = temp.path().join(files[0].0).to_string_lossy().into_owned();
-    let outcome = rig.run(&[entry]).unwrap_or_else(|error| panic!("{error}"));
+    let status = rig.run(&[entry]).unwrap_or_else(|error| panic!("{error}"));
 
-    Run { capture: outcome.capture, status: outcome.status, _temp: temp }
+    Run { capture: rig.take(), status, _temp: temp }
 }
 
 fn script(body: &str) -> Run {
-    run(&mut Reporter, &[("main.bash", body)])
+    run(&mut Reporter::default(), &[("main.bash", body)])
 }
 
 // ── the transport ────────────────────────────────────────────────────
@@ -72,7 +91,7 @@ fn script(body: &str) -> Run {
 #[test]
 fn every_descendant_shell_reaches_the_wire() {
     let result = run(
-        &mut Reporter,
+        &mut Reporter::default(),
         &[
             (
                 "main.bash",
@@ -102,7 +121,7 @@ fn every_descendant_shell_reaches_the_wire() {
 #[test]
 fn concurrent_writers_never_interleave() {
     let result = run(
-        &mut Reporter,
+        &mut Reporter::default(),
         &[
             (
                 "main.bash",
@@ -170,7 +189,8 @@ fn a_signalled_subject_is_reported_and_loses_nothing() {
 #[test]
 fn the_prelude_is_non_invasive_and_self_reliant() {
     let temp = tempfile::tempdir().unwrap();
-    let prelude = Reporter.prelude(temp.path(), &temp.path().join("up")).unwrap();
+    let setup = Reporter::default().setup().unwrap();
+    let prelude = super::run::prelude(&setup, temp.path(), &temp.path().join("up")).unwrap();
     let code: Vec<&str> =
         prelude.as_str().lines().filter(|line| !line.trim_start().starts_with('#')).collect();
     let text = code.join("\n");
@@ -216,6 +236,13 @@ fn the_prelude_is_non_invasive_and_self_reliant() {
 #[derive(Default)]
 struct Soak {
     answered: usize,
+    seen: Capture,
+}
+
+impl Keeps for Soak {
+    fn take(&mut self) -> Capture {
+        std::mem::take(&mut self.seen)
+    }
 }
 
 const SOAK_BASH: &str = r#"
@@ -225,6 +252,11 @@ NOTE() { BC_INSTR say NOTE "$@"; }
 impl Rig for Soak {
     fn setup(&self) -> Result<Setup, RigError> {
         Ok(Setup::new().bash(BashSrc::raw(SOAK_BASH)))
+    }
+
+    fn heard(&mut self, said: Line) -> Result<(), RigError> {
+        self.seen.lines.push(said);
+        Ok(())
     }
 
     fn answer(&mut self, turn: &Turn) -> Result<Reply, RigError> {
@@ -333,7 +365,11 @@ fn a_panicking_answer_kills_the_subject() {
             Ok(Setup::new())
         }
 
-        fn answer(&mut self, _turn: &Turn) -> Result<Reply, RigError> {
+        fn heard(&mut self, _said: Line) -> Result<(), RigError> {
+            Ok(())
+        }
+
+        fn answer(&mut self, _asked: &Turn) -> Result<Reply, RigError> {
             panic!("answer blew up")
         }
     }
@@ -373,8 +409,12 @@ fn a_kept_workspace_holds_the_prelude_the_steps_and_the_trace() {
             Ok(Setup::new().debug(true).workspace(Workspace::At(self.0.clone())))
         }
 
-        fn answer(&mut self, turn: &Turn) -> Result<Reply, RigError> {
-            turn.source(&BashSrc::raw("BC_INSTR say REC sourced"))
+        fn heard(&mut self, _said: Line) -> Result<(), RigError> {
+            Ok(())
+        }
+
+        fn answer(&mut self, asked: &Turn) -> Result<Reply, RigError> {
+            asked.source(&BashSrc::raw("BC_INSTR say REC sourced"))
         }
     }
 
@@ -383,8 +423,8 @@ fn a_kept_workspace_holds_the_prelude_the_steps_and_the_trace() {
     let entry = temp.path().join("main.bash");
     fs::write(&entry, "BC_INSTR ask something\n( BC_INSTR say REC subshell )\n").unwrap();
 
-    let outcome = Kept(kept.clone()).run(&[entry.to_string_lossy().into_owned()]).unwrap();
-    assert_eq!(outcome.status, ExitStatus::Code(0));
+    let status = Kept(kept.clone()).run(&[entry.to_string_lossy().into_owned()]).unwrap();
+    assert_eq!(status, ExitStatus::Code(0));
     assert!(kept.join("prelude.bash").is_file(), "the prelude survived the run");
 
     let steps = fs::read_dir(&kept)

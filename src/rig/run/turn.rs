@@ -2,23 +2,21 @@
 
 use std::path::Path;
 
-use crate::bash::rig::capture::Capture;
 use crate::bash::rig::error::{Doing, RigError};
 use crate::bash::rig::source::BashSrc;
 use crate::bash::rig::wire::{Line, Reply, Stamp};
 
-/// The question, the history behind it, and where to put what the reply
-/// refers to. Constructible only where a shell is blocked.
+/// The question and where to put what a reply refers to. Constructible only
+/// where a shell is blocked.
 pub struct Turn<'a> {
     asked: &'a Line,
     args: &'a [String],
-    seen: &'a Capture,
     dir: &'a Path,
 }
 
 impl<'a> Turn<'a> {
-    pub(crate) fn over(asked: &'a Line, seen: &'a Capture, dir: &'a Path) -> Option<Self> {
-        Some(Self { args: asked.value.asked()?, asked, seen, dir })
+    pub(crate) fn new(asked: &'a Line, args: &'a [String], dir: &'a Path) -> Self {
+        Self { asked, args, dir }
     }
 
     /// The words the subject passed after `ask`, in order.
@@ -29,11 +27,6 @@ impl<'a> Turn<'a> {
     /// Who asked, and when.
     pub fn stamp(&self) -> Stamp {
         self.asked.stamp
-    }
-
-    /// Everything the run has recorded so far, this question included.
-    pub fn seen(&self) -> &Capture {
-        self.seen
     }
 
     /// This run's workspace.

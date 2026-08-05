@@ -10,54 +10,46 @@ use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 
-use super::{Outcome, Rig, Setup, Turn, Workspace};
-use crate::bash::rig::capture::Capture;
+use super::{ExitStatus, Rig, Setup, Turn, Workspace};
 use crate::bash::rig::error::{Doing, RigError};
 use crate::bash::rig::wire::Wire;
 
-pub(crate) fn run(rig: &mut impl Rig, argv: &[String]) -> Result<Outcome, RigError> {
+pub(crate) fn run(rig: &mut impl Rig, argv: &[String]) -> Result<ExitStatus, RigError> {
     let setup = rig.setup()?;
     let site = Site::open(&setup.workspace)?;
     let dir = site.dir();
 
     let mut wire = Wire::create(dir)?;
-    let prelude = dir.join("prelude.bash");
-    fs::write(&prelude, rig.prelude(dir, wire.up_path())?.as_str())
-        .doing(|| format!("writing the prelude to {}", prelude.display()))?;
+    let written = dir.join("prelude.bash");
+    fs::write(&written, super::prelude(&setup, dir, wire.up_path())?.as_str())
+        .doing(|| format!("writing the prelude to {}", written.display()))?;
 
-    let mut subject = Subject::spawn(argv, &prelude, &setup)?;
-    let mut capture = Capture::default();
+    let mut subject = Subject::spawn(argv, &written, &setup)?;
 
     loop {
-        serve(rig, &mut wire, &mut capture, dir)?;
+        serve(rig, &mut wire, dir)?;
         match wait_for(wire.reader(), subject.exit())? {
             Ready::Spoke => continue,
             Ready::Exited => break,
         }
     }
     // Whatever the subject said just before it went is still in the pipe.
-    serve(rig, &mut wire, &mut capture, dir)?;
+    serve(rig, &mut wire, dir)?;
     wire.finish()?;
 
-    let status = subject.finish().doing(|| "waiting for bash".into())?;
-    Ok(Outcome { capture, status: status.into() })
+    Ok(subject.finish().doing(|| "waiting for bash".into())?.into())
 }
 
-/// Reads the pipe, then answers whatever asked, so an answer sees the
-/// question in its own history.
-fn serve(
-    rig: &mut impl Rig,
-    wire: &mut Wire,
-    capture: &mut Capture,
-    dir: &Path,
-) -> Result<(), RigError> {
-    let arrived = capture.lines.len();
-    capture.lines.extend(wire.drain()?);
+/// `say` goes one way and `ask` the other, exactly as in bash.
+fn serve(rig: &mut impl Rig, wire: &mut Wire, dir: &Path) -> Result<(), RigError> {
+    for line in wire.drain()? {
+        let Some(args) = line.value.asked() else {
+            rig.heard(line)?;
+            continue;
+        };
 
-    for index in arrived..capture.lines.len() {
-        let Some(turn) = Turn::over(&capture.lines[index], capture, dir) else { continue };
-        let reply = rig.answer(&turn)?;
-        wire.answer(turn.stamp().pid, reply)?;
+        let reply = rig.answer(&Turn::new(&line, args, dir))?;
+        wire.answer(line.stamp.pid, reply)?;
     }
     Ok(())
 }
