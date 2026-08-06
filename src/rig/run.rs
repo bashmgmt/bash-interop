@@ -8,7 +8,7 @@ use std::path::Path;
 use std::process::{Child, Command};
 
 use crate::bash::rig::wire::{prelude, Answer, Kind, Line, Wire};
-use crate::bash::rig::{ExitStatus, Rig};
+use crate::bash::rig::{ExitStatus, Rig, Run};
 use crate::failure::{Doing, Failure};
 
 /// Run `argv` under `rig`, and hand back the session it drove and how bash
@@ -17,7 +17,7 @@ use crate::failure::{Doing, Failure};
 pub fn run<R: Rig, S: AsRef<OsStr>>(
     rig: &R,
     argv: &[S],
-) -> Result<(R::Session, ExitStatus), Failure> {
+) -> Result<Run<R::Session>, Failure> {
     let workspace = tempfile::tempdir().doing(|| "opening a workspace for the run".into())?;
 
     run_in(rig, workspace.path(), argv)
@@ -30,7 +30,7 @@ pub fn run_in<R: Rig, S: AsRef<OsStr>>(
     rig: &R,
     at: &Path,
     argv: &[S],
-) -> Result<(R::Session, ExitStatus), Failure> {
+) -> Result<Run<R::Session>, Failure> {
     let opening = || format!("opening the workspace {}", at.display());
 
     fs::create_dir_all(at).doing(opening)?;
@@ -123,21 +123,21 @@ impl<'r, R: Rig> Running<'r, R> {
         }
     }
 
-    fn finish(self) -> Result<(R::Session, ExitStatus), Failure> {
+    /// The subject has already left; this kills whatever of its group
+    /// outlived it, reaps, and asks the rig to let go.
+    ///
+    /// The first failure is the one reported. A rig that has already failed
+    /// is not asked to end, and a message left half-read is a consequence of
+    /// whatever went wrong before it rather than news of its own.
+    fn finish(self) -> Result<Run<R::Session>, Failure> {
         let Self { rig, mut session, mut subject, wire, failed } = self;
 
-        // The rig's failure is the cause. Nothing that went wrong after it is
-        // worth reporting in its place, and a run that failed has no end to
-        // run; dropping `subject` still kills and reaps the group.
-        if let Some(why) = failed {
-            return Err(why);
-        }
+        let subject = ExitStatus::from(subject.finish().doing(|| "waiting for bash".into())?);
+        let failed = failed
+            .or_else(|| wire.finish().err())
+            .or_else(|| rig.end(&mut session, subject).err());
 
-        wire.finish()?;
-        let status = ExitStatus::from(subject.finish().doing(|| "waiting for bash".into())?);
-        rig.end(&mut session, status)?;
-
-        Ok((session, status))
+        Ok(Run { session, subject, failed })
     }
 }
 

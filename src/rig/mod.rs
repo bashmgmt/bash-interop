@@ -44,7 +44,7 @@
 //!     }
 //! }
 //!
-//! let (heard, status) = run(&Deploying, &["bash", "deploy.bash"])?;
+//! let (heard, status) = run(&Deploying, &["bash", "deploy.bash"])?.whole()?;
 //!
 //! for line in &heard {
 //!     println!("pid {} said {:?}", line.pid, line.words);
@@ -68,6 +68,37 @@ mod wire;
 use std::ffi::OsString;
 use std::fmt;
 
+/// What a run produced.
+///
+/// Reaching one of these means bash was started and seen out. A `Failure`
+/// instead means the run never got that far: it could not be set up, or it
+/// lost contact with the subject and killed it, and then how the subject
+/// would have ended is not something anyone can say.
+pub struct Run<S> {
+    /// The client's own state, whatever it made of what it heard.
+    pub session: S,
+
+    /// How bash ended. Always its own: the run serves until the subject
+    /// leaves of its own accord, whether or not anything went wrong.
+    pub subject: ExitStatus,
+
+    /// What went wrong on this side, if anything. The subject was told
+    /// whatever could be told and still reached its own end, so `subject` is
+    /// its status rather than a consequence of this.
+    pub failed: Option<Failure>,
+}
+
+impl<S> Run<S> {
+    /// The session, if nothing went wrong — the shape a caller wants when a
+    /// partial reading is no use to it.
+    pub fn whole(self) -> Result<(S, ExitStatus), Failure> {
+        match self.failed {
+            Some(why) => Err(why),
+            None => Ok((self.session, self.subject)),
+        }
+    }
+}
+
 /// What a rig tells the run about the process it is about to start.
 #[derive(Default)]
 pub struct Startup {
@@ -82,6 +113,7 @@ pub struct Startup {
 }
 
 pub use run::{run, run_in};
+
 pub use tree::{forest, shells, Shell, ShellNode};
 pub use wire::{field, Answer, Kind, Line, Micros, Pid};
 

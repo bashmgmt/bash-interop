@@ -100,15 +100,39 @@ including nothing.
 ## `run`
 
 ```rust
-/// Run `argv` under `rig`, and hand back the session it drove and how bash
-/// ended. The workspace is the run's, made and discarded with it.
 pub fn run<R: Rig, S: AsRef<OsStr>>(rig: &R, argv: &[S])
-    -> Result<(R::Session, ExitStatus), Failure>;
+    -> Result<Run<R::Session>, Failure>;
 
 /// The same, in a directory of your choosing, left behind to read.
 pub fn run_in<R: Rig, S: AsRef<OsStr>>(rig: &R, at: &Path, argv: &[S])
-    -> Result<(R::Session, ExitStatus), Failure>;
+    -> Result<Run<R::Session>, Failure>;
+
+/// What a run produced.
+pub struct Run<S> {
+    pub session: S,
+    pub subject: ExitStatus,
+    pub failed: Option<Failure>,
+}
+
+impl<S> Run<S> {
+    /// The session, if nothing went wrong.
+    pub fn whole(self) -> Result<(S, ExitStatus), Failure>;
+}
 ```
+
+**`subject` is always the subject's own status**, because the run serves until
+it leaves of its own accord — see [when the rig
+fails](#when-the-rig-fails). `failed` is what went wrong on this side, if
+anything, and the two are independent: a run can fail and still report exactly
+how bash ended.
+
+A `Failure` in place of a `Run` means something else entirely: the run never
+got that far. It could not be set up, or it lost contact with the subject and
+killed it, and then how the subject *would* have ended is not something anyone
+can say. That is the whole of the distinction, and it is why the status is not
+an `Option`.
+
+`whole()` is for callers that have no use for a partial reading.
 
 The two arguments are the two real inputs. The run owns a directory for its
 pipes and its prelude, the transport over them, and the subject's process
@@ -196,9 +220,13 @@ it carries on with a status it can test. Nothing is forced on it.
 `hear` has nobody waiting, so nothing can be said at the time — but the run
 still ends in the failure, and the next shell to ask carries the reason.
 
-A failed run runs no `end`: it did not finish, and reporting a second fault in
-place of the first would bury the cause. Dropping the subject still kills and
-reaps the group.
+A rig that has already failed is not asked to `end`, and a message left
+half-read is treated as a consequence of whatever went wrong before it rather
+than as news of its own: the first failure is the one reported.
+
+None of this costs the status. `bashcap run` still exits with the subject's
+code even when the capture broke, and says on stderr that it did — a wrapper
+reporting its own trouble as the subject's would not be transparent.
 
 ## Status
 
