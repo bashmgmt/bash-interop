@@ -7,7 +7,7 @@ use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::path::Path;
 use std::process::{Child, Command};
 
-use crate::bash::rig::wire::{prelude, Wire};
+use crate::bash::rig::wire::{prelude, Kind, Wire};
 use crate::bash::rig::{ExitStatus, Rig};
 use crate::failure::{Doing, Failure};
 
@@ -76,9 +76,9 @@ impl<'r, R: Rig> Running<'r, R> {
 
     fn serve(&mut self) -> Result<(), Failure> {
         for line in self.wire.drain()? {
-            match line.asked() {
-                None => self.rig.hear(&mut self.session, line)?,
-                Some(_) => {
+            match line.kind {
+                Kind::Say => self.rig.hear(&mut self.session, line)?,
+                Kind::Ask => {
                     let waiting = line.pid;
                     let answer = self.rig.answer(&mut self.session, line)?;
 

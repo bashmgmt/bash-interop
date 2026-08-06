@@ -34,7 +34,7 @@
 //!     }
 //!
 //!     fn answer(&self, heard: &mut Vec<Line>, asked: Line) -> Result<Answer, Failure> {
-//!         let target = asked.asked().unwrap_or_default().first().cloned();
+//!         let target = asked.words.first().cloned();
 //!         heard.push(asked);
 //!
 //!         Ok(match target.as_deref() {
@@ -63,8 +63,8 @@ mod wire;
 use std::fmt;
 
 pub use run::{run, run_in};
-pub use tree::{forest, shells, BadField, Origin, Shell, ShellNode};
-pub use wire::{field, Answer, Line, Micros, Pid};
+pub use tree::{forest, shells, Shell, ShellNode};
+pub use wire::{field, Answer, Kind, Line, Micros, Pid};
 
 pub use crate::failure::{Doing, Failure};
 

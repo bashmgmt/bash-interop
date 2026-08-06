@@ -106,9 +106,12 @@ __bc_join() {
     __BC__reply="$__BC__DIR/rep.$BASHPID"
     __BC__replyfd=""
 
-    __bc_send __ORIGIN__ parent "$__bc_parent" shlvl "$SHLVL" source "${BASH_SOURCE[-1]:-}"
 }
 ```
+
+A shell announces nothing. Its first message carries `seq 0`, which is what
+says a shell has joined, and every message it writes carries `parent` and
+`shlvl`. One line per message, always.
 
 Every shell opens the pipe itself, by name, from a path baked into the
 prelude. **Nothing is inherited**, so no descriptor has to survive a fork and
@@ -125,8 +128,13 @@ inherited owner when there is one, so a subshell names its *emitting* parent;
 One line, one frame:
 
 ```
-<at> <pid> <seq> <marker> <chunk>\n
+<marker> <pid> <seq> <chunk>\n
 ```
+
+**The header carries only what reassembly needs**: whether more chunks follow,
+and the `(pid, seq)` key they share. Everything else about a message lives
+inside it and is not read until the message is whole — assembling and
+interpreting are different jobs, and this is the seam between them.
 
 **The delimiter separates frames and is part of none of them.** It is appended
 after a frame is built and consumed before one is parsed, on both sides. Both
@@ -228,8 +236,7 @@ fn timing(line: &Line) -> Option<Result<Timing, String>>;
 
 `None` means *not this family's message*: some other tool's, and no error.
 `Some(Err)` means recognised and malformed. The two levels separate sharing a
-wire from failing to decode. `Origin::of` and `Snapshot::of` are both this
-shape.
+wire from failing to decode. `Snapshot::of` is this shape.
 
 ## Asking
 
@@ -278,5 +285,5 @@ in one would not, and is the single thing a step must avoid.
 ## See also
 
 - [rig.md](rig.md) — who calls `drain` and `answer`
-- [tree.md](tree.md) — what `__ORIGIN__` is for
+- [tree.md](tree.md) — the views `parent` and `seq` make possible
 - [measurements.md](measurements.md) — the frame limit, and what each proof establishes

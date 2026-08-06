@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use crate::failure::{Doing, Failure};
 
-pub use message::{field, Answer, Line, Micros, Pid};
+pub use message::{field, Answer, Kind, Line, Micros, Pid};
 pub use pipes::Wire;
 
 /// The client half, shipped verbatim. It locates the workspace from its own

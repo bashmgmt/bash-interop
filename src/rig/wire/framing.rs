@@ -1,12 +1,16 @@
 //! Bytes in, whole messages out.
 //!
-//! A frame on the up pipe is `<at> <pid> <seq> <marker> <chunk>` and a
-//! delimiter. A reply carries no header — the shell that asked is its only
-//! reader — so `pipes` writes a message and a delimiter directly.
+//! A frame on the up pipe is `<marker> <pid> <seq> <chunk>` and a delimiter.
+//! The header carries only what reassembly needs: whether more chunks follow,
+//! and the key they share. Everything else about a message is inside it, and
+//! is not read until the message is whole.
+//!
+//! A reply carries no header at all — the shell that asked is its only reader
+//! — so `pipes` writes a message and a delimiter directly.
 
 use std::collections::HashMap;
 
-use super::message::{self, Line, Micros, Pid};
+use super::message::{Line, Micros, Pid};
 use crate::failure::{Doing, Failure};
 
 pub const DELIMITER: u8 = b'\n';
@@ -62,8 +66,7 @@ impl Reassembly {
 
     /// One frame in; a `Line` out once it completed a message.
     fn accept(&mut self, framed: &str, heard_at: Micros) -> Result<Option<Line>, Failure> {
-        let frame =
-            Frame::read(framed).doing(|| format!("reading the frame {framed:?}"))?;
+        let frame = Frame::read(framed).doing(|| format!("reading the frame {framed:?}"))?;
         let key = (frame.pid, frame.seq);
 
         let message = match self.partial.remove(&key) {
@@ -75,21 +78,14 @@ impl Reassembly {
             return Ok(None);
         }
 
-        Ok(Some(Line {
-            sent_at: frame.sent_at,
-            heard_at,
-            pid: frame.pid,
-            seq: frame.seq,
-            words: message::parse_message(&message)?,
-        }))
+        Line::read(frame.pid, frame.seq, heard_at, &message).map(Some)
     }
 }
 
 struct Frame {
-    sent_at: Micros,
+    continues: bool,
     pid: Pid,
     seq: u32,
-    continues: bool,
     chunk: String,
 }
 
@@ -97,19 +93,18 @@ impl Frame {
     /// `&'static str` for the cause: the frame's own text is attached once,
     /// by the caller.
     fn read(raw: &str) -> Result<Self, &'static str> {
-        let mut fields = raw.splitn(5, ' ');
+        let mut fields = raw.splitn(4, ' ');
 
-        let sent_at = fields.next().and_then(Micros::parse_epoch).ok_or("bad timestamp")?;
-        let pid = fields.next().and_then(|raw| raw.parse().ok()).map(Pid).ok_or("bad pid")?;
-        let seq = fields.next().and_then(|raw| raw.parse().ok()).ok_or("bad sequence number")?;
         let continues = match fields.next() {
             Some(CONTINUES) => true,
             Some(ENDS) => false,
             _ => return Err("bad marker"),
         };
+        let pid = fields.next().and_then(|raw| raw.parse().ok()).map(Pid).ok_or("bad pid")?;
+        let seq = fields.next().and_then(|raw| raw.parse().ok()).ok_or("bad sequence number")?;
         let chunk = fields.next().ok_or("no message")?.to_string();
 
-        Ok(Self { sent_at, pid, seq, continues, chunk })
+        Ok(Self { continues, pid, seq, chunk })
     }
 }
 
@@ -117,7 +112,23 @@ impl Frame {
 mod tests {
     use super::*;
 
+    use super::super::message::literal;
+
     const AT: Micros = Micros(9);
+
+    /// A whole message, as the bash writes one: the protocol's words in
+    /// front, then the client's.
+    fn whole(payload: &[&str]) -> String {
+        let ahead = ["SAY", "at=1.000002", "parent=7", "shlvl=4"];
+        let words: Vec<String> =
+            ahead.iter().chain(payload).map(|word| word.to_string()).collect();
+
+        literal(&words)
+    }
+
+    fn frame(pid: u32, seq: u32, body: &str) -> String {
+        format!(". {pid} {seq} {body}\n")
+    }
 
     fn words(line: &Line) -> Vec<&str> {
         line.words.iter().map(String::as_str).collect()
@@ -129,68 +140,73 @@ mod tests {
 
     #[test]
     fn a_message_survives_any_read_boundary() {
-        let stream = "1.000000 7 0 . ('A' 'one')\n1.000001 7 1 . ('B' 'two')\n";
+        let stream = frame(7, 0, &whole(&["A", "one"])) + &frame(7, 1, &whole(&["B", "two"]));
 
-        let whole = fed(&mut Reassembly::default(), stream.as_bytes());
-        assert_eq!(whole.len(), 2);
-        assert_eq!(words(&whole[0]), ["A", "one"]);
-        assert_eq!(whole[0].sent_at, Micros(1_000_000), "the sender's clock, as it wrote it");
-        assert_eq!(whole[0].heard_at, AT, "the reader's, as it was handed in");
+        let seen = fed(&mut Reassembly::default(), stream.as_bytes());
+        assert_eq!(seen.len(), 2);
+        assert_eq!(words(&seen[0]), ["A", "one"]);
+        assert_eq!(seen[0].sent_at, Micros(1_000_002), "the sender's clock, from the message");
+        assert_eq!(seen[0].heard_at, AT, "the reader's, as it was handed in");
+        assert_eq!((seen[0].pid, seen[0].seq), (Pid(7), 0), "from the frame header");
 
         let mut dribbled = Reassembly::default();
-        let mut seen = Vec::new();
+        let mut byte_at_a_time = Vec::new();
         for byte in stream.as_bytes() {
-            seen.extend(fed(&mut dribbled, &[*byte]));
+            byte_at_a_time.extend(fed(&mut dribbled, &[*byte]));
         }
-        assert_eq!(seen.len(), 2);
-        assert_eq!(words(&seen[1]), ["B", "two"]);
+        assert_eq!(byte_at_a_time.len(), 2);
+        assert_eq!(words(&byte_at_a_time[1]), ["B", "two"]);
         dribbled.finish().unwrap();
     }
 
     #[test]
     fn interleaved_split_messages_rejoin_per_sender() {
+        let (mine, theirs) = (whole(&["WIDE", "aaaa"]), whole(&["OTHER", "bbbb"]));
+        let cut = 12;
         let mut incoming = Reassembly::default();
 
-        assert!(fed(&mut incoming, b"1.000000 7 0 + ('WIDE' 'aa\n").is_empty());
-        assert!(fed(&mut incoming, b"1.000001 9 0 + ('OTHER' 'bb\n").is_empty());
+        assert!(fed(&mut incoming, format!("+ 7 0 {}\n", &mine[..cut]).as_bytes()).is_empty());
+        assert!(fed(&mut incoming, format!("+ 9 0 {}\n", &theirs[..cut]).as_bytes()).is_empty());
 
-        let mine = fed(&mut incoming, b"1.000002 7 0 . aa')\n");
-        assert_eq!(words(&mine[0]), ["WIDE", "aaaa"]);
+        let rejoined = fed(&mut incoming, format!(". 7 0 {}\n", &mine[cut..]).as_bytes());
+        assert_eq!(words(&rejoined[0]), ["WIDE", "aaaa"]);
 
-        let theirs = fed(&mut incoming, b"1.000003 9 0 . bb')\n");
-        assert_eq!(words(&theirs[0]), ["OTHER", "bbbb"]);
+        let other = fed(&mut incoming, format!(". 9 0 {}\n", &theirs[cut..]).as_bytes());
+        assert_eq!(words(&other[0]), ["OTHER", "bbbb"]);
         incoming.finish().unwrap();
     }
 
     #[test]
     fn nothing_may_be_left_part_way() {
         let mut cut = Reassembly::default();
-        fed(&mut cut, b"1.000000 7 0 . ('A')");
+        let no_delimiter = frame(7, 0, &whole(&["A"]));
+        fed(&mut cut, no_delimiter.trim_end().as_bytes());
         assert!(cut.finish().is_err(), "a frame without its delimiter");
 
         let mut unfinished = Reassembly::default();
-        fed(&mut unfinished, b"1.000000 7 0 + ('A'\n");
+        fed(&mut unfinished, b"+ 7 0 ('SAY'\n");
         assert!(unfinished.finish().is_err(), "a message without its last chunk");
 
         Reassembly::default().finish().unwrap();
     }
 
-    /// One field wrong per line, in the order `read` takes them.
+    /// One thing wrong per line: first the frame header, in the order `read`
+    /// takes it, then the message the whole frame carries.
     #[test]
-    fn a_frame_that_will_not_parse_is_an_error() {
+    fn a_frame_that_will_not_read_is_an_error() {
         let bad = [
-            "nonsense\n",
-            "1.0 7 0 . ()\n",
-            "1.000000 x 0 . ()\n",
-            "1.000000 7 z . ()\n",
-            "1.000000 7 0 ? ()\n",
-            "1.000000 7 0 .\n",
-            "1.000000 7 0 . (unquoted\n",
+            "nonsense\n".to_string(),
+            format!("? 7 0 {}\n", whole(&[])),
+            format!(". x 0 {}\n", whole(&[])),
+            format!(". 7 z {}\n", whole(&[])),
+            ". 7 0\n".to_string(),
+            ". 7 0 (unquoted\n".to_string(),
+            format!(". 7 0 {}\n", literal(&["MUMBLE".to_string()])),
         ];
         for frame in bad {
             assert!(
                 Reassembly::default().feed(frame.as_bytes(), AT).is_err(),
-                "{frame:?} should not parse"
+                "{frame:?} should not read"
             );
         }
     }

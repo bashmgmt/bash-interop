@@ -1,7 +1,13 @@
 //! One message, where it came from, and the one that goes back.
+//!
+//! A message is a bash array literal. The protocol puts its own words in
+//! front — the kind, then `key=value` context — and the reader shifts exactly
+//! those back off, leaving the client's arglist. Nothing here is needed to
+//! reassemble a message; that is `framing`'s concern and it happens first.
 
 use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::vec;
 
 use crate::bash::value::{self, BashCodec, QuotedNest};
 use crate::failure::{Doing, Failure};
@@ -17,7 +23,7 @@ impl Micros {
 
     /// `$EPOCHREALTIME`: seconds, the locale's decimal separator, and exactly
     /// six digits of microseconds.
-    pub(crate) fn parse_epoch(text: &str) -> Option<Self> {
+    fn parse_epoch(text: &str) -> Option<Self> {
         let (seconds, micros) = text.split_once(['.', ','])?;
         if micros.len() != 6 {
             return None;
@@ -36,23 +42,50 @@ impl fmt::Display for Pid {
     }
 }
 
-/// Reserved: it marks a question rather than any payload.
-const ASK_TAG: &str = "__ASK__";
+/// What the protocol says a message is. A word outside this set is a defect
+/// in the bash, never a client's choice — a client's own tag is a payload
+/// word, and the protocol never reads one.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum Kind {
+    Say,
+    Ask,
+}
 
-/// What one shell said, once, with the provenance the wire gives it.
+impl Kind {
+    fn read(word: &str) -> Result<Self, &'static str> {
+        match word {
+            "SAY" => Ok(Self::Say),
+            "ASK" => Ok(Self::Ask),
+            _ => Err("unknown kind"),
+        }
+    }
+}
+
+/// What one shell said, once, with the provenance the protocol put in front
+/// of it.
 #[derive(Debug)]
 pub struct Line {
-    /// The sending shell's `$EPOCHREALTIME` when it wrote the first frame.
+    pub kind: Kind,
+
+    /// The sending shell's `$EPOCHREALTIME`.
     pub sent_at: Micros,
 
-    /// The rig's clock when the last frame of the message arrived.
+    /// The run's clock when the last frame of the message arrived.
     pub heard_at: Micros,
 
     pub pid: Pid,
 
-    /// Counted per shell, from its first message.
+    /// The shell that emitted before this one forked. Not `$PPID`, which
+    /// names the grandparent inside a subshell.
+    pub parent: Pid,
+
+    pub shlvl: u32,
+
+    /// Counted per shell from its first message, so `0` is a shell that has
+    /// just joined.
     pub seq: u32,
 
+    /// The client's arglist, and nothing of the protocol's.
     pub words: Vec<String>,
 }
 
@@ -66,9 +99,55 @@ impl Line {
         }
     }
 
-    /// The question a blocked shell asked, if this is one.
-    pub fn asked(&self) -> Option<&[String]> {
-        self.behind(ASK_TAG)
+    pub(super) fn read(
+        pid: Pid,
+        seq: u32,
+        heard_at: Micros,
+        literal: &str,
+    ) -> Result<Self, Failure> {
+        let at = || format!("reading the message {literal:?}");
+
+        let words = QuotedNest.words(literal).doing(at)?;
+
+        Self::shifted(pid, seq, heard_at, words).doing(at)
+    }
+
+    fn shifted(
+        pid: Pid,
+        seq: u32,
+        heard_at: Micros,
+        words: Vec<String>,
+    ) -> Result<Self, &'static str> {
+        let mut ahead = Ahead(words.into_iter());
+
+        let kind = Kind::read(&ahead.word()?)?;
+        let sent_at = Micros::parse_epoch(&ahead.field("at")?).ok_or("bad at")?;
+        let parent = ahead.field("parent")?.parse().map(Pid).map_err(|_| "bad parent")?;
+        let shlvl = ahead.field("shlvl")?.parse().map_err(|_| "bad shlvl")?;
+
+        Ok(Self { kind, sent_at, heard_at, pid, parent, shlvl, seq, words: ahead.rest() })
+    }
+}
+
+/// The protocol's own words, taken off the front one at a time. `shift`, as
+/// the bash that wrote them would do it.
+struct Ahead(vec::IntoIter<String>);
+
+impl Ahead {
+    fn word(&mut self) -> Result<String, &'static str> {
+        self.0.next().ok_or("the message ended early")
+    }
+
+    /// One `key=value`, whose key must be `key`.
+    fn field(&mut self, key: &'static str) -> Result<String, &'static str> {
+        match self.word()?.split_once('=') {
+            Some((found, value)) if found == key => Ok(value.to_string()),
+            _ => Err(key),
+        }
+    }
+
+    fn rest(self) -> Vec<String> {
+        self.0.collect()
     }
 }
 
@@ -97,10 +176,6 @@ impl Answer {
     }
 }
 
-pub(crate) fn parse_message(literal: &str) -> Result<Vec<String>, Failure> {
-    QuotedNest.words(literal).doing(|| format!("reading the message {literal:?}"))
-}
-
 pub(crate) fn literal(words: &[String]) -> String {
     format!("({})", value::emit_q_words(words))
 }
@@ -113,27 +188,58 @@ mod tests {
         items.iter().map(|item| item.to_string()).collect()
     }
 
-    #[test]
-    fn messages_round_trip() {
-        let nested = literal(&words(&["INNER", "x y"]));
-        let sent = words(&["TAG", "a space", "quote'inside", "", "two\nlines", &nested]);
+    fn sent(payload: &[&str]) -> String {
+        let mut all = words(&["SAY", "at=1.000002", "parent=7", "shlvl=4"]);
+        all.extend(words(payload));
 
-        let wire = literal(&sent);
-        assert!(!wire.contains('\n'), "a message is always one line");
-        assert_eq!(parse_message(&wire).unwrap(), sent);
-
-        // A word may itself be a message, decoded one level at a time.
-        assert_eq!(parse_message(&nested).unwrap(), words(&["INNER", "x y"]));
-
-        assert_eq!(parse_message(&literal(&[])).unwrap(), Vec::<String>::new());
+        literal(&all)
     }
 
     #[test]
-    fn an_epoch_reads_to_the_microsecond() {
-        assert_eq!(Micros::parse_epoch("1785922874.170358"), Some(Micros(1785922874170358)));
-        assert_eq!(Micros::parse_epoch("1785922874,170358"), Some(Micros(1785922874170358)));
-        assert_eq!(Micros::parse_epoch("1785922874.1703"), None, "six digits, as bash prints");
-        assert_eq!(Micros::parse_epoch("1785922874.17035x"), None);
-        assert_eq!(Micros::parse_epoch("nope"), None);
+    fn the_protocols_words_come_off_and_the_clients_remain() {
+        let line = Line::read(Pid(9), 3, Micros(50), &sent(&["REC", "a space", ""])).unwrap();
+
+        assert_eq!(line.kind, Kind::Say);
+        assert_eq!(line.sent_at, Micros(1_000_002));
+        assert_eq!(line.heard_at, Micros(50), "the run's clock, not the wire's");
+        assert_eq!((line.pid, line.parent, line.shlvl, line.seq), (Pid(9), Pid(7), 4, 3));
+        assert_eq!(line.words, words(&["REC", "a space", ""]), "the payload alone");
+        assert_eq!(line.behind("REC"), Some(words(&["a space", ""]).as_slice()));
+    }
+
+    #[test]
+    fn a_message_may_carry_nothing_of_its_own() {
+        let line = Line::read(Pid(9), 0, Micros(0), &sent(&[])).unwrap();
+
+        assert!(line.words.is_empty());
+        assert_eq!(line.behind("REC"), None);
+    }
+
+    #[test]
+    fn a_header_the_protocol_did_not_write_is_an_error() {
+        let bad = [
+            literal(&words(&["MUMBLE", "at=1.000002", "parent=7", "shlvl=4"])),
+            literal(&words(&["SAY", "when=1.000002", "parent=7", "shlvl=4"])),
+            literal(&words(&["SAY", "at=1.0", "parent=7", "shlvl=4"])),
+            literal(&words(&["SAY", "at=1.000002", "parent=x", "shlvl=4"])),
+            literal(&words(&["SAY", "at=1.000002", "parent=7"])),
+            "(unquoted".to_string(),
+        ];
+        for literal in bad {
+            assert!(Line::read(Pid(9), 0, Micros(0), &literal).is_err(), "{literal} should not read");
+        }
+    }
+
+    #[test]
+    fn messages_round_trip() {
+        let nested = literal(&words(&["INNER", "x y"]));
+        let payload = words(&["TAG", "quote'inside", "two\nlines", &nested]);
+
+        let line = Line::read(Pid(1), 0, Micros(0), &sent(&["TAG", "quote'inside", "two\nlines", &nested]))
+            .unwrap();
+        assert_eq!(line.words, payload, "a message is one line, whatever it carries");
+
+        // A word may itself be a message, decoded one level at a time.
+        assert_eq!(QuotedNest.words(&nested).unwrap(), words(&["INNER", "x y"]));
     }
 }

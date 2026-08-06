@@ -34,8 +34,9 @@ far more: a full `bashcap` snapshot is ~611 µs, so the 7 µs difference between
 an inlined send and a function call is under one percent of what an
 instrumented call site actually costs.
 
-Joining — the first `say` in a new shell, which opens the pipe and emits
-`__ORIGIN__` — costs 10 µs.
+Joining — the first `say` in a new shell, which opens the pipe — costs 10 µs
+and sends nothing of its own. Provenance rides on the messages the shell goes
+on to write, as two more `printf` arguments.
 
 ### The one-frame lane
 
@@ -79,6 +80,7 @@ can be is left to the compiler.
 | proof | establishes |
 |---|---|
 | `every_descendant_shell_reaches_the_wire` | subshells, command substitutions and child processes all reach the pipe; five shells, one root, three deep, and `SHLVL` never drops toward a descendant |
+| `a_newline_inside_a_value_is_escaped_not_framed` | and the whole run is one message, since joining sends none |
 | `concurrent_writers_never_interleave` | 8 writers × 80 messages, half of them 9000 bytes, arrive whole |
 | `nothing_is_lost_at_the_end` | 200 messages written immediately before exit are readable after the subject is gone |
 | `a_newline_inside_a_value_is_escaped_not_framed` | a value containing `\n` arrives as one message, not two frames |

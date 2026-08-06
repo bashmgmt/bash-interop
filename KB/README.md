@@ -20,7 +20,7 @@ Every module under `src/bash/rig/` is private; `mod.rs` carries the trait,
 
 ```rust
 pub use run::{run, run_in};
-pub use tree::{forest, shells, BadField, Origin, Shell, ShellNode};
+pub use tree::{forest, shells, Shell, ShellNode};
 pub use wire::{field, prelude, Answer, Line, Micros, Pid};
 pub use crate::failure::{Doing, Failure};
 ```
@@ -56,9 +56,10 @@ and a decoder opts into it:
 let words = line.behind("TIMEIT")?;   // None: some other tool's message
 ```
 
-Two words are reserved, both describing the transport rather than a payload:
-`__ORIGIN__` opens each shell's stream, `__ASK__` marks a question. `__ASK__`
-is stripped before an ask reaches `answer`.
+The protocol reserves no word in the payload. Its own — the `SAY`/`ASK` kind
+and the `at=`/`parent=`/`shlvl=` context — sit in front of the client's
+arglist and are shifted off before a rig sees one, the way bash `shift`s past
+its own arguments. `Line::words` is the client's alone.
 
 An **answer** is an arglist too, and it is a command the shell runs:
 `["return", "1"]`, `["source", path]`, `["declare", "-g", "x=1"]`,
