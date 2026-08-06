@@ -176,6 +176,30 @@ A shell that asks after the subject has exited can never be answered, and goes
 with the run. A process that means to survive detaches with `setsid`, which
 leaves the group.
 
+## When the rig fails
+
+A rig that returns `Err` **poisons the run**: it is not called again, every
+ask from then on is refused with its reason, and `run` ends in that `Failure`
+rather than a status.
+
+The run does not stop at once, and that is the point. A shell blocked on an
+ask waits forever unless it is told something, and — measured, 0 of 120 — a
+subject killed immediately after the refusal is written **never delivers it**.
+So the loop serves on until the subject leaves of its own accord, exactly as a
+successful run does.
+
+The blocked shell is answered with `__bc_refused`, which reports the reason at
+the subject's own call site and returns 125. From the subject's side that is
+an ordinary failing command: under `set -e` its script ends there, otherwise
+it carries on with a status it can test. Nothing is forced on it.
+
+`hear` has nobody waiting, so nothing can be said at the time — but the run
+still ends in the failure, and the next shell to ask carries the reason.
+
+A failed run runs no `end`: it did not finish, and reporting a second fault in
+place of the first would bury the cause. Dropping the subject still kills and
+reaps the group.
+
 ## Status
 
 ```rust

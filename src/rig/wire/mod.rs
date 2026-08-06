@@ -47,20 +47,44 @@ pub fn prelude(dir: &Path, bash: &str) -> Result<PathBuf, Failure> {
 mod tests {
     use super::*;
 
-    /// The subject's shell is left as it was found. Every one of these is a
-    /// property of the file, so none of them needs bash to run.
+    /// The namespace. Everything the protocol brings is called `__BC_…`, so
+    /// nothing it does can collide with a name the subject chose.
+    const OURS: &str = "__BC_";
+
+    /// What the subject's shell keeps. Every one of these is a property of
+    /// the file, so none of them needs bash to run — and every one of them is
+    /// about names and options the subject owns, never about ours.
+    ///
+    /// `expand_aliases` is the one option the protocol turns on, and it stays
+    /// on: the guards have to be aliases, because `return` must act in the
+    /// frame that failed. A subject's own aliases therefore expand where they
+    /// otherwise would not — the single change this makes, made once and
+    /// written down rather than asserted away.
     #[test]
-    fn the_protocol_half_touches_nothing_of_the_subject_s() {
+    fn the_protocol_half_touches_little_of_the_subject_s() {
         let code: Vec<&str> =
             PRELUDE.lines().filter(|line| !line.trim_start().starts_with('#')).collect();
 
-        for forbidden in ["eval", "trap", "export", "shopt"] {
-            assert!(!code.join("\n").contains(forbidden), "the protocol contains {forbidden:?}");
+        // Only what reaches past the namespace counts: a word of ours may be
+        // spelled however it likes.
+        let theirs: Vec<String> = code
+            .iter()
+            .map(|line| {
+                let words = line.split_whitespace().filter(|word| !word.contains(OURS));
+
+                words.collect::<Vec<_>>().join(" ")
+            })
+            .collect();
+
+        for forbidden in ["eval", "trap", "export"] {
+            let found = theirs.iter().find(|line| line.contains(forbidden));
+
+            assert!(found.is_none(), "the protocol {forbidden}s: {found:?}");
         }
 
         // `set --` rebinds a function's positional parameters and is scoped to
         // the call; `set -e` and friends change the shell the subject runs in.
-        for line in &code {
+        for line in &theirs {
             let after_set = line.split("set -").nth(1);
             assert!(after_set.is_none_or(|rest| rest.starts_with('-')), "changes an option: {line}");
         }
@@ -73,7 +97,7 @@ mod tests {
                 && name.chars().all(|c| c.is_alphanumeric() || c == '_')
                 && rest.split_whitespace().count() <= 1;
 
-            assert!(!global || name.starts_with("__BC__"), "a name outside __BC__: {line}");
+            assert!(!global || name.starts_with(OURS), "a name outside {OURS}: {line}");
         }
     }
 }

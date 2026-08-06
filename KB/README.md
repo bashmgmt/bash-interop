@@ -41,10 +41,17 @@ produces is the client's, expressed as its `Session` — see
 operation.
 
 The contract towards the subject's shell: no trap installed, no builtin
-shadowed, no variable exported, no global set outside `__BC__*`, no shell
-option changed, and no `eval`. A client's own traps, `IFS` and options are
-therefore its own, and `tests/proofs.rs` asserts this against the generated
-prelude.
+shadowed, no variable exported, no name set outside `__BC_*`, no `set -o`
+change, and no `eval`. A client's own traps, `IFS` and options are therefore
+its own. The one option the protocol does turn on is `expand_aliases`, which
+the guards require — see [wire.md](wire.md#error-flow-is-ours-not-set--es).
+
+**Error flow is taken from `set -e` deliberately.** Every command that can
+fail in the protocol's bash is guarded with `|| __BC_BAIL` or `|| __BC_THROW`,
+so it behaves the same however the subject set its shell, and a fault of ours
+is reported at the subject's call site with status 125 rather than killing the
+script mid-message. That is a requirement of BC-related bash, not a style
+preference.
 
 ## A message is an arglist
 

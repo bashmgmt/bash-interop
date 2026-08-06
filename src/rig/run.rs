@@ -7,7 +7,7 @@ use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::path::Path;
 use std::process::{Child, Command};
 
-use crate::bash::rig::wire::{prelude, Kind, Wire};
+use crate::bash::rig::wire::{prelude, Answer, Kind, Line, Wire};
 use crate::bash::rig::{ExitStatus, Rig};
 use crate::failure::{Doing, Failure};
 
@@ -49,6 +49,12 @@ struct Running<'r, R: Rig> {
     session: R::Session,
     subject: Subject,
     wire: Wire,
+
+    /// Set the moment the rig fails, and the run ends in it rather than in a
+    /// status. Serving continues until the subject leaves of its own accord:
+    /// a shell blocked on an ask waits forever unless it is told something,
+    /// and one killed before it can act on a refusal never reports it.
+    failed: Option<Failure>,
 }
 
 impl<'r, R: Rig> Running<'r, R> {
@@ -62,7 +68,7 @@ impl<'r, R: Rig> Running<'r, R> {
         let entry = prelude(dir, &startup.bash)?;
         let subject = Subject::spawn(&command, &entry, &startup.env)?;
 
-        Ok(Self { rig, session, subject, wire })
+        Ok(Self { rig, session, subject, wire, failed: None })
     }
 
     /// Serve until bash is gone, then once more for what it said on the way
@@ -80,21 +86,52 @@ impl<'r, R: Rig> Running<'r, R> {
 
     fn serve(&mut self) -> Result<(), Failure> {
         for line in self.wire.drain()? {
-            match line.kind {
-                Kind::Say => self.rig.hear(&mut self.session, line)?,
-                Kind::Ask => {
-                    let waiting = line.pid;
-                    let answer = self.rig.answer(&mut self.session, line)?;
+            let waiting = line.pid;
 
-                    self.wire.answer(waiting, answer)?;
-                }
+            if let Some(answer) = self.react(line) {
+                self.wire.answer(waiting, answer)?;
             }
         }
         Ok(())
     }
 
+    /// What to write back, if anything. A rig that fails poisons the run: it
+    /// is not called again, and every ask from then on is refused with the
+    /// reason it gave.
+    fn react(&mut self, line: Line) -> Option<Answer> {
+        let asked = line.kind == Kind::Ask;
+
+        if let Some(why) = &self.failed {
+            return asked.then(|| Answer::refused(why));
+        }
+
+        let reacted = match line.kind {
+            Kind::Say => self.rig.hear(&mut self.session, line).map(|()| None),
+            Kind::Ask => self.rig.answer(&mut self.session, line).map(Some),
+        };
+
+        match reacted {
+            Ok(answer) => answer,
+            Err(why) => {
+                // Only a shell that asked is listening; one that merely spoke
+                // has no reply pipe to write to.
+                let refusal = asked.then(|| Answer::refused(&why));
+                self.failed = Some(why);
+
+                refusal
+            }
+        }
+    }
+
     fn finish(self) -> Result<(R::Session, ExitStatus), Failure> {
-        let Self { rig, mut session, mut subject, wire } = self;
+        let Self { rig, mut session, mut subject, wire, failed } = self;
+
+        // The rig's failure is the cause. Nothing that went wrong after it is
+        // worth reporting in its place, and a run that failed has no end to
+        // run; dropping `subject` still kills and reaps the group.
+        if let Some(why) = failed {
+            return Err(why);
+        }
 
         wire.finish()?;
         let status = ExitStatus::from(subject.finish().doing(|| "waiting for bash".into())?);

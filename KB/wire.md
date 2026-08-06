@@ -54,6 +54,59 @@ Because the file is shipped as it is, it is real bash: `bash -n` and
 `shellcheck` run on it directly, and the non-invasiveness invariants are
 properties of the file rather than of a generated string.
 
+## Error flow is ours, not `set -e`'s
+
+**Every command in `prelude.bash` that can fail is followed by `|| __BC_BAIL`
+or `|| __BC_THROW`.** This is a strict requirement of BC-related bash, not a
+preference, and it buys two things at once: the left side of `||` is exempt
+from `errexit`, and the status arrives in our hands rather than the shell's.
+So this code behaves the same however the subject set its shell, and a failure
+of ours never kills a script halfway through a message.
+
+```bash
+shopt -s expand_aliases
+
+alias __BC_BAIL='{ __BC__rc=$?; return "$__BC__rc"; }'
+alias __BC_THROW='{ __BC__rc=$?; __bc_complain "${FUNCNAME[0]} ($__BC__rc)"; return "$__BC__FAILED"; }'
+```
+
+**Aliases, not functions**, because `return` has to act in the frame that
+failed and a function returns from itself. Aliases expand at parse time, so
+`expand_aliases` must be on *before* the code using them is parsed — which is
+why it is set at the top of the file, above everything that uses the guards.
+That option stays on afterwards: it is the one change the protocol makes to
+the subject's shell, and a subject's own aliases will expand where they
+otherwise would not.
+
+`__BC_BAIL` forwards the status untouched — for propagating a failure an inner
+function already reported. `__BC_THROW` complains first and returns
+`__BC__FAILED`, for a fault nothing else will mention.
+
+Two traps this closes, both observed:
+
+- Unguarded, a failed `exec` in `__bc_join` **killed a `set -e` subject** and,
+  without `set -e`, cascaded into a second `Bad file descriptor` from the
+  `printf` that followed. One fault, two behaviours, decided by the subject's
+  options.
+- `(( x -= n ))` returns **1** when the result is zero, so bare arithmetic is
+  an `errexit` foot-gun even where nothing is wrong. Guard it like anything
+  else.
+
+### What a failure looks like
+
+```
+BC_INSTR: __bc_join (1) at build.bash:42
+```
+
+One line per fault, naming the subject's own call site rather than a line of
+ours. `BC_INSTR` returns **125** — what `env` and `timeout` return when the
+wrapper rather than the payload failed — so *the instrumentation broke* is
+distinguishable from *the answer ran and returned non-zero*, which is the
+subject's own business. A usage error (`BC_INSTR nonsense`) is 2.
+
+The answer's own status is the one command deliberately left unguarded: a
+subject that asked a question wants what came back.
+
 ## The pipes
 
 | | the up pipe | `rep.<pid>` |

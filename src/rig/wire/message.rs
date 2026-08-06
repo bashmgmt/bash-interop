@@ -171,6 +171,13 @@ impl Answer {
         Self::of(["return".to_string(), code.to_string()])
     }
 
+    /// What a shell blocked on an ask is told when the rig could not answer
+    /// it: the reason, reported at its own call site, and the status every
+    /// other instrumentation failure returns.
+    pub(crate) fn refused(why: &Failure) -> Self {
+        Self::of(["__bc_refused".to_string(), why.to_string()])
+    }
+
     pub(crate) fn to_message(&self) -> String {
         literal(&self.0)
     }

@@ -9,36 +9,78 @@ __BC__UP="$__BC__DIR/up"
 # frame is always one atomic write.
 __BC__limit=3900
 
+# `BC_INSTR` could not do its job — as distinct from an answer that ran and
+# returned non-zero, which is the subject's own business. 125 is what `env`
+# and `timeout` return when the wrapper rather than the payload failed.
+__BC__FAILED=125
+
 __BC__owner=""
 __BC__parent=""
 __BC__up=""
 __BC__seq=0
 __BC__reply=""
 __BC__replyfd=""
+__BC__at=""
+__BC__rc=0
+
+# Error flow here is ours, not `set -e`'s. Every command that can fail is
+# followed by `|| __BC_BAIL` or `|| __BC_THROW`, which both makes it exempt
+# from errexit and hands us the status — so this code behaves the same however
+# the subject set its shell, and a failure of ours never kills a script
+# halfway through a message.
+#
+# Aliases rather than functions because `return` has to act in the frame that
+# failed, which a function cannot do. `expand_aliases` must therefore be on
+# before the code using them is parsed, which is why it is set here and the
+# guards are defined above everything that uses them.
+shopt -s expand_aliases
+
+alias __BC_BAIL='{ __BC__rc=$?; return "$__BC__rc"; }'
+alias __BC_THROW='{ __BC__rc=$?; __bc_complain "${FUNCNAME[0]} ($__BC__rc)"; return "$__BC__FAILED"; }'
+
+# One line per fault, naming the call site in the subject rather than a line
+# of ours, which is what a reader can act on.
+__bc_complain() {
+    printf 'BC_INSTR: %s at %s\n' "$1" "${__BC__at:-?}" >&2
+}
 
 BC_INSTR() {
     local __BC__msg
+    __BC__at="${BASH_SOURCE[1]:-?}:${BASH_LINENO[0]:-?}"
 
     case "${1-}" in
-        say) shift; [[ $BASHPID == "$__BC__owner" ]] || __bc_join; __bc_send SAY "$@" ;;
+        say) shift
+             { [[ $BASHPID == "$__BC__owner" ]] || __bc_join; } || __BC_BAIL
+             __bc_send SAY "$@" || __BC_BAIL ;;
         ask) shift; __bc_ask "$@" ;;
         *)   return 2 ;;
     esac
 }
 
+# The answer's own status is the result, so it is the one command here that is
+# deliberately unguarded: a subject asking a question wants what came back.
 __bc_ask() {
-    [[ $BASHPID == "$__BC__owner" ]] || __bc_join
+    { [[ $BASHPID == "$__BC__owner" ]] || __bc_join; } || __BC_BAIL
     [[ -n $__BC__replyfd ]] || {
-        [[ -p $__BC__reply ]] || mkfifo "$__BC__reply"
-        exec {__BC__replyfd}<>"$__BC__reply"
+        { [[ -p $__BC__reply ]] || mkfifo "$__BC__reply"; } || __BC_THROW
+        exec {__BC__replyfd}<>"$__BC__reply" || __BC_THROW
     }
 
-    __bc_send ASK "$@"
+    __bc_send ASK "$@" || __BC_BAIL
 
     local __bc_line
-    IFS= read -r __bc_line <&"$__BC__replyfd"
+    IFS= read -r __bc_line <&"$__BC__replyfd" || __BC_THROW
     local -a __bc_answer="$__bc_line"
+
     "${__bc_answer[@]}"
+}
+
+# What the run answers with when the rig could not: its reason, at the call
+# site, and the status every other instrumentation failure returns.
+__bc_refused() {
+    __bc_complain "$1"
+
+    return "$__BC__FAILED"
 }
 
 # $1 is the kind; the rest is the client's arglist. The protocol's own words
@@ -50,11 +92,12 @@ __bc_send() {
     __BC__msg="(${__BC__msg% })"
 
     if (( ${#__BC__msg} <= __BC__limit )); then
-        printf '. %s %s %s\n' "$BASHPID" "$((__BC__seq++))" "$__BC__msg" >&"$__BC__up"
-        return
+        printf '. %s %s %s\n' \
+            "$BASHPID" "$((__BC__seq++))" "$__BC__msg" >&"$__BC__up" || __BC_THROW
+        return 0
     fi
 
-    __bc_split
+    __bc_split || __BC_BAIL
 }
 
 # A shell announces nothing: its first message carries seq 0, which is what
@@ -62,7 +105,7 @@ __bc_send() {
 __bc_join() {
     __BC__parent=${__BC__owner:-$PPID}
 
-    exec {__BC__up}>"$__BC__UP"
+    exec {__BC__up}>"$__BC__UP" || __BC_THROW
     __BC__owner=$BASHPID
     __BC__seq=0
     __BC__reply="$__BC__DIR/rep.$BASHPID"
@@ -74,13 +117,16 @@ __bc_split() {
     local __bc_from=0
 
     while (( __bc_from + __BC__limit < ${#__BC__msg} )); do
-        printf '+ %s %s\n' "$__bc_head" "${__BC__msg:__bc_from:__BC__limit}" >&"$__BC__up"
+        printf '+ %s %s\n' \
+            "$__bc_head" "${__BC__msg:__bc_from:__BC__limit}" >&"$__BC__up" || __BC_THROW
         (( __bc_from += __BC__limit ))
     done
 
-    printf '. %s %s\n' "$__bc_head" "${__BC__msg:__bc_from}" >&"$__BC__up"
+    printf '. %s %s\n' "$__bc_head" "${__BC__msg:__bc_from}" >&"$__BC__up" || __BC_THROW
 }
 
-# The rig's own bash, laid down beside this file. Always written, possibly
-# empty, so sourcing it needs no test and leaves $? alone.
-source "$__BC__DIR/rig.bash"
+# The rig's own bash, laid down beside this file. The run always writes it, so
+# its absence is a broken setup and is ours to report; what it does when it
+# runs is the rig's, and that status is forwarded as it stands.
+[[ -f $__BC__DIR/rig.bash ]] || __BC_THROW
+source "$__BC__DIR/rig.bash" || __BC_BAIL
