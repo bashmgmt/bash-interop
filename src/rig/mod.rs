@@ -11,7 +11,7 @@
 //! to [`run()`], which hands the session back when bash is gone.
 //!
 //! ```no_run
-//! use mb_resolver::bash::rig::{run, Answer, Failure, Line, Rig};
+//! use mb_resolver::bash::rig::{run, Answer, Failure, Line, Rig, Startup};
 //!
 //! /// Keeps every message, and tells a shell that asks to use staging.
 //! struct Deploying;
@@ -20,8 +20,8 @@
 //!     type Session = Vec<Line>;
 //!
 //!     /// A word the subject's scripts can call, in every shell.
-//!     fn bash(&self) -> String {
-//!         "STAGE() { BC_INSTR say STAGE \"$@\"; }".into()
+//!     fn startup(&self) -> Startup {
+//!         Startup { bash: "STAGE() { BC_INSTR say STAGE \"$@\"; }".into(), ..Default::default() }
 //!     }
 //!
 //!     fn open(&self) -> Result<Vec<Line>, Failure> {
@@ -44,7 +44,7 @@
 //!     }
 //! }
 //!
-//! let (heard, status) = run(&Deploying, &["deploy.bash"])?;
+//! let (heard, status) = run(&Deploying, &["bash", "deploy.bash"])?;
 //!
 //! for line in &heard {
 //!     println!("pid {} said {:?}", line.pid, line.words);
@@ -53,14 +53,33 @@
 //! ```
 //!
 //! An answer is a command the shell runs, so its expressiveness is bash's.
-//! Only `open` is required: `bash`, `hear`, `answer` and `end` default to no
-//! bash, keeping nothing, saying the word is unknown, and doing nothing.
+//! Only `open` is required: `startup`, `transform_command`, `hear`, `answer`
+//! and `end` default to injecting nothing, running the command line as asked,
+//! keeping nothing, saying the word is unknown, and doing nothing.
+//!
+//! The command line carries its own program, so a run is not bound to bash at
+//! the top: instrumentation travels by `BASH_ENV`, and any bash the subject
+//! starts joins the wire whether or not the subject is one.
 
 mod run;
 mod tree;
 mod wire;
 
+use std::ffi::OsString;
 use std::fmt;
+
+/// What a rig tells the run about the process it is about to start.
+#[derive(Default)]
+pub struct Startup {
+    /// Injected into every shell, after the protocol's own. This is the only
+    /// half descendants see: `BASH_ENV` reaches them, a command line does
+    /// not.
+    pub bash: String,
+
+    /// Added to the environment the subject is started with, beside the
+    /// `BASH_ENV` the run sets itself.
+    pub env: Vec<(OsString, OsString)>,
+}
 
 pub use run::{run, run_in};
 pub use tree::{forest, shells, Shell, ShellNode};
@@ -76,10 +95,16 @@ pub trait Rig {
     /// its own in it, and hands it back when the run is over.
     type Session;
 
-    /// Bash this rig needs, injected into every shell after the protocol's
-    /// own and before the subject runs.
-    fn bash(&self) -> String {
-        String::new()
+    /// What the run needs before there is a shell to talk to.
+    fn startup(&self) -> Startup {
+        Startup::default()
+    }
+
+    /// The command line actually run, given the one the caller asked for —
+    /// which carries its own program, so a rig may put a launcher in front,
+    /// wrap the payload, or replace it outright. Identity by default.
+    fn transform_command(&self, argv: Vec<OsString>) -> Vec<OsString> {
+        argv
     }
 
     fn open(&self) -> Result<Self::Session, Failure>;

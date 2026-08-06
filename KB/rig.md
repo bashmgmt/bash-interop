@@ -15,9 +15,12 @@ pub trait Rig {
     /// its own in it, and hands it back when the run is over.
     type Session;
 
-    /// Bash this rig needs, injected into every shell after the protocol's
-    /// own and before the subject runs.
-    fn bash(&self) -> String;
+    /// What the run needs before there is a shell to talk to.
+    fn startup(&self) -> Startup;
+
+    /// The command line actually run, given the one the caller asked for.
+    /// Identity by default.
+    fn transform_command(&self, argv: Vec<OsString>) -> Vec<OsString>;
 
     fn open(&self) -> Result<Self::Session, Failure>;
 
@@ -33,17 +36,42 @@ pub trait Rig {
 }
 ```
 
-**`open` is the only required method.** The rest default to: no bash, keeping
-nothing, hearing the question and telling the shell the word is unknown
-(`return 127`), and doing nothing. A rig that ignores everything is a session
-type and one line; a rig that only listens adds `hear`.
+**`open` is the only required method.** The rest default to: injecting
+nothing, running the command line as asked, keeping nothing, hearing the
+question and telling the shell the word is unknown (`return 127`), and doing
+nothing. A rig that ignores everything is a session type and one line; a rig
+that only listens adds `hear`.
+
+The two that inform the run split by kind. `Startup` is **data** — what the
+process needs before it exists:
+
+```rust
+#[derive(Default)]
+pub struct Startup {
+    /// Injected into every shell, after the protocol's own. The only half
+    /// descendants see: `BASH_ENV` reaches them, a command line does not.
+    pub bash: String,
+
+    /// Added to the environment the subject is started with.
+    pub env: Vec<(OsString, OsString)>,
+}
+```
+
+`transform_command` is **behaviour** — a rig may put a launcher in front of
+the command line, wrap the payload, or replace it outright. It cannot mislay
+what the caller asked for by accident, because identity is the default.
+
+**The command line carries its own program.** `run(&rig, &["bash", "x.bash"])`,
+not `&["x.bash"]` — so a run is not bound to bash at the top. Instrumentation
+travels by `BASH_ENV`, so `&["make", "test"]` works too, and every bash `make`
+starts joins the wire.
 
 `answer`'s default routes through `hear`, so a rig that does not answer still
 keeps what it was asked.
 
-A rig's bash and its decoder are one thing, and `bash()` is where that pairing
-is expressed: bashcap's rig returns bashcap's bash, and neither can be run
-without the other.
+A rig's bash and its decoder are one thing, and `Startup::bash` is where that
+pairing is expressed: bashcap's rig hands over bashcap's bash, and neither can
+be run without the other.
 
 `Line` arrives **by value**: a session that keeps it does so without cloning,
 one that ignores it drops it for free.
@@ -60,10 +88,10 @@ whatever the client says it is:
 
 | | its `Session` | what it overrides |
 |---|---|---|
-| bashcap | `Capturing { written, sink }` | `bash`; `hear` decodes and writes; `end` flushes |
-| `examples/snapshotting.rs` | `Vec<(Pid, Snapshot)>` | `bash`; `hear` decodes and keeps |
-| `examples/answering.rs` | what it has heard | `bash`; `answer` decides from it |
-| `proofs.rs`, the soak | `Soak { heard, answered }` | all four; the tally lives in the session because a rig is `&self` |
+| bashcap | `Capturing { written, sink }` | `startup`; `hear` decodes and writes; `end` flushes |
+| `examples/snapshotting.rs` | `Vec<Capture>` | `startup`; `hear` decodes and keeps |
+| `examples/answering.rs` | what it has heard | `startup`; `answer` decides from it |
+| `proofs.rs`, the soak | `Soak { heard, answered }` | `startup`, `hear`, `answer`; the tally lives in the session because a rig is `&self` |
 | `proofs.rs`, the panic | `()` | `answer`, which never returns |
 
 That last row is the point: a session is whatever the client says it is,
@@ -84,8 +112,9 @@ pub fn run_in<R: Rig, S: AsRef<OsStr>>(rig: &R, at: &Path, argv: &[S])
 
 The two arguments are the two real inputs. The run owns a directory for its
 pipes and its prelude, the transport over them, and the subject's process
-group. **None of it appears in any signature a rig sees**: `Site` is private
-to `run.rs`, and the session is the only thing that crosses between them.
+group. **None of it appears in any signature a rig sees**, and the session is
+the only thing that crosses between them. An empty command line is a
+`Failure`, not a panic.
 
 `run` hands back the session because that is the client's, and the status
 because the run is what called `wait`.
@@ -111,9 +140,9 @@ with `open` / `drive` / `serve` / `finish`. `run` owns the `TempDir` and calls
 
 ```rust
 for line in self.wire.drain()? {
-    match line.asked() {
-        None => self.rig.hear(&mut self.session, line)?,
-        Some(_) => {
+    match line.kind {
+        Kind::Say => self.rig.hear(&mut self.session, line)?,
+        Kind::Ask => {
             let waiting = line.pid;
             let answer = self.rig.answer(&mut self.session, line)?;
 

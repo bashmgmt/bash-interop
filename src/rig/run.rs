@@ -1,6 +1,6 @@
 //! Performing a run: everything the driver needs, and nothing a rig sees.
 
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
@@ -53,10 +53,14 @@ struct Running<'r, R: Rig> {
 
 impl<'r, R: Rig> Running<'r, R> {
     fn open<S: AsRef<OsStr>>(rig: &'r R, dir: &Path, argv: &[S]) -> Result<Self, Failure> {
+        let asked = argv.iter().map(|word| word.as_ref().to_os_string()).collect();
+        let command = rig.transform_command(asked);
+        let startup = rig.startup();
+
         let session = rig.open()?;
         let wire = Wire::create(dir)?;
-        let entry = prelude(dir, &rig.bash())?;
-        let subject = Subject::spawn(argv, &entry)?;
+        let entry = prelude(dir, &startup.bash)?;
+        let subject = Subject::spawn(&command, &entry, &startup.env)?;
 
         Ok(Self { rig, session, subject, wire })
     }
@@ -109,16 +113,24 @@ struct Subject {
 }
 
 impl Subject {
-    fn spawn<S: AsRef<OsStr>>(argv: &[S], prelude: &Path) -> Result<Self, Failure> {
+    /// The command line carries its own program, so the run starts whatever
+    /// it names. Instrumentation travels by `BASH_ENV`, which any bash the
+    /// subject starts will read, whether or not the subject is one itself.
+    fn spawn(argv: &[OsString], prelude: &Path, env: &[(OsString, OsString)]) -> Result<Self, Failure> {
         use std::os::unix::process::CommandExt;
 
-        let mut command = Command::new("bash");
-        command.args(argv).env("BASH_ENV", prelude).process_group(0);
+        let said = || argv.iter().map(|word| word.to_string_lossy()).collect::<Vec<_>>().join(" ");
+        let (program, rest) = argv
+            .split_first()
+            .ok_or_else(|| Failure::new("starting the subject", "the command line is empty"))?;
 
-        let child = command.spawn().doing(|| {
-            let words: Vec<_> = argv.iter().map(|word| word.as_ref().to_string_lossy()).collect();
-            format!("spawning bash {}", words.join(" "))
-        })?;
+        let mut command = Command::new(program);
+        command.args(rest).env("BASH_ENV", prelude).process_group(0);
+        for (key, value) in env {
+            command.env(key, value);
+        }
+
+        let child = command.spawn().doing(|| format!("spawning {}", said()))?;
         let group = child.id() as libc::pid_t;
         let exit = pidfd(group).doing(|| format!("watching bash {group}"))?;
 

@@ -1,5 +1,6 @@
 //! Scratch bash for the proofs and the examples.
 
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -27,6 +28,12 @@ impl Scripts {
     pub fn at(&self, name: &str) -> PathBuf {
         self.dir().join(name)
     }
+}
+
+/// `bash <script>` — the command line, program included, since a run starts
+/// whatever its argv names.
+pub fn bash(script: PathBuf) -> Vec<OsString> {
+    vec!["bash".into(), script.into()]
 }
 
 /// Write bash of your own and answer with a command to source it.
