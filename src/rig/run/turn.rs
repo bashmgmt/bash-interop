@@ -8,17 +8,17 @@ use crate::bash::rig::wire::{Line, Reply, Stamp};
 
 pub struct Turn<'a> {
     asked: &'a Line,
-    args: &'a [String],
     dir: &'a Path,
 }
 
 impl<'a> Turn<'a> {
-    pub(crate) fn new(asked: &'a Line, args: &'a [String], dir: &'a Path) -> Self {
-        Self { asked, args, dir }
+    pub(crate) fn over(asked: &'a Line, dir: &'a Path) -> Option<Self> {
+        asked.value.asked()?;
+        Some(Self { asked, dir })
     }
 
     pub fn args(&self) -> &[String] {
-        self.args
+        self.asked.value.asked().unwrap_or_default()
     }
 
     pub fn stamp(&self) -> Stamp {

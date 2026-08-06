@@ -1,7 +1,3 @@
-# `__BC__*` is shared down the call chain; `__bc_*` is one function's own.
-# @Q escapes newlines, so the \n each printf ends with is purely the frame
-# delimiter, and `read` consumes it without storing it.
-
 __BC__owner=""
 __BC__up=""
 __BC__seq=0

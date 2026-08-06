@@ -102,14 +102,19 @@ impl fmt::Display for ExitStatus {
     }
 }
 
-impl From<std::process::ExitStatus> for ExitStatus {
-    fn from(status: std::process::ExitStatus) -> Self {
+impl TryFrom<std::process::ExitStatus> for ExitStatus {
+    type Error = RigError;
+
+    fn try_from(status: std::process::ExitStatus) -> Result<Self, RigError> {
         use std::os::unix::process::ExitStatusExt;
 
         match (status.code(), status.signal()) {
-            (Some(code), _) => Self::Code(code),
-            (None, Some(signal)) => Self::Signal(signal),
-            (None, None) => Self::Signal(0),
+            (Some(code), _) => Ok(Self::Code(code)),
+            (None, Some(signal)) => Ok(Self::Signal(signal)),
+            (None, None) => Err(RigError::new(
+                "reading how bash ended",
+                format!("neither an exit code nor a signal: {status:?}"),
+            )),
         }
     }
 }

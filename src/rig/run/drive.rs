@@ -36,7 +36,7 @@ pub(crate) fn run<R: Rig, S: AsRef<OsStr>>(rig: &R, argv: &[S]) -> Result<R::Out
     wire.finish()?;
 
     let status = subject.finish().doing(|| "waiting for bash".into())?;
-    rig.ended(session, status.into())
+    rig.ended(session, status.try_into()?)
 }
 
 fn serve<R: Rig>(
@@ -46,12 +46,12 @@ fn serve<R: Rig>(
     dir: &Path,
 ) -> Result<(), RigError> {
     for line in wire.drain()? {
-        let Some(args) = line.value.asked() else {
+        let Some(turn) = Turn::over(&line, dir) else {
             rig.heard(session, line)?;
             continue;
         };
 
-        let reply = rig.answer(session, &Turn::new(&line, args, dir))?;
+        let reply = rig.answer(session, &turn)?;
         wire.answer(line.stamp.pid, reply)?;
     }
     Ok(())
@@ -87,7 +87,7 @@ fn wait_for(pipe: RawFd, exit: RawFd) -> Result<Ready, RigError> {
 }
 
 struct Subject {
-    child: Option<Child>,
+    child: Child,
     group: libc::pid_t,
     exit: OwnedFd,
 }
@@ -111,7 +111,7 @@ impl Subject {
         let group = child.id() as libc::pid_t;
         let exit = pidfd(group).doing(|| format!("watching bash {group}"))?;
 
-        Ok(Self { child: Some(child), group, exit })
+        Ok(Self { child, group, exit })
     }
 
     fn exit(&self) -> RawFd {
@@ -120,10 +120,7 @@ impl Subject {
 
     fn finish(&mut self) -> io::Result<std::process::ExitStatus> {
         self.release();
-        match self.child.take() {
-            Some(mut child) => child.wait(),
-            None => Err(io::Error::other("the subject was already finished")),
-        }
+        self.child.wait()
     }
 
     fn release(&self) {
@@ -135,9 +132,8 @@ impl Subject {
 
 impl Drop for Subject {
     fn drop(&mut self) {
-        if self.child.is_some() {
-            let _ = self.finish();
-        }
+        self.release();
+        let _ = self.child.wait();
     }
 }
 
@@ -149,30 +145,30 @@ fn pidfd(pid: libc::pid_t) -> io::Result<OwnedFd> {
     Ok(unsafe { OwnedFd::from_raw_fd(raw as RawFd) })
 }
 
-enum Site {
-    Temporary(tempfile::TempDir),
-    Kept(PathBuf),
+struct Site {
+    dir: PathBuf,
+    _temporary: Option<tempfile::TempDir>,
 }
 
 impl Site {
     fn open(workspace: &Workspace) -> Result<Self, RigError> {
         match workspace {
-            Workspace::Temporary => tempfile::tempdir()
-                .map(Self::Temporary)
-                .doing(|| "opening a temporary workspace".into()),
+            Workspace::Temporary => {
+                let temp = tempfile::tempdir()
+                    .doing(|| "opening a temporary workspace".into())?;
 
+                Ok(Self { dir: temp.path().to_path_buf(), _temporary: Some(temp) })
+            }
             Workspace::At(path) => {
                 fs::create_dir_all(path)
                     .doing(|| format!("opening the workspace {}", path.display()))?;
-                Ok(Self::Kept(path.clone()))
+
+                Ok(Self { dir: path.clone(), _temporary: None })
             }
         }
     }
 
     fn dir(&self) -> &Path {
-        match self {
-            Self::Temporary(temp) => temp.path(),
-            Self::Kept(path) => path,
-        }
+        &self.dir
     }
 }

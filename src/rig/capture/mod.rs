@@ -38,7 +38,7 @@ impl Capture {
     }
 
     pub fn of<T: FromRecord>(&self) -> impl Iterator<Item = Stamped<Result<T, T::Err>>> + '_ {
-        self.lines.iter().filter_map(|line| {
+        self.chronological().into_iter().filter_map(|line| {
             T::from_record(&line.value).map(|value| Stamped { stamp: line.stamp, value })
         })
     }
