@@ -14,19 +14,20 @@ BC_INSTR ask a b c      # ship it, block, and run the answer
 
 ```bash
 BC_INSTR() {
-    local __BC__msg
+    __BC__at="${BASH_SOURCE[1]:-?}:${BASH_LINENO[0]:-?}"
 
     case "${1-}" in
-        say) shift; [[ $BASHPID == "$__BC__owner" ]] || __bc_join; __bc_send "$@" ;;
+        say) shift; [[ $BASHPID == "$__BC__owner" ]] || __bc_join; __bc_send SAY "$@" ;;
         ask) shift; __bc_ask "$@" ;;
-        *)   return 2 ;;
+        *)   __bc_complain "unknown verb ${1-}"; return "$__BC__FAILED" ;;
     esac
 }
 ```
 
 The leading word is consumed in bash, so the arglist an answer sees is what
-the subject wrote after `ask`. An unrecognised one returns 2 and ships
-nothing.
+the subject wrote after `ask`. An unrecognised one ships nothing and is an
+instrumentation failure like any other: named on stderr at the subject's call
+site, and 125.
 
 ## The prelude
 
@@ -250,9 +251,12 @@ One bash array literal — `declare -a x="$msg"` on the bash side,
 ```rust
 /// What one shell said, once, with the provenance the wire gives it.
 pub struct Line {
+    pub kind: Kind,        // Say or Ask
     pub sent_at: Micros,   // the sending shell's $EPOCHREALTIME
     pub heard_at: Micros,  // the run's clock when the last frame arrived
     pub pid: Pid,
+    pub parent: Pid,       // the shell that emitted before this one forked
+    pub shlvl: u32,
     pub seq: u32,          // counted per shell, from its first message
     pub words: Vec<String>,
 }
@@ -260,14 +264,15 @@ pub struct Line {
 impl Line {
     /// The words after `lead`, if this message begins with it.
     pub fn behind(&self, lead: &str) -> Option<&[String]>;
-
-    /// The question a blocked shell asked, if this is one.
-    pub fn asked(&self) -> Option<&[String]>;
 }
 
 /// Value of the first `key value` pair with this key.
 pub fn field<'a>(words: &'a [String], key: &str) -> Option<&'a str>;
 ```
+
+`field` reads a *payload* convention a client may choose. It has nothing to do
+with the `key=value` headers the protocol writes in front of one, which
+`Ahead::header` shifts back off before a client ever sees the words.
 
 `words` is what the subject passed, in order, an empty arglist included.
 `behind` and `field` are conveniences a decoder opts into. An element may

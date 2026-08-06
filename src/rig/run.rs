@@ -63,9 +63,10 @@ impl<'r, R: Rig> Running<'r, R> {
         let command = rig.transform_command(asked);
         let startup = rig.startup();
 
-        let session = rig.open()?;
         let wire = Wire::create(dir)?;
         let entry = prelude(dir, &startup.bash)?;
+
+        let session = rig.open()?;
         let subject = Subject::spawn(&command, &entry, &startup.env)?;
 
         Ok(Self { rig, session, subject, wire, failed: None })

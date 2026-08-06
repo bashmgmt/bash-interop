@@ -91,8 +91,8 @@ whatever the client says it is:
 | bashcap | `Capturing { written, sink }` | `startup`; `hear` decodes and writes; `end` flushes |
 | `examples/snapshotting.rs` | `Vec<Capture>` | `startup`; `hear` decodes and keeps |
 | `examples/answering.rs` | what it has heard | `startup`; `answer` decides from it |
-| `proofs.rs`, the soak | `Soak { heard, answered }` | `startup`, `hear`, `answer`; the tally lives in the session because a rig is `&self` |
-| `proofs.rs`, the panic | `()` | `answer`, which never returns |
+| `proofs/answering.rs` | `Soak { heard, answered }` | `startup`, `hear`, `answer`; the tally lives in the session because a rig is `&self` |
+| `proofs/owning.rs` | `()` | `answer`, which never returns |
 
 That last row is the point: a session is whatever the client says it is,
 including nothing.
@@ -151,30 +151,40 @@ struct Running<'r, R: Rig> {
     session: R::Session,
     subject: Subject,
     wire: Wire,
+
+    /// Set the moment the rig fails, and the run ends in it rather than in a
+    /// status.
+    failed: Option<Failure>,
 }
 ```
 
-with `open` / `drive` / `serve` / `finish`. `run` owns the `TempDir` and calls
-`run_in`, so the workspace drops one frame above the run that read it — after
-`finish` has reaped the subject.
+with `open` / `drive` / `serve` / `react` / `finish`. `run` owns the `TempDir`
+and calls `run_in`, so the workspace drops one frame above the run that read
+it — after `finish` has reaped the subject.
+
+`open` lays down the workspace and the pipe *before* asking the rig to open a
+session, so the session a rig hands over is the last thing acquired before the
+subject exists. That is what makes `end` reachable for every run that started
+one.
 
 ## The loop
 
-`Running::drive`. There is no interval and no timer.
+`Running::drive` and `serve`. There is no interval and no timer.
 
 ```rust
 for line in self.wire.drain()? {
-    match line.kind {
-        Kind::Say => self.rig.hear(&mut self.session, line)?,
-        Kind::Ask => {
-            let waiting = line.pid;
-            let answer = self.rig.answer(&mut self.session, line)?;
+    let waiting = line.pid;
 
-            self.wire.answer(waiting, answer)?;
-        }
+    if let Some(answer) = self.react(line) {
+        self.wire.answer(waiting, answer)?;
     }
 }
 ```
+
+`react` is where the rig is called and where a failure is caught — see [when
+the rig fails](#when-the-rig-fails). It returns what to write back, if
+anything: only a shell that *asked* is listening, so a `hear` that fails has
+nowhere to reply and yields `None`.
 
 The subject's exit is a readable descriptor — a `pidfd` — so one `poll` waits
 on the pipe and on the child at once. A readable `pidfd` does not imply an
@@ -234,14 +244,9 @@ reporting its own trouble as the subject's would not be transparent.
 pub enum ExitStatus { Code(u8), Signal(u8) }
 
 impl ExitStatus {
-    /// Ended cleanly, or the status saying it did not.
-    pub fn ok(self) -> Result<(), Self>;
-
     /// What a shell would report for it: `128 + n` for a signal.
     pub fn shell_code(self) -> i32;
 }
-
-impl std::error::Error for ExitStatus {}
 ```
 
 Both fields are the width the kernel gives them. The conversion from
@@ -249,11 +254,9 @@ Both fields are the width the kernel gives them. The conversion from
 `WTERMSIG` is the low seven bits, `WEXITSTATUS` the second byte — so it is
 total and invents nothing.
 
-`ExitStatus` is an `Error`, so refusing a bad one is the ordinary idiom:
-
-```rust
-status.ok().doing(|| format!("running {}", script.display()))?;
-```
+How a run went and how the subject ended are two facts, and the status is only
+the second: `Run::failed` carries the first. A caller wanting both takes them
+from the `Run`, and one wanting neither separately calls `whole()`.
 
 No signal disposition is changed, so a subject's own handlers and a caller's
 `SIGINT` both behave as they would unwrapped.

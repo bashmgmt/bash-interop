@@ -45,7 +45,6 @@ __bc_complain() {
 }
 
 BC_INSTR() {
-    local __BC__msg
     __BC__at="${BASH_SOURCE[1]:-?}:${BASH_LINENO[0]:-?}"
 
     case "${1-}" in
@@ -53,7 +52,8 @@ BC_INSTR() {
              { [[ $BASHPID == "$__BC__owner" ]] || __bc_join; } || __BC_BAIL
              __bc_send SAY "$@" || __BC_BAIL ;;
         ask) shift; __bc_ask "$@" ;;
-        *)   return 2 ;;
+        *)   __bc_complain "unknown verb ${1-}"
+             return "$__BC__FAILED" ;;
     esac
 }
 
@@ -88,16 +88,17 @@ __bc_refused() {
 __bc_send() {
     set -- "$1" "at=$EPOCHREALTIME" "parent=$__BC__parent" "shlvl=$SHLVL" "${@:2}"
 
-    printf -v __BC__msg '%s ' "${@@Q}"
-    __BC__msg="(${__BC__msg% })"
+    local __bc_msg
+    printf -v __bc_msg '%s ' "${@@Q}"
+    __bc_msg="(${__bc_msg% })"
 
-    if (( ${#__BC__msg} <= __BC__limit )); then
+    if (( ${#__bc_msg} <= __BC__limit )); then
         printf '. %s %s %s\n' \
-            "$BASHPID" "$((__BC__seq++))" "$__BC__msg" >&"$__BC__up" || __BC_THROW
+            "$BASHPID" "$((__BC__seq++))" "$__bc_msg" >&"$__BC__up" || __BC_THROW
         return 0
     fi
 
-    __bc_split || __BC_BAIL
+    __bc_split "$__bc_msg" || __BC_BAIL
 }
 
 # A shell announces nothing: its first message carries seq 0, which is what
@@ -112,17 +113,20 @@ __bc_join() {
     __BC__replyfd=""
 }
 
+# $1 is a message too wide for one frame. Every chunk carries the same
+# `pid seq`, which is the key the reader rejoins them by.
 __bc_split() {
+    local __bc_msg="$1"
     local __bc_head="$BASHPID $((__BC__seq++))"
     local __bc_from=0
 
-    while (( __bc_from + __BC__limit < ${#__BC__msg} )); do
+    while (( __bc_from + __BC__limit < ${#__bc_msg} )); do
         printf '+ %s %s\n' \
-            "$__bc_head" "${__BC__msg:__bc_from:__BC__limit}" >&"$__BC__up" || __BC_THROW
+            "$__bc_head" "${__bc_msg:__bc_from:__BC__limit}" >&"$__BC__up" || __BC_THROW
         (( __bc_from += __BC__limit ))
     done
 
-    printf '. %s %s\n' "$__bc_head" "${__BC__msg:__bc_from}" >&"$__BC__up" || __BC_THROW
+    printf '. %s %s\n' "$__bc_head" "${__bc_msg:__bc_from}" >&"$__BC__up" || __BC_THROW
 }
 
 # The rig's own bash, laid down beside this file. The run always writes it, so

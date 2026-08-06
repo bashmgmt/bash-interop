@@ -155,7 +155,9 @@ pub trait Rig {
         Ok(Answer::status(127))
     }
 
-    /// The subject is gone; release what the session holds.
+    /// The subject is gone; release what the session holds. Reached once per
+    /// run that started a subject; a session opened before a setup failure is
+    /// dropped instead.
     fn end(&self, _session: &mut Self::Session, _status: ExitStatus) -> Result<(), Failure> {
         Ok(())
     }
@@ -170,14 +172,6 @@ pub enum ExitStatus {
 }
 
 impl ExitStatus {
-    /// Ended cleanly, or the status saying it did not.
-    pub fn ok(self) -> Result<(), Self> {
-        match self {
-            Self::Code(0) => Ok(()),
-            ended => Err(ended),
-        }
-    }
-
     /// What a shell would report for it: `128 + n` for a signal.
     pub fn shell_code(self) -> i32 {
         match self {
@@ -195,8 +189,6 @@ impl fmt::Display for ExitStatus {
         }
     }
 }
-
-impl std::error::Error for ExitStatus {}
 
 impl From<std::process::ExitStatus> for ExitStatus {
     /// After `wait(2)` a process has either exited or been signalled, so

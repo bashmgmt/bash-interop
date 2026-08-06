@@ -121,9 +121,9 @@ impl Line {
         let mut ahead = Ahead(words.into_iter());
 
         let kind = Kind::read(&ahead.word()?)?;
-        let sent_at = Micros::parse_epoch(&ahead.field("at")?).ok_or("bad at")?;
-        let parent = ahead.field("parent")?.parse().map(Pid).map_err(|_| "bad parent")?;
-        let shlvl = ahead.field("shlvl")?.parse().map_err(|_| "bad shlvl")?;
+        let sent_at = Micros::parse_epoch(&ahead.header("at")?).ok_or("bad at")?;
+        let parent = ahead.header("parent")?.parse().map(Pid).map_err(|_| "bad parent")?;
+        let shlvl = ahead.header("shlvl")?.parse().map_err(|_| "bad shlvl")?;
 
         Ok(Self { kind, sent_at, heard_at, pid, parent, shlvl, seq, words: ahead.rest() })
     }
@@ -138,8 +138,8 @@ impl Ahead {
         self.0.next().ok_or("the message ended early")
     }
 
-    /// One `key=value`, whose key must be `key`.
-    fn field(&mut self, key: &'static str) -> Result<String, &'static str> {
+    /// One `key=value` header, whose key must be `key`.
+    fn header(&mut self, key: &'static str) -> Result<String, &'static str> {
         match self.word()?.split_once('=') {
             Some((found, value)) if found == key => Ok(value.to_string()),
             _ => Err(key),
@@ -151,7 +151,9 @@ impl Ahead {
     }
 }
 
-/// Value of the first `key value` pair with this key.
+/// Value of the first `key value` pair with this key — a convention clients
+/// may write their payload in, unrelated to the `key=value` headers the
+/// protocol puts in front of one.
 pub fn field<'a>(words: &'a [String], key: &str) -> Option<&'a str> {
     words.chunks_exact(2).find(|pair| pair[0] == key).map(|pair| pair[1].as_str())
 }
