@@ -115,6 +115,10 @@ __bc_join() {
 
 # $1 is a message too wide for one frame. Every chunk carries the same
 # `pid seq`, which is the key the reader rejoins them by.
+#
+# The cursor moves by assignment: a bare `(( x += n ))` is a command whose
+# status is false whenever the result is 0, which errexit would take for a
+# failure.
 __bc_split() {
     local __bc_msg="$1"
     local __bc_head="$BASHPID $((__BC__seq++))"
@@ -123,7 +127,7 @@ __bc_split() {
     while (( __bc_from + __BC__limit < ${#__bc_msg} )); do
         printf '+ %s %s\n' \
             "$__bc_head" "${__bc_msg:__bc_from:__BC__limit}" >&"$__BC__up" || __BC_THROW
-        (( __bc_from += __BC__limit ))
+        __bc_from=$(( __bc_from + __BC__limit ))
     done
 
     printf '. %s %s\n' "$__bc_head" "${__bc_msg:__bc_from}" >&"$__BC__up" || __BC_THROW

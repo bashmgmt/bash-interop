@@ -32,18 +32,29 @@ pub struct Reassembly {
 impl Reassembly {
     /// Everything in one read arrived at one moment, which is the `heard_at`
     /// every message completed by it carries.
+    ///
+    /// The buffer is cut once, after every frame in it has been found. Taking
+    /// them off the front one at a time would rescan and move what is left
+    /// behind each of them, which is quadratic in the frames one read carries
+    /// — and a busy read carries hundreds.
     pub fn feed(&mut self, bytes: &[u8], heard_at: Micros) -> Result<Vec<Line>, Failure> {
         self.bytes.extend_from_slice(bytes);
+
+        let mut framed: Vec<String> = Vec::new();
+        let mut cut = 0;
+        while let Some(offset) = self.bytes[cut..].iter().position(|byte| *byte == DELIMITER) {
+            let end = cut + offset;
+            let text = std::str::from_utf8(&self.bytes[cut..end])
+                .doing(|| format!("reading a frame of {} bytes", end - cut))?;
+
+            framed.push(text.to_string());
+            cut = end + 1;
+        }
+        self.bytes.drain(..cut);
+
         let mut whole = Vec::new();
-
-        while let Some(end) = self.bytes.iter().position(|byte| *byte == DELIMITER) {
-            let mut framed: Vec<u8> = self.bytes.drain(..=end).collect();
-            framed.pop();
-
-            let text = std::str::from_utf8(&framed)
-                .doing(|| format!("reading a frame of {} bytes", framed.len()))?;
-
-            if let Some(line) = self.accept(text, heard_at)? {
+        for frame in &framed {
+            if let Some(line) = self.accept(frame, heard_at)? {
                 whole.push(line);
             }
         }

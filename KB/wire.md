@@ -226,7 +226,7 @@ header so every chunk shares a `(pid, seq)` — the reassembly key. See
 
 ```rust
 #[derive(Default)]
-pub struct Reassembly { pending: Vec<u8>, message: HashMap<(Pid, u32), String> }
+pub struct Reassembly { bytes: Vec<u8>, partial: HashMap<(Pid, u32), String> }
 
 impl Reassembly {
     pub fn feed(&mut self, bytes: &[u8], heard_at: Micros) -> Result<Vec<Line>, Failure>;
@@ -239,9 +239,15 @@ inside a multi-byte character, so a frame is decoded only once the delimiter
 has said where it ends. `finish` fails if a frame lacks its delimiter or a
 message lacks its last chunk.
 
+`feed` finds every frame in the buffer before cutting it once. Taking them off
+the front one at a time would rescan and move the remainder behind each frame,
+which is quadratic in the frames one read carries — and a 64 KB read off a
+busy pipe carries hundreds.
+
 The clock is an argument rather than a call inside the fold. `Wire::drain`
 reads it once per `read`, since everything one read returns arrived at one
-moment, and bytes to messages stays a pure function.
+moment, and bytes to messages stays a pure function. A system clock behind the
+epoch fails the run rather than reading as zero.
 
 ## Messages
 

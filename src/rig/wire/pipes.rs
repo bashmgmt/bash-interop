@@ -56,7 +56,7 @@ impl Wire {
         loop {
             match self.reader.read(&mut buffer) {
                 Ok(0) => break,
-                Ok(count) => heard.extend(self.incoming.feed(&buffer[..count], Micros::now())?),
+                Ok(count) => heard.extend(self.incoming.feed(&buffer[..count], Micros::now()?)?),
                 Err(cause) => match cause.kind() {
                     io::ErrorKind::WouldBlock => break,
                     io::ErrorKind::Interrupted => continue,

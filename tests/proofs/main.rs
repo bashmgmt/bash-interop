@@ -9,6 +9,7 @@
 //! | [`transport`] | every shell reaches the wire, and a message arrives whole |
 //! | [`transparency`] | what the subject keeps: its status, its trap, its `IFS` |
 //! | [`answering`] | every form of answer, under load, from two shells at once |
+//! | [`starting`] | what a rig tells the run about the process it starts |
 //! | [`owning`] | the run's workspace, and the process group it takes with it |
 //! | [`failing`] | what a rig's own failure does to the run and to the subject |
 //!
@@ -19,6 +20,7 @@
 mod answering;
 mod failing;
 mod owning;
+mod starting;
 mod transparency;
 mod transport;
 
