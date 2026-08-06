@@ -1,29 +1,20 @@
-# The wire — pipes, frames, messages
+# The wire — the bash, the pipe, the frame, the message
 
-`src/bash/rig/wire/`, with its bash in `src/bash/rig/source/wire.bash`
+`src/bash/rig/wire/`, with its bash in `src/bash/rig/wire/prelude.bash`
 
 A named pipe every shell joins by itself, a line-oriented frame carrying
 provenance and routing, and a message that is one bash array literal.
 
-**Every pipe is held open at both ends by its owner.** The operator holds `up`
-`O_RDWR`, so the open never blocks, a shell exiting never looks like
-end-of-stream, and the reader waits with `poll` rather than a timer. A shell
-holds its own reply pipe `O_RDWR` for the same reasons, so the operator's write
-never blocks and never sees `ENXIO`.
-
 ## The client surface
-
-One name, two operations:
 
 ```bash
 BC_INSTR say a b c      # ship the arglist and return
-BC_INSTR ask a b c      # ship it, block, and continue with the answer
+BC_INSTR ask a b c      # ship it, block, and run the answer
 ```
 
 ```bash
 BC_INSTR() {
-    local __BC__msg __BC__at
-    [[ -z $__BC__DEBUG ]] || __bc_where
+    local __BC__msg
 
     case "${1-}" in
         say) shift; [[ $BASHPID == "$__BC__owner" ]] || __bc_join; __bc_send "$@" ;;
@@ -33,145 +24,101 @@ BC_INSTR() {
 }
 ```
 
-The leading word is consumed in bash and never reaches Rust, so the arglist an
-answer sees is what the subject wrote after `ask`.
+The leading word is consumed in bash, so the arglist an answer sees is what
+the subject wrote after `ask`. An unrecognised one returns 2 and ships
+nothing.
 
-`__BC__at` is taken one frame out, in `__bc_where`, because only there is
-`FUNCNAME[2]` the client rather than one of our own frames. Bash scopes locals
-dynamically, so every subfunction sees it without being handed it. Only the
-debug log reads it, which is why it is taken only when debugging.
+## The prelude
+
+```rust
+fn prelude(dir: &Path, bash: &str) -> Result<PathBuf, Failure>;
+```
+
+**Nothing is templated.** `prelude.bash` is shipped verbatim and finds its own
+workspace:
+
+```bash
+__BC__DIR="${BASH_SOURCE[0]%/*}"
+__BC__UP="$__BC__DIR/up"
+__BC__limit=3900
+…
+source "$__BC__DIR/rig.bash"
+```
+
+so the run lays two files into the workspace — the protocol's bash and the
+rig's, always written and possibly empty — and points `BASH_ENV` at the first.
+`dir` must be absolute, which is why `run_in` canonicalises it: that path is
+what every shell reads its own location from.
+
+Because the file is shipped as it is, it is real bash: `bash -n` and
+`shellcheck` run on it directly, and the non-invasiveness invariants are
+properties of the file rather than of a generated string.
 
 ## The pipes
 
-| | `up` — one, shared | `rep.<pid>` — one per asking shell |
+| | the up pipe | `rep.<pid>` |
 |---|---|---|
-| created by | the operator, in `Wire::create` | the asking shell, on its first ask |
-| the operator holds | `O_RDWR`, `O_NONBLOCK` | `O_WRONLY`, opened once per shell and cached |
+| named | `UP`, one constant | after the pid of the shell that asks |
+| created by | the run, in `Wire::create` | the asking shell, on its first ask |
+| the run holds | `O_RDWR`, `O_NONBLOCK` | `O_WRONLY`, opened `O_NONBLOCK` once per shell and cached |
 | the shell holds | `exec {__BC__up}>"$__BC__UP"` | `exec {__BC__replyfd}<>"$__BC__reply"` |
+
+**Every pipe is held open at both ends by its owner.** The run holds the up
+pipe `O_RDWR`, so its open never blocks, a shell exiting never looks like
+end-of-stream, and the reader waits with `poll` rather than a timer. A shell
+holds its own reply pipe `O_RDWR`, so it may open it once however many times
+it asks and `read` blocks on data rather than on the open.
+
+The run opens a reply pipe `O_NONBLOCK` and clears the flag once the open
+succeeds. Opening a pipe to write otherwise blocks until someone reads, and a
+shell that asked and then died leaves nobody to; `ENXIO` ends the run naming
+that pid instead.
 
 ```rust
 impl Wire {
-    pub fn create(dir: &Path) -> Result<Self, RigError>;
-    pub fn up_path(&self) -> &Path;
+    pub fn create(dir: &Path) -> Result<Self, Failure>;
 
-    /// The descriptor to wait on. Readable exactly when the subject has said
-    /// something.
+    /// Readable exactly when the subject has said something.
     pub fn reader(&self) -> RawFd;
 
-    /// Everything the pipe currently holds. A shell blocked on an answer is
-    /// one whose record `asked()`.
-    pub fn drain(&mut self) -> Result<Vec<Line>, RigError>;
+    /// Everything the pipe currently holds.
+    pub fn drain(&mut self) -> Result<Vec<Line>, Failure>;
 
-    pub fn answer(&mut self, pid: Pid, reply: Reply) -> Result<(), RigError>;
+    pub fn answer(&mut self, pid: Pid, answer: Answer) -> Result<(), Failure>;
 
     /// Nothing may be left half-read.
-    pub fn finish(self) -> Result<(), RigError>;
+    pub fn finish(self) -> Result<(), Failure>;
 }
 ```
 
-**The wire remembers no run.** `drain` hands back what it just read and
-forgets it; whether any of it is kept is the rig's business, so the transport
-depends on no layer above it.
+`drain` hands back what it just read and forgets it. The transport keeps no
+run and depends on no layer above it.
 
-Descriptors and reassembly are separate. `Wire` owns the pipes; `framing.rs`
-owns the frame format and the fold that turns bytes into whole messages:
-
-```rust
-#[derive(Default)]
-pub struct Reassembly {
-    pending: String,                       // bytes not yet terminated
-    message: HashMap<(Pid, u32), String>,  // frames without their last
-}
-
-impl Reassembly {
-    pub fn feed(&mut self, bytes: &str) -> Result<Vec<Line>, RigError>;
-    pub fn finish(self) -> Result<(), RigError>;
-}
-```
-
-That split is what lets the split/rejoin path be tested without spawning
-anything: a stream fed one byte at a time must yield what one feed yields, and
-two shells mid-message at once must not bleed into each other.
-
-Both flags on the reader earn their place:
-
-- **`O_RDWR`.** A FIFO opened read-only blocks until a writer appears, and
-  returns end-of-file once the last writer closes. Holding a write end
-  ourselves means `create` never blocks, the writer count never reaches zero,
-  and bash's write-only `exec` never blocks either.
-- **`O_NONBLOCK`, set at open.** The caller decides when to wait, with `poll`;
-  `drain` reads until the pipe is empty and returns.
-
-### Joining, and the fork guard
-
-Nothing is inherited. Every shell opens the pipe itself, from a path baked into
-the prelude:
+## Joining, and the fork guard
 
 ```bash
 __bc_join() {
     local __bc_parent=${__BC__owner:-$PPID}
+
     exec {__BC__up}>"$__BC__UP"
     __BC__owner=$BASHPID
     __BC__seq=0
     __BC__reply="$__BC__DIR/rep.$BASHPID"
     __BC__replyfd=""
+
     __bc_send __ORIGIN__ parent "$__bc_parent" shlvl "$SHLVL" source "${BASH_SOURCE[-1]:-}"
 }
 ```
 
-Because no descriptor has to survive a fork there is no bash-version surface at
-all, and `exec {var}>` allocates a descriptor ≥ 10, so a client using fd 3 or 4
-cannot collide with us.
+Every shell opens the pipe itself, by name, from a path baked into the
+prelude. **Nothing is inherited**, so no descriptor has to survive a fork and
+a client's own use of a particular fd cannot collide.
 
-Every send is preceded by
-
-```bash
-[[ $BASHPID == "$__BC__owner" ]] || __bc_join
-```
-
-which is the fork detector, and it catches both cases that exist:
-
-| scenario | `__BC__owner` at the guard | `parent` recorded |
-|---|---|---|
-| first call in the top shell | `""`, the prelude just ran | `$PPID` — the rig's own process |
-| `( … )` subshell | the parent's pid, inherited | `${__BC__owner}` — the emitting parent, exactly |
-| `bash child.sh` | `""`, the prelude re-ran via `BASH_ENV` | `$PPID` — the parent process |
-
-`$PPID` alone would be wrong for the subshell: inside one it names the
-*grandparent*. Reading the inherited `__BC__owner` before overwriting it is
-what makes the process forest true.
-
-The guard sits in `BC_INSTR`'s `say` arm and at the top of `__bc_ask`, which
-are the only two places a message originates, so there is no way to write
-through a stale descriptor by accident. It is deliberately *not* in
-`__bc_send`, which `__bc_join` itself calls — that would be a loop.
-
-### The one-frame lane
-
-`__bc_send` packs and ships, and one atomic write is where it ends:
-
-```bash
-__bc_send() {
-    printf -v __BC__msg '%s ' "${@@Q}"
-    __BC__msg="(${__BC__msg% })"
-    [[ -z $__BC__DEBUG ]] || __bc_log "${#__BC__msg}" "$__BC__at"
-
-    if (( ${#__BC__msg} <= __BC__limit )); then
-        printf '%s %s %s . %s\n' \
-            "$EPOCHREALTIME" "$BASHPID" "$((__BC__seq++))" "$__BC__msg" >&"$__BC__up"
-        return
-    fi
-
-    __bc_split
-}
-```
-
-Packing and shipping are one function because nothing ever wants one without
-the other — `say`, `ask` and `join` all call exactly this. Two things keep the
-common path short: the call site `__BC__at` is three array subscripts that only
-the debug log reads, so it is taken only when something will read it; and a
-message that fits leaves before `__bc_split` is ever reached. See
-[design.md](design.md#the-one-frame-lane).
+`$BASHPID != $__BC__owner` detects a fork — a subshell inherits the variable
+but not the pid — so a `( … )` or a `$( … )` rejoins with its own descriptor,
+its own sequence counter and its own reply pipe. `__bc_parent` is the
+inherited owner when there is one, so a subshell names its *emitting* parent;
+`$PPID` there names the grandparent.
 
 ## Frames
 
@@ -182,117 +129,109 @@ One line, one frame:
 ```
 
 **The delimiter separates frames and is part of none of them.** It is appended
-after a frame is built and consumed before one is parsed, on both sides: bash
-`printf`s it after the message and `read` consumes it without storing it;
-Rust pushes it onto a built message and drains it off before parsing. No frame
-and no message ever holds one.
-
-That is exact rather than heuristic because both emitters escape a newline
-inside a value — bash through `@Q`, Rust through `emit_q_words`, each
-rendering it `$'\n'` — so a frame needs no length prefix. A value carrying
-newlines still arrives as one record, which
-`a_newline_inside_a_value_is_escaped_not_framed` proves end to end.
+after a frame is built and consumed before one is parsed, on both sides. Both
+emitters render a newline inside a value as `$'\n'` — bash through `@Q`, Rust
+through `emit_q_words` — so framing needs no length prefix and a value
+carrying newlines arrives as one message.
 
 ```rust
-pub struct Frame { pub stamp: Stamp, pub partial: bool, pub chunk: String }
-impl Frame { pub fn parse(raw: &str) -> Result<Self, RigError>; }
+struct Frame { sent_at: Micros, pid: Pid, seq: u32, continues: bool, chunk: String }
 ```
 
-The header sits **outside** the message because a continuation has to be routed
-before there is a message to parse — and routing is the only thing it is for.
-`+` means more chunks follow, `.` means this is the last, and that is the
-header's entire semantic content.
+Private to `framing.rs`: a frame exists between the read and the message. The
+header sits outside the message because a continuation must be routed before
+there is a message to parse. `+` means more chunks follow, `.` means this is
+the last, and that is the header's entire semantic content.
 
-Whether the sender is waiting for an answer is *not* here. It is `__ASK__` in
-the message, where `Record::asked` reads it, so the two reserved words work
-identically and a capture read back from a file still knows which lines were
-questions.
+Whether the sender is waiting is in the message, as `__ASK__`, where
+`Line::asked` reads it — so a stream written to a file and read back still
+distinguishes questions.
+
+An answer carries **no header**: the shell that asked is its only reader, so
+`pipes` writes the message and a delimiter and nothing else.
+
+```bash
+__BC__limit=3900
+```
+
+Below `PIPE_BUF` (4096) with room for the ~37-byte header and the delimiter,
+so every frame is one atomic write. It lives in the bash because only the
+writer splits: reassembly is driven by the `+`/`.` marker, so Rust never needs
+the number. A longer message goes through
+`__bc_split`, which chunks it with `+`, terminates with `.`, and reuses one
+header so every chunk shares a `(pid, seq)` — the reassembly key. See
+[measurements.md](measurements.md#the-pipe_buf-boundary).
 
 ```rust
-pub const FRAME_LIMIT: usize = 3900;
+#[derive(Default)]
+pub struct Reassembly { pending: Vec<u8>, message: HashMap<(Pid, u32), String> }
+
+impl Reassembly {
+    pub fn feed(&mut self, bytes: &[u8], heard_at: Micros) -> Result<Vec<Line>, Failure>;
+    pub fn finish(self) -> Result<(), Failure>;
+}
 ```
 
-Below `PIPE_BUF` (4096) with room for the header, so every frame is one atomic
-write and concurrent shells cannot interleave. A longer message goes through
-`__bc_split`, which chunks it with `+` and terminates with `.`, reusing one
-header so every chunk shares a `seq`. That pair is the reassembly
-key in `Wire::accept`.
+The buffer is **bytes**, not text: a read boundary falls anywhere, including
+inside a multi-byte character, so a frame is decoded only once the delimiter
+has said where it ends. `finish` fails if a frame lacks its delimiter or a
+message lacks its last chunk.
 
-This is not theoretical: unframed, eight concurrent writers emitting 9000-byte
-messages produced 16 mangled lines and lost 8 messages outright.
+The clock is an argument rather than a call inside the fold. `Wire::drain`
+reads it once per `read`, since everything one read returns arrived at one
+moment, and bytes to messages stays a pure function.
 
 ## Messages
 
-A message is **one bash array literal** — `declare -a x="$msg"` on the bash
-side, `QuotedNest::parse_literal` on the Rust side, the same shape in both
-directions.
+One bash array literal — `declare -a x="$msg"` on the bash side,
+`QuotedNest::words` on the Rust side, the same shape both ways.
 
 ```rust
-pub struct Record { pub words: Vec<String> }
-
-impl Record {
-    pub fn new(words: impl IntoIterator<Item = impl Into<String>>) -> Self;
-    pub fn behind(&self, lead: &str) -> Option<&[String]>;
-    pub fn asked(&self) -> Option<&[String]>;   // behind(ASK_TAG)
-    pub fn parse_message(literal: &str) -> Result<Self, RigError>;
-    pub fn to_message(&self) -> String;
+/// What one shell said, once, with the provenance the wire gives it.
+pub struct Line {
+    pub sent_at: Micros,   // the sending shell's $EPOCHREALTIME
+    pub heard_at: Micros,  // the run's clock when the last frame arrived
+    pub pid: Pid,
+    pub seq: u32,          // counted per shell, from its first message
+    pub words: Vec<String>,
 }
 
-/// Value of the first `key value` pair with this key, over words a decoder
-/// has already claimed.
+impl Line {
+    /// The words after `lead`, if this message begins with it.
+    pub fn behind(&self, lead: &str) -> Option<&[String]>;
+
+    /// The question a blocked shell asked, if this is one.
+    pub fn asked(&self) -> Option<&[String]>;
+}
+
+/// Value of the first `key value` pair with this key.
 pub fn field<'a>(words: &'a [String], key: &str) -> Option<&'a str>;
 ```
 
-`words` is what the subject passed, in order, an empty arglist included. The
-rig reads no position of it.
-`behind` is how a tool opts into the leading-discriminator convention, and
-`field` is a convenience for the commonest payload shape — both entirely
-optional.
+`words` is what the subject passed, in order, an empty arglist included.
+`behind` and `field` are conveniences a decoder opts into. An element may
+itself be a literal, decoded with `Schema::n_d(k)`, which is how a payload
+carries structure without sentinel words.
 
-An element may itself be a literal, decoded with `Schema::n_d(k)`, which is how
-structure survives without sentinels. See [values.md](values.md#trees-and-the-two-codecs).
-
-### Provenance
-
-```rust
-pub struct Micros(pub u64);   // from $EPOCHREALTIME; both radix characters accepted
-pub struct Pid(pub u32);
-pub struct Stamp { pub at: Micros, pub pid: Pid, pub seq: u32 }
-pub struct Stamped<T> { pub stamp: Stamp, pub value: T }
-pub type Line = Stamped<Record>;
-```
-
-The stamp is written by the **sender**, which is what makes cross-shell
-chronological ordering meaningful. `Micros::parse_epoch` accepts `.` and `,`
-because `$EPOCHREALTIME` uses the locale's radix character and the rig refuses
-to force a locale on the subject.
+Both clocks are kept because they answer different questions: `sent_at` orders
+messages across the process tree as the shells saw it, `heard_at` says when
+the run learned of one. Nothing sorts by either — the order a session sees is
+the order the pipe delivered.
 
 ### Typed decoding
 
-```rust
-pub trait FromRecord: Sized {
-    type Err;
-    fn from_record(record: &Record) -> Option<Result<Self, Self::Err>>;
-}
-```
-
-Three outcomes, all real: `None` — not this family's record; `Some(Err)` — ours
-and malformed; `Some(Ok)` — ours. `None` is what lets several tools share one
-wire without the rig knowing anything about either. The idiomatic shape is
-recognise, then decode:
+There is no trait. A decoder is a function of the shape
 
 ```rust
-impl FromRecord for Timing {
-    type Err = String;
-    fn from_record(record: &Record) -> Option<Result<Self, Self::Err>> {
-        Some(Self::decode(record.behind("TIMEIT")?))
-    }
-}
+fn timing(line: &Line) -> Option<Result<Timing, String>>;
 ```
 
-## Control
+`None` means *not this family's message*: some other tool's, and no error.
+`Some(Err)` means recognised and malformed. The two levels separate sharing a
+wire from failing to decode. `Origin::of` and `Snapshot::of` are both this
+shape.
 
-The ask half, in full:
+## Asking
 
 ```bash
 __bc_ask() {
@@ -312,73 +251,32 @@ __bc_ask() {
 }
 ```
 
-The last line is the whole of continuing: `local -a` is bash's own parser
-unpacking the array literal, and then the shell *runs it*. Its status is the
-function's status, and therefore `BC_INSTR ask`'s.
-
-This shell holds both ends of its own reply pipe, so the descriptor is opened
-once however many times it asks, and `read` blocks on data rather than on the
-open. Assignments in a sourced step are global and therefore reach the client;
-a `local` in one would not, and is the single thing a step must avoid.
+`local -a` is bash's own parser unpacking the array literal; the shell then
+runs it, and its status becomes `BC_INSTR ask`'s.
 
 ```rust
-pub const ASK_TAG: &str = "__ASK__";
+/// One command, as an arglist — the same shape a message has, on the same
+/// wire, encoded the same way.
+pub struct Answer(Vec<String>);
 
-/// One command, as an arglist — the same shape a message has.
-pub struct Reply(Vec<String>);
-
-impl Reply {
+impl Answer {
     pub fn of(words: impl IntoIterator<Item = impl Into<String>>) -> Self;
-    pub fn nothing() -> Self;          // [":"]
-    pub fn status(code: i32) -> Self;  // ["return", "<code>"]
-    pub fn source(path: &Path) -> Self;
-    pub fn eval(code: &str) -> Self;
-    pub fn words(&self) -> &[String];
+
+    /// Return `code` and nothing else. `u8` is what bash's `return` carries.
+    pub fn status(code: u8) -> Self;
 }
 ```
 
-The ask travels up as an ordinary message, so breakpoints appear in the capture
-like anything else; `Record::asked` strips `__ASK__` before it reaches an
-answer, because it is the transport's word and not the subject's. It is one of
-exactly two reserved words, the other being `__ORIGIN__`, and both are the
-transport describing itself.
+An answer is a command array, so it reaches anything the shell knows,
+including words the prelude defined. It performs no I/O: an answer that wants
+to send more bash than one command's worth writes a file **wherever it likes**
+and names it — `Answer::of(["source", path])`.
 
-**A reply has no variants and never will.** A bash command array can reach
-anything the shell knows, so the fidelity comes from the vocabulary the prelude
-defined rather than from cases here:
-
-```text
-[":"]                                    nothing
-["return", "1"]                          resume with a status
-["exit", "9"]                            end the shell
-["source", "/…/step.bash"]               run code
-["declare", "-g", "picked=elderberry"]   assign
-["eval", "picked=x; note ready"]         interim, for debugging
-["WITH_BASHCAP", "-BCS:probe", "deploy"] a call into the tool's own words
-```
-
-There is no "unanswered" and no "refused": a rig with nothing useful to say
-answers `["return", "127"]`, and a refusal is a command that says what went
-wrong and returns non-zero. That is why the rig never writes to the subject's
-own streams — anything an answer wants said, the subject says.
-
-[`Turn::source`](run.md#turn--one-question-and-everything-around-it) writes a
-body into the run's workspace and hands back the command that sources it, which
-is the file-free `eval` route's counterpart for anything worth keeping.
-
-## What cannot be read ends the run
-
-A frame that would not parse, a message that would not decode, a frame without
-its newline, or a message whose last chunk never came: each is a `RigError`,
-raised where it happens. `Wire::finish` is the last of those checks — it takes
-the wire by value and asserts nothing is half-read.
-
-There is no side channel of unreadable lines, because a capture that quietly
-lacks something is worth less than no capture. The subject is killed on the way
-out, so nothing is left blocked.
+Assignments made by a sourced step are global and reach the client; a `local`
+in one would not, and is the single thing a step must avoid.
 
 ## See also
 
-- [design.md](design.md) — why a named pipe, why framing, and what it costs
-- [capture.md](capture.md) — what the lines become
-- [source.md](source.md) — the bash this document quotes, and where it lives
+- [rig.md](rig.md) — who calls `drain` and `answer`
+- [tree.md](tree.md) — what `__ORIGIN__` is for
+- [measurements.md](measurements.md) — the frame limit, and what each proof establishes

@@ -1,3 +1,14 @@
+# The client half of the protocol, sourced through BASH_ENV by every shell in
+# the subject's process tree. It is shipped verbatim into the run's workspace
+# and finds everything it needs from its own path, so nothing is templated in.
+
+__BC__DIR="${BASH_SOURCE[0]%/*}"
+__BC__UP="$__BC__DIR/up"
+
+# Under PIPE_BUF (4096) with room for the header and the delimiter, so a frame
+# is always one atomic write.
+__BC__limit=3900
+
 __BC__owner=""
 __BC__up=""
 __BC__seq=0
@@ -5,18 +16,13 @@ __BC__reply=""
 __BC__replyfd=""
 
 BC_INSTR() {
-    local __BC__msg __BC__at
-    [[ -z $__BC__DEBUG ]] || __bc_where
+    local __BC__msg
 
     case "${1-}" in
         say) shift; [[ $BASHPID == "$__BC__owner" ]] || __bc_join; __bc_send "$@" ;;
         ask) shift; __bc_ask "$@" ;;
         *)   return 2 ;;
     esac
-}
-
-__bc_where() {
-    __BC__at="${BASH_SOURCE[2]:-}:${BASH_LINENO[1]:-0}:${FUNCNAME[2]:-main}"
 }
 
 __bc_ask() {
@@ -38,7 +44,6 @@ __bc_ask() {
 __bc_send() {
     printf -v __BC__msg '%s ' "${@@Q}"
     __BC__msg="(${__BC__msg% })"
-    [[ -z $__BC__DEBUG ]] || __bc_log "${#__BC__msg}" "$__BC__at"
 
     if (( ${#__BC__msg} <= __BC__limit )); then
         printf '%s %s %s . %s\n' \
@@ -73,6 +78,6 @@ __bc_split() {
     printf '%s . %s\n' "$__bc_head" "${__BC__msg:__bc_from}" >&"$__BC__up"
 }
 
-__bc_log() {
-    printf '%s %s %s\n' "$EPOCHREALTIME" "$BASHPID" "$*" >> "$__BC__DIR/debug.log"
-}
+# The rig's own bash, laid down beside this file. Always written, possibly
+# empty, so sourcing it needs no test and leaves $? alone.
+source "$__BC__DIR/rig.bash"
