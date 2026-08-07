@@ -7,7 +7,7 @@ use std::time::Instant;
 use mb_resolver::bash::rig::{run, Answer, ExitStatus, Failure, Kind, Line, Rig};
 
 use crate::support::{bash, Scripts};
-use crate::{behind, gone, report, script, ENTRY};
+use crate::{behind, gone, report, script, Keeping, ENTRY};
 
 /// Fails the first time it is asked anything, and keeps whatever it heard.
 struct Breaking {
@@ -78,6 +78,38 @@ fn a_failure_while_hearing_ends_the_run_and_kills_the_subject() {
     assert!(failure.to_string().contains("the sink is on fire"), "{failure}");
     assert!(started.elapsed().as_secs() < 5, "the run must not wait the subject out");
     assert!(gone(blocked(&scripts)), "the subject outlived the run");
+}
+
+/// A reply pipe's name is a shell's own and is free again before that shell
+/// can ask anything else, so one already taken was left by something else.
+///
+/// Adopting it would in fact work — a pipe is a rendezvous and does not care
+/// who made it. `mkfifo` is a single attempt anyway: the protocol does not
+/// build on state it did not create, and the shell is told at its own call
+/// site rather than carrying on over it.
+#[test]
+fn a_reply_pipe_name_already_taken_is_the_subjects_to_handle() {
+    let scripts = Scripts::of(&[(
+        ENTRY,
+        r#"
+        exec 2> "${BASH_SOURCE[0]%/*}/err"
+        mkfifo "$__BC__DIR/rep.$BASHPID"
+
+        BC_INSTR ask something
+        echo "ask returned $?" >&2
+        BC_INSTR say REC "still running"
+        "#,
+    )]);
+
+    let (seen, status) = run(&Keeping, &bash(scripts.at(ENTRY))).unwrap().whole().unwrap();
+
+    assert_eq!(status, ExitStatus::Code(0), "the subject carried on and ended its own way");
+    assert_eq!(behind(&seen, "REC"), [["still running"]], "{}", report(&seen));
+
+    let said = std::fs::read_to_string(scripts.at("err")).unwrap();
+    assert!(said.contains("ask returned 125"), "the instrumentation failed: {said:?}");
+    assert!(said.contains("__bc_ask"), "naming what broke: {said:?}");
+    assert!(said.contains(&format!("{ENTRY}:5")), "at the subject's own call site: {said:?}");
 }
 
 /// A verb the protocol does not define is the client's mistake and stays in

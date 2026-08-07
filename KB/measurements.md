@@ -106,9 +106,15 @@ be is left to the compiler. One file per subject.
 | `a_shell_left_asking_does_not_outlive_the_run` | the run does not wait for a straggler, and the straggler does not survive it |
 | `a_panicking_answer_kills_the_subject` | the same guarantee reached by unwinding, naming the blocked pid |
 
+| `malformed.rs` | establishes |
+|---|---|
+| `an_unfinished_message_is_reported_beside_the_subjects_status` | a message whose last chunk never comes is reported as `Run::failed`, the subject's own status survives it, and the messages around it arrive |
+| `a_message_that_will_not_read_ends_the_run` | a chunk claiming another message's key corrupts it, and the reader refuses it rather than handing on nonsense |
+
 | `failing.rs` | establishes |
 |---|---|
 | `a_rig_that_cannot_answer_ends_the_run_and_kills_the_subject` | `run` yields the rig's reason, and the shell blocked on the ask does not outlive it |
+| `a_reply_pipe_name_already_taken_is_the_subjects_to_handle` | `mkfifo` is one attempt: a name something else left is refused at the subject's call site rather than adopted |
 | `a_failure_while_hearing_ends_the_run_and_kills_the_subject` | the same for a message nobody was waiting on, without waiting out a subject that would have slept 30 seconds |
 | `an_unknown_verb_is_reported_rather_than_ignored` | a verb the protocol does not define is named on stderr and returns 125 |
 

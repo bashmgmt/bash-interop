@@ -125,6 +125,33 @@ mod tests {
         })
     }
 
+    /// A shell that asked and then died leaves a pipe nobody is reading.
+    /// Opening one to write blocks until a reader arrives, and none will —
+    /// `O_NONBLOCK` is what turns that into `ENXIO` instead of a run that
+    /// never returns.
+    ///
+    /// Answering runs on a thread so a regression fails here rather than
+    /// hanging the suite.
+    #[test]
+    fn answering_a_pipe_nobody_reads_fails_rather_than_blocking() {
+        let dir = tempfile::tempdir().expect("a workspace");
+        let wire = Wire::create(dir.path()).expect("the up pipe");
+
+        let pid = Pid(4243);
+        nix::unistd::mkfifo(&super::super::reply(dir.path(), pid), nix::sys::stat::Mode::S_IRWXU)
+            .expect("a reply pipe with no reader");
+
+        let (done, answered) = std::sync::mpsc::channel();
+        std::thread::spawn(move || done.send(wire.answer(pid, Answer::status(0))));
+
+        let outcome = answered
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("the open blocked; a dead asker would hang the run");
+
+        let why = outcome.expect_err("answering a pipe nobody reads cannot succeed");
+        assert!(why.to_string().contains("os error 6"), "ENXIO, not something else: {why}");
+    }
+
     /// An answer past the pipe's 64 KB cannot be handed over in one write, so
     /// the run has to block until the shell has taken the rest. It arrives
     /// whole, and the pipe goes with it.

@@ -11,7 +11,8 @@
 //! | [`answering`] | every form of answer, under load, from two shells at once |
 //! | [`starting`] | what a rig tells the run about the process it starts |
 //! | [`owning`] | the run's workspace, and the process group it takes with it |
-//! | [`failing`] | what a rig's own failure does to the run and to the subject |
+//! | [`failing`] | what a fault on either side does to the run and to the subject |
+//! | [`malformed`] | what the reader does with a stream the protocol did not write |
 //!
 //! This file holds what more than one of them needs.
 //!
@@ -19,6 +20,7 @@
 
 mod answering;
 mod failing;
+mod malformed;
 mod owning;
 mod starting;
 mod transparency;
