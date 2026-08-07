@@ -93,9 +93,15 @@ be is left to the compiler. One file per subject.
 |---|---|
 | `a_session_survives_every_way_of_answering` | 57 asks across two shells, every answer form, one deliberately slow, mixed with a message too wide for one frame |
 
+| `starting.rs` | establishes |
+|---|---|
+| `a_rig_may_wrap_the_command_line_and_add_to_the_environment` | a launcher runs in front of the command line, that command line arrives intact, and `Startup::env` reaches the process the launcher started |
+| `the_command_line_is_run_as_asked_by_default` | `transform_command` is identity unless a rig says otherwise |
+
 | `owning.rs` | establishes |
 |---|---|
 | `a_named_workspace_is_left_behind` | `run_in` leaves its prelude and its pipe where it was told to |
+| `every_reply_pipe_goes_with_its_answer` | 43 asks from two shells leave no reply pipe behind |
 | `a_shell_left_asking_does_not_outlive_the_run` | the run does not wait for a straggler, and the straggler does not survive it |
 | `a_panicking_answer_kills_the_subject` | the same guarantee reached by unwinding, naming the blocked pid |
 

@@ -41,5 +41,5 @@ pub fn sourcing(path: &Path, body: &str) -> Result<Answer, Failure> {
     fs::write(path, body)
         .map_err(|cause| Failure::new(format!("writing {}", path.display()), cause))?;
 
-    Ok(Answer::of(["source", &path.to_string_lossy()]))
+    Ok(Answer::of("source", [path.to_string_lossy()]))
 }

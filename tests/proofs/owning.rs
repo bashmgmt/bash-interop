@@ -3,7 +3,7 @@
 
 use std::time::{Duration, Instant};
 
-use mb_resolver::bash::rig::{run, run_in, Answer, ExitStatus, Failure, Line, Rig};
+use mb_resolver::bash::rig::{run, run_in, Answer, ExitStatus, Failure, Kind, Line, Rig};
 
 use crate::support::{bash, Scripts};
 use crate::{behind, report, script, Keeping, ENTRY};
@@ -24,6 +24,39 @@ fn a_named_workspace_is_left_behind() {
     assert!(at.join("prelude.bash").is_file(), "the protocol's bash");
     assert!(at.join("rig.bash").is_file(), "the rig's own, beside it");
     assert!(at.join("up").exists(), "the pipe every shell joined");
+}
+
+/// A reply pipe belongs to one question and goes with its answer, so a run
+/// that asks many times from several shells ends holding none of them — and
+/// the name a later question uses is one nothing else can be sitting on.
+#[test]
+fn every_reply_pipe_goes_with_its_answer() {
+    let temp = tempfile::tempdir().unwrap();
+    let at = temp.path().join("workspace");
+    let scripts = Scripts::of(&[
+        (
+            ENTRY,
+            r#"
+            for i in $(seq 1 40); do BC_INSTR ask step "$i"; done
+            bash "${BASH_SOURCE[0]%/*}/other.bash"
+            exit 0
+            "#,
+        ),
+        ("other.bash", "for i in 1 2 3; do BC_INSTR ask step \"$i\"; done\nexit 0\n"),
+    ]);
+
+    let (seen, status) = run_in(&Keeping, &at, &bash(scripts.at(ENTRY))).unwrap().whole().unwrap();
+
+    assert_eq!(status, ExitStatus::Code(0));
+    assert_eq!(seen.iter().filter(|line| line.kind == Kind::Ask).count(), 43, "two shells asked");
+
+    let left: Vec<String> = std::fs::read_dir(&at)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name.starts_with("rep."))
+        .collect();
+
+    assert!(left.is_empty(), "reply pipes left behind: {left:?}");
 }
 
 /// A shell asking after the subject exited can never be answered, so the run

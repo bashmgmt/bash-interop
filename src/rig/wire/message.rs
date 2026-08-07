@@ -169,20 +169,29 @@ pub fn field<'a>(words: &'a [String], key: &str) -> Option<&'a str> {
 pub struct Answer(Vec<String>);
 
 impl Answer {
-    pub fn of(words: impl IntoIterator<Item = impl Into<String>>) -> Self {
-        Self(words.into_iter().map(Into::into).collect())
+    /// A command and the arguments it is given. The command word stands apart
+    /// from them because a command of no words is not one: it would run
+    /// nothing and leave the shell holding whatever status it had.
+    pub fn of(
+        command: impl Into<String>,
+        args: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        let mut words = vec![command.into()];
+        words.extend(args.into_iter().map(Into::into));
+
+        Self(words)
     }
 
     /// The command `return code`.
     pub fn status(code: u8) -> Self {
-        Self::of(["return".to_string(), code.to_string()])
+        Self::of("return", [code.to_string()])
     }
 
     /// What a shell blocked on an ask is told when the rig could not answer
     /// it: the reason, reported at its own call site, and the status every
     /// other instrumentation failure returns.
     pub(crate) fn refused(why: &Failure) -> Self {
-        Self::of(["__bc_refused".to_string(), why.to_string()])
+        Self::of("__bc_refused", [why.to_string()])
     }
 
     pub(crate) fn to_message(&self) -> String {

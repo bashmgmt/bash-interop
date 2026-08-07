@@ -38,7 +38,7 @@
 //!         heard.push(asked);
 //!
 //!         Ok(match target.as_deref() {
-//!             Some("target") => Answer::of(["declare", "-g", "target=staging"]),
+//!             Some("target") => Answer::of("declare", ["-g", "target=staging"]),
 //!             _ => Answer::status(1),
 //!         })
 //!     }

@@ -23,11 +23,13 @@ fn up(dir: &Path) -> PathBuf {
     dir.join("up")
 }
 
-/// A shell's reply pipe, named after the pid that asks. The bash builds the
-/// same path from `__BC__DIR`, which is why the run tells it the directory
-/// and not this.
-fn reply(dir: &Path, pid: Pid) -> PathBuf {
-    dir.join(format!("rep.{pid}"))
+/// Where a shell blocked on an ask is listening. Named for the message rather
+/// than the shell: it is made for one answer and removed with it, so nothing
+/// accumulates over a run and no name is ever met twice. The bash builds the
+/// same path from `__BC__DIR`, which is why the run tells it the directory and
+/// not this.
+fn reply(dir: &Path, pid: Pid, seq: u32) -> PathBuf {
+    dir.join(format!("rep.{pid}.{seq}"))
 }
 
 /// Lays the protocol's bash into `dir` with the rig's beside it, and returns

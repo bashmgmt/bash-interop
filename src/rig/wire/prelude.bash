@@ -18,21 +18,14 @@ __BC__owner=""
 __BC__parent=""
 __BC__up=""
 __BC__seq=0
-__BC__reply=""
-__BC__replyfd=""
 __BC__at=""
 __BC__rc=0
 
-# Error flow here is ours, not `set -e`'s. Every command that can fail is
-# followed by `|| __BC_BAIL` or `|| __BC_THROW`, which both makes it exempt
-# from errexit and hands us the status — so this code behaves the same however
-# the subject set its shell, and a failure of ours never kills a script
-# halfway through a message.
-#
-# Aliases rather than functions because `return` has to act in the frame that
-# failed, which a function cannot do. `expand_aliases` must therefore be on
-# before the code using them is parsed, which is why it is set here and the
-# guards are defined above everything that uses them.
+# Error flow here is ours, not `set -e`'s: every command that can fail is
+# followed by `|| __BC_BAIL` or `|| __BC_THROW`, which exempts it from errexit
+# and hands us the status. Aliases rather than functions because `return` must
+# act in the frame that failed; `expand_aliases` is therefore on before
+# anything using them is parsed.
 shopt -s expand_aliases
 
 alias __BC_BAIL='{ __BC__rc=$?; return "$__BC__rc"; }'
@@ -57,19 +50,27 @@ BC_INSTR() {
     esac
 }
 
-# The answer's own status is the result, so it is the one command here that is
-# deliberately unguarded: a subject asking a question wants what came back.
+# One pipe per question, named for the message that asks it — `__bc_send`
+# stamps the sequence number read here — and removed by the run once answered,
+# so `mkfifo` is one attempt against a name nothing else holds. Read-write, so
+# the read waits for an answer instead of seeing end of input.
+#
+# Running the answer is the one unguarded command here: its status is the
+# result a subject asking a question wants.
 __bc_ask() {
     { [[ $BASHPID == "$__BC__owner" ]] || __bc_join; } || __BC_BAIL
-    [[ -n $__BC__replyfd ]] || {
-        { [[ -p $__BC__reply ]] || mkfifo "$__BC__reply"; } || __BC_THROW
-        exec {__BC__replyfd}<>"$__BC__reply" || __BC_THROW
-    }
+
+    local __bc_reply="$__BC__DIR/rep.$BASHPID.$__BC__seq"
+    local __bc_fd
+    mkfifo "$__bc_reply" || __BC_THROW
+    exec {__bc_fd}<>"$__bc_reply" || __BC_THROW
 
     __bc_send ASK "$@" || __BC_BAIL
 
     local __bc_line
-    IFS= read -r __bc_line <&"$__BC__replyfd" || __BC_THROW
+    IFS= read -r __bc_line <&"$__bc_fd" || __BC_THROW
+    exec {__bc_fd}>&- || __BC_THROW
+
     local -a __bc_answer="$__bc_line"
 
     "${__bc_answer[@]}"
@@ -109,16 +110,12 @@ __bc_join() {
     exec {__BC__up}>"$__BC__UP" || __BC_THROW
     __BC__owner=$BASHPID
     __BC__seq=0
-    __BC__reply="$__BC__DIR/rep.$BASHPID"
-    __BC__replyfd=""
 }
 
 # $1 is a message too wide for one frame. Every chunk carries the same
-# `pid seq`, which is the key the reader rejoins them by.
-#
-# The cursor moves by assignment: a bare `(( x += n ))` is a command whose
-# status is false whenever the result is 0, which errexit would take for a
-# failure.
+# `pid seq`, the key the reader rejoins them by. The cursor moves by
+# assignment: `(( x += n ))` is a command, and its status is false when the
+# result is 0.
 __bc_split() {
     local __bc_msg="$1"
     local __bc_head="$BASHPID $((__BC__seq++))"
@@ -134,7 +131,7 @@ __bc_split() {
 }
 
 # The rig's own bash, laid down beside this file. The run always writes it, so
-# its absence is a broken setup and is ours to report; what it does when it
-# runs is the rig's, and that status is forwarded as it stands.
+# its absence is a broken setup and ours to report; what it does when it runs
+# is the rig's, and that status is forwarded as it stands.
 [[ -f $__BC__DIR/rig.bash ]] || __BC_THROW
 source "$__BC__DIR/rig.bash" || __BC_BAIL

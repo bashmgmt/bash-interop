@@ -1,8 +1,6 @@
 //! One named pipe, joined by name by every shell.
 
-use std::collections::hash_map::Entry;
-use std::collections::HashMap;
-use std::fs::{File, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::os::fd::{AsRawFd, RawFd};
 use std::os::unix::fs::OpenOptionsExt;
@@ -17,7 +15,6 @@ const READ_CHUNK: usize = 64 * 1024;
 pub struct Wire {
     dir: PathBuf,
     reader: File,
-    replies: HashMap<Pid, File>,
     incoming: Reassembly,
 }
 
@@ -37,12 +34,7 @@ impl Wire {
             .open(&up)
             .doing(named)?;
 
-        Ok(Self {
-            dir: dir.to_path_buf(),
-            reader,
-            replies: HashMap::new(),
-            incoming: Reassembly::default(),
-        })
+        Ok(Self { dir: dir.to_path_buf(), reader, incoming: Reassembly::default() })
     }
 
     pub fn reader(&self) -> RawFd {
@@ -67,18 +59,18 @@ impl Wire {
         Ok(heard)
     }
 
-    pub fn answer(&mut self, pid: Pid, answer: Answer) -> Result<(), Failure> {
-        let Self { dir, replies, .. } = self;
-
-        let pipe = match replies.entry(pid) {
-            Entry::Occupied(seat) => seat.into_mut(),
-            Entry::Vacant(seat) => seat.insert(reply_pipe(&super::reply(dir, pid))?),
-        };
-
+    /// Answer the shell blocked on one message, and take the pipe with it. The
+    /// shell holds its own descriptor until it has read, so removing the name
+    /// is what keeps a run's asks from leaving a pipe behind each.
+    pub fn answer(&self, pid: Pid, seq: u32, answer: Answer) -> Result<(), Failure> {
+        let path = super::reply(&self.dir, pid, seq);
         let answering = || format!("answering pid {pid}");
 
+        let mut pipe = reply_pipe(&path)?;
         pipe.write_all(answer.to_message().as_bytes()).doing(answering)?;
-        pipe.write_all(&[DELIMITER]).doing(answering)
+        pipe.write_all(&[DELIMITER]).doing(answering)?;
+
+        fs::remove_file(&path).doing(|| format!("removing the reply pipe {}", path.display()))
     }
 
     /// Nothing may be left half-read.

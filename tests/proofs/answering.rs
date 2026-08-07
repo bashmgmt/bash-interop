@@ -51,9 +51,9 @@ impl Rig for Answering {
 
         Ok(match step % 7 {
             0 => Answer::status(0),
-            1 => Answer::of(["declare", "-g", &format!("mark_{step}=set")]),
-            2 => Answer::of(["eval", &format!("NOTE eval {step}")]),
-            3 => Answer::of(["NOTE", "call", &step.to_string()]),
+            1 => Answer::of("declare", ["-g".to_string(), format!("mark_{step}=set")]),
+            2 => Answer::of("eval", [format!("NOTE eval {step}")]),
+            3 => Answer::of("NOTE", ["call".to_string(), step.to_string()]),
             4 => {
                 let step_bash = self.steps.join(format!("step.{step}.bash"));
                 return sourcing(&step_bash, &format!("NOTE source {step}"));

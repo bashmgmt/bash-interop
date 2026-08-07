@@ -89,9 +89,10 @@ Two traps this closes, both observed:
   without `set -e`, cascaded into a second `Bad file descriptor` from the
   `printf` that followed. One fault, two behaviours, decided by the subject's
   options.
-- `(( x -= n ))` returns **1** when the result is zero, so bare arithmetic is
-  an `errexit` foot-gun even where nothing is wrong. Guard it like anything
-  else.
+- `(( x -= n ))` returns **1** when the result is zero, so a bare arithmetic
+  *command* fails `errexit` where nothing is wrong. A cursor therefore moves by
+  assignment — `x=$(( x + n ))` — which has no status of its own. This one
+  reached production twice: in the frame walk and in `__bc_split`.
 
 ### What a failure looks like
 
@@ -103,25 +104,37 @@ One line per fault, naming the subject's own call site rather than a line of
 ours. `BC_INSTR` returns **125** — what `env` and `timeout` return when the
 wrapper rather than the payload failed — so *the instrumentation broke* is
 distinguishable from *the answer ran and returned non-zero*, which is the
-subject's own business. A usage error (`BC_INSTR nonsense`) is 2.
+subject's own business. A verb the protocol does not define is the same kind
+of fault and the same 125: it ships nothing and says which word it was.
 
 The answer's own status is the one command deliberately left unguarded: a
 subject that asked a question wants what came back.
 
 ## The pipes
 
-| | the up pipe | `rep.<pid>` |
+| | the up pipe | `rep.<pid>.<seq>` |
 |---|---|---|
-| named | `UP`, one constant | after the pid of the shell that asks |
-| created by | the run, in `Wire::create` | the asking shell, on its first ask |
-| the run holds | `O_RDWR`, `O_NONBLOCK` | `O_WRONLY`, opened `O_NONBLOCK` once per shell and cached |
-| the shell holds | `exec {__BC__up}>"$__BC__UP"` | `exec {__BC__replyfd}<>"$__BC__reply"` |
+| named | `up`, one constant | after the *message* that asks |
+| lives for | the run | one question |
+| created by | the run, in `Wire::create` | the asking shell, per ask |
+| removed by | the workspace going | the run, with the answer |
+| the run holds | `O_RDWR`, `O_NONBLOCK` | `O_WRONLY`, opened and closed per answer |
+| the shell holds | `exec {__BC__up}>"$__BC__UP"` | `exec {__bc_fd}<>"$__bc_reply"`, closed on receipt |
 
-**Every pipe is held open at both ends by its owner.** The run holds the up
+**A reply pipe belongs to a question, not to a shell.** It is named for the
+message — `__bc_send` stamps the sequence number the name is built from — so
+`mkfifo` is one attempt against a name nothing else can hold, and there is no
+existing-pipe case to test for or tolerate. The run removes it as it answers,
+which is why a run of any length holds no descriptor and leaves no file per
+ask. A shell killed between `mkfifo` and its answer leaves one behind, and a
+later question that reached the same `(pid, seq)` would fail on `mkfifo`
+rather than reuse it.
+
+**Both pipes are held open at both ends by their owner.** The run holds the up
 pipe `O_RDWR`, so its open never blocks, a shell exiting never looks like
 end-of-stream, and the reader waits with `poll` rather than a timer. A shell
-holds its own reply pipe `O_RDWR`, so it may open it once however many times
-it asks and `read` blocks on data rather than on the open.
+holds its reply pipe `O_RDWR` so `read` blocks on data rather than on the
+open, and unlinking the name while it is open does not disturb it.
 
 The run opens a reply pipe `O_NONBLOCK` and clears the flag once the open
 succeeds. Opening a pipe to write otherwise blocks until someone reads, and a
@@ -138,7 +151,8 @@ impl Wire {
     /// Everything the pipe currently holds.
     pub fn drain(&mut self) -> Result<Vec<Line>, Failure>;
 
-    pub fn answer(&mut self, pid: Pid, answer: Answer) -> Result<(), Failure>;
+    /// Answer the shell blocked on one message, and remove its pipe.
+    pub fn answer(&self, pid: Pid, seq: u32, answer: Answer) -> Result<(), Failure>;
 
     /// Nothing may be left half-read.
     pub fn finish(self) -> Result<(), Failure>;
@@ -157,9 +171,6 @@ __bc_join() {
     exec {__BC__up}>"$__BC__UP"
     __BC__owner=$BASHPID
     __BC__seq=0
-    __BC__reply="$__BC__DIR/rep.$BASHPID"
-    __BC__replyfd=""
-
 }
 ```
 
@@ -172,10 +183,10 @@ prelude. **Nothing is inherited**, so no descriptor has to survive a fork and
 a client's own use of a particular fd cannot collide.
 
 `$BASHPID != $__BC__owner` detects a fork — a subshell inherits the variable
-but not the pid — so a `( … )` or a `$( … )` rejoins with its own descriptor,
-its own sequence counter and its own reply pipe. `__bc_parent` is the
-inherited owner when there is one, so a subshell names its *emitting* parent;
-`$PPID` there names the grandparent.
+but not the pid — so a `( … )` or a `$( … )` rejoins with its own descriptor
+and its own sequence counter. `__bc_parent` is the inherited owner when there
+is one, so a subshell names its *emitting* parent; `$PPID` there names the
+grandparent.
 
 ## Frames
 
@@ -307,16 +318,18 @@ wire from failing to decode. `Snapshot::of` is this shape.
 ```bash
 __bc_ask() {
     [[ $BASHPID == "$__BC__owner" ]] || __bc_join
-    [[ -n $__BC__replyfd ]] || {
-        [[ -p $__BC__reply ]] || mkfifo "$__BC__reply"
-        exec {__BC__replyfd}<>"$__BC__reply"
-    }
 
-    set -- __ASK__ "$@"
-    __bc_send "$@"
+    local __bc_reply="$__BC__DIR/rep.$BASHPID.$__BC__seq"
+    local __bc_fd
+    mkfifo "$__bc_reply"
+    exec {__bc_fd}<>"$__bc_reply"
+
+    __bc_send ASK "$@"
 
     local __bc_line
-    IFS= read -r __bc_line <&"$__BC__replyfd"
+    IFS= read -r __bc_line <&"$__bc_fd"
+    exec {__bc_fd}>&-
+
     local -a __bc_answer="$__bc_line"
     "${__bc_answer[@]}"
 }
@@ -331,7 +344,11 @@ runs it, and its status becomes `BC_INSTR ask`'s.
 pub struct Answer(Vec<String>);
 
 impl Answer {
-    pub fn of(words: impl IntoIterator<Item = impl Into<String>>) -> Self;
+    /// A command and the arguments it is given.
+    pub fn of(
+        command: impl Into<String>,
+        args: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self;
 
     /// Return `code` and nothing else. `u8` is what bash's `return` carries.
     pub fn status(code: u8) -> Self;
@@ -341,7 +358,12 @@ impl Answer {
 An answer is a command array, so it reaches anything the shell knows,
 including words the prelude defined. It performs no I/O: an answer that wants
 to send more bash than one command's worth writes a file **wherever it likes**
-and names it — `Answer::of(["source", path])`.
+and names it — `Answer::of("source", [path])`.
+
+The command word stands apart from its arguments because a command of no words
+is not one: an empty array runs nothing and leaves the shell holding whatever
+status it had. Splitting the signature is what makes that unrepresentable
+rather than checked.
 
 Assignments made by a sourced step are global and reach the client; a `local`
 in one would not, and is the single thing a step must avoid.

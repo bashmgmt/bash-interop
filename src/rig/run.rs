@@ -87,10 +87,12 @@ impl<'r, R: Rig> Running<'r, R> {
 
     fn serve(&mut self) -> Result<(), Failure> {
         for line in self.wire.drain()? {
-            let waiting = line.pid;
+            // The message names the pipe a shell blocked on it is listening
+            // at, and `react` consumes the message.
+            let (pid, seq) = (line.pid, line.seq);
 
             if let Some(answer) = self.react(line) {
-                self.wire.answer(waiting, answer)?;
+                self.wire.answer(pid, seq, answer)?;
             }
         }
         Ok(())
