@@ -46,32 +46,30 @@ BC_INSTR() {
     case "${1-}" in
         say) shift
              { [[ $BASHPID == "$__BC__owner" ]] || __bc_join; } || __BC_BAIL
-             __bc_send SAY "$(( __BC__seq++ ))" "$@" || __BC_BAIL ;;
+             __bc_send SAY "$@" || __BC_BAIL ;;
         ask) shift; __bc_ask "$@" ;;
         *)   __bc_complain "unknown verb ${1-}"
              return "$__BC__FAILED" ;;
     esac
 }
 
-# One pipe per question, named for the message that carries it, and removed
-# by the run once answered — so `mkfifo` is one attempt against a name nothing
-# else holds. Read-write, so the read waits for an answer instead of seeing
+# The shell's reply pipe, made for one question and removed by the run as it
+# answers — a shell is blocked while it asks, so the name is free again before
+# the next one. Read-write, so the read waits for an answer rather than seeing
 # end of input.
 #
-# The array assignment is unguarded because it cannot fail: bash puts text it
-# cannot read as a literal into one element, and running that is a command not
-# found, which is the subject's business. So is the answer's own status, which
-# is why running it is unguarded too.
+# The array assignment is unguarded because it cannot fail: text bash cannot
+# read as a literal becomes one element, and running that is a command not
+# found. So is the answer's own status, which is the result the caller wants.
 __bc_ask() {
     { [[ $BASHPID == "$__BC__owner" ]] || __bc_join; } || __BC_BAIL
 
-    local __bc_seq=$(( __BC__seq++ ))
-    local __bc_reply="$__BC__DIR/rep.$BASHPID.$__bc_seq"
+    local __bc_reply="$__BC__DIR/rep.$BASHPID"
     local __bc_fd
     mkfifo "$__bc_reply" || __BC_THROW
     exec {__bc_fd}<>"$__bc_reply" || __BC_THROW
 
-    __bc_send ASK "$__bc_seq" "$@" || __BC_BAIL
+    __bc_send ASK "$@" || __BC_BAIL
 
     local __bc_line
     IFS= read -r __bc_line <&"$__bc_fd" || __BC_THROW
@@ -82,13 +80,12 @@ __bc_ask() {
     "${__bc_answer[@]}"
 }
 
-# $1 the kind, $2 the sequence number this message carries, the rest the
-# client's arglist. The counter belongs to the shell and is spent by the
-# caller, so this is a function of what it is passed. The protocol's own words
-# go in front of the arglist, and the reader shifts exactly those back off.
+# $1 is the kind, the rest the client's arglist. The protocol's own words go
+# in front of it, and the reader shifts exactly those back off. The sequence
+# number is spent once here, whichever of the two paths below takes it.
 __bc_send() {
-    local __bc_seq="$2"
-    set -- "$1" "at=$EPOCHREALTIME" "parent=$__BC__parent" "shlvl=$SHLVL" "${@:3}"
+    local __bc_seq=$(( __BC__seq++ ))
+    set -- "$1" "at=$EPOCHREALTIME" "parent=$__BC__parent" "shlvl=$SHLVL" "${@:2}"
 
     local __bc_msg
     printf -v __bc_msg '%s ' "${@@Q}"

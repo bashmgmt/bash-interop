@@ -94,15 +94,16 @@ impl<'r, R: Rig> Running<'r, R> {
     /// interpret a status, and does not get to carry on.
     fn serve(&mut self) -> Result<(), Failure> {
         for line in self.wire.drain()? {
-            // The reply pipe is named for the message, which the rig consumes.
-            let (pid, seq) = (line.pid, line.seq);
+            // The rig consumes the message, and the reply pipe is named after
+            // the shell that sent it.
+            let asking = line.pid;
 
             match line.kind {
                 Kind::Say => self.rig.hear(&mut self.session, line)?,
                 Kind::Ask => {
                     let answer = self.rig.answer(&mut self.session, line)?;
 
-                    self.wire.answer(pid, seq, answer)?;
+                    self.wire.answer(asking, answer)?;
                 }
             }
         }

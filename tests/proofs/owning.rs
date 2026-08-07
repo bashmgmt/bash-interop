@@ -59,6 +59,25 @@ fn every_reply_pipe_goes_with_its_answer() {
     assert!(left.is_empty(), "reply pipes left behind: {left:?}");
 }
 
+/// A workspace belongs to one run. The pipe every shell joins is made there,
+/// and making it is what claims the directory — so whatever a run leaves
+/// behind, a later one never meets it.
+#[test]
+fn a_workspace_belongs_to_one_run() {
+    let temp = tempfile::tempdir().unwrap();
+    let at = temp.path().join("workspace");
+    let scripts = Scripts::of(&[(ENTRY, "BC_INSTR say REC one")]);
+
+    let first = run_in(&Keeping, &at, &bash(scripts.at(ENTRY))).unwrap().whole().unwrap();
+    assert_eq!(first.1, ExitStatus::Code(0));
+
+    let again = run_in(&Keeping, &at, &bash(scripts.at(ENTRY)))
+        .err()
+        .expect("a second run must not reuse it");
+
+    assert!(again.to_string().contains("EEXIST"), "{again}");
+}
+
 /// A shell asking after the subject exited can never be answered, so the run
 /// takes the whole process group with it.
 #[test]

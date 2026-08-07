@@ -16,14 +16,13 @@ use crate::failure::{Doing, Failure};
 pub struct Micros(pub u64);
 
 impl Micros {
-    /// The run's own clock. A system clock behind the epoch is a broken
-    /// machine rather than a zero reading, so it ends the run.
-    pub(crate) fn now() -> Result<Self, Failure> {
-        let since = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .doing(|| "reading the run's clock".into())?;
+    /// The run's own clock, to sit beside the sending shell's
+    /// `$EPOCHREALTIME`.
+    pub(crate) fn now() -> Self {
+        let since =
+            SystemTime::now().duration_since(UNIX_EPOCH).expect("a clock at or after the epoch");
 
-        Ok(Self(since.as_micros() as u64))
+        Self(since.as_micros() as u64)
     }
 
     /// `$EPOCHREALTIME`: seconds, the locale's decimal separator, and exactly

@@ -102,6 +102,7 @@ be is left to the compiler. One file per subject.
 |---|---|
 | `a_named_workspace_is_left_behind` | `run_in` leaves its prelude and its pipe where it was told to |
 | `every_reply_pipe_goes_with_its_answer` | 43 asks from two shells leave no reply pipe behind |
+| `a_workspace_belongs_to_one_run` | a second run in the same directory stops at the up pipe |
 | `a_shell_left_asking_does_not_outlive_the_run` | the run does not wait for a straggler, and the straggler does not survive it |
 | `a_panicking_answer_kills_the_subject` | the same guarantee reached by unwinding, naming the blocked pid |
 

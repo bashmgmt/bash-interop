@@ -48,7 +48,7 @@ impl Wire {
         loop {
             match self.reader.read(&mut buffer) {
                 Ok(0) => break,
-                Ok(count) => heard.extend(self.incoming.feed(&buffer[..count], Micros::now()?)?),
+                Ok(count) => heard.extend(self.incoming.feed(&buffer[..count], Micros::now())?),
                 Err(cause) => match cause.kind() {
                     io::ErrorKind::WouldBlock => break,
                     io::ErrorKind::Interrupted => continue,
@@ -59,11 +59,12 @@ impl Wire {
         Ok(heard)
     }
 
-    /// Answer the shell blocked on one message, and take the pipe with it. The
-    /// shell holds its own descriptor until it has read, so removing the name
-    /// is what keeps a run's asks from leaving a pipe behind each.
-    pub fn answer(&self, pid: Pid, seq: u32, answer: Answer) -> Result<(), Failure> {
-        let path = super::reply(&self.dir, pid, seq);
+    /// Answer the shell blocked on a question, and take its pipe with the
+    /// answer. The shell holds its own descriptor until it has read, and it is
+    /// blocked until then, so the name is free again before it asks anything
+    /// else.
+    pub fn answer(&self, pid: Pid, answer: Answer) -> Result<(), Failure> {
+        let path = super::reply(&self.dir, pid);
         let answering = || format!("answering pid {pid}");
 
         let mut pipe = reply_pipe(&path)?;
@@ -132,14 +133,14 @@ mod tests {
         let dir = tempfile::tempdir().expect("a workspace");
         let wire = Wire::create(dir.path()).expect("the up pipe");
 
-        let (pid, seq) = (Pid(4242), 7);
-        let path = super::super::reply(dir.path(), pid, seq);
+        let pid = Pid(4242);
+        let path = super::super::reply(dir.path(), pid);
         nix::unistd::mkfifo(&path, nix::sys::stat::Mode::S_IRWXU).expect("the reply pipe");
 
         let shell = asking(&path);
         let payload = "x".repeat(100_000);
 
-        wire.answer(pid, seq, Answer::of("printf", [payload.clone()])).expect("answering");
+        wire.answer(pid, Answer::of("printf", [payload.clone()])).expect("answering");
 
         let got = shell.join().expect("the asking shell");
         assert_eq!(

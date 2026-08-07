@@ -18,7 +18,7 @@ BC_INSTR() {
 
     case "${1-}" in
         say) shift; [[ $BASHPID == "$__BC__owner" ]] || __bc_join
-             __bc_send SAY "$(( __BC__seq++ ))" "$@" ;;
+             __bc_send SAY "$@" ;;
         ask) shift; __bc_ask "$@" ;;
         *)   __bc_complain "unknown verb ${1-}"; return "$__BC__FAILED" ;;
     esac
@@ -56,21 +56,14 @@ Because the file is shipped as it is, it is real bash: `bash -n` and
 `shellcheck` run on it directly, and the non-invasiveness invariants are
 properties of the file rather than of a generated string.
 
-## Error flow is ours, not `set -e`'s
+## Error flow
 
-**Every command in `prelude.bash` whose failure is a fault is followed by
-`|| __BC_BAIL` or `|| __BC_THROW`.** The reason is narrower than errexit, and
-measured: **a `||` list suppresses errexit for its whole left-hand side,
-including inside the functions it calls.** So `BC_INSTR … || handler` — the
-ordinary way a script uses this — leaves an unguarded function running on past
-its own first failure, and one fault becomes two. The guards are what make a
-function stop where it broke.
-
-| | unguarded | guarded |
-|---|---|---|
-| bare call under `set -e` | shell dies at the failure | shell dies at the guard |
-| call in a `\|\|` list | **runs on past the failure** | returns to the caller |
-| `BASH_ENV` top level | continues either way — a sourced file's status is discarded and errexit does not reach there |
+Commands in `prelude.bash` that can fail are followed by `|| __BC_BAIL` or
+`|| __BC_THROW` — the ordinary way bash meant to be embedded anywhere handles
+its own errors. It carries weight here because a script may call `BC_INSTR`
+inside an or-list, and bash disables `errexit` for everything an or-list
+calls: unguarded, a function of ours would carry on past its own first
+failure and report the second one instead.
 
 ```bash
 shopt -s expand_aliases
@@ -79,39 +72,33 @@ alias __BC_BAIL='return $?'
 alias __BC_THROW='{ __bc_complain "${FUNCNAME[0]} ($?)"; return "$__BC__FAILED"; }'
 ```
 
-`$?` survives only in the **first** command of a block — anything before it
-sets its own status — which is why `__BC_THROW` reads it there and `__BC_BAIL`
-is a single command with no ordering hazard at all. Neither needs a variable
-to hold it.
+`__BC_BAIL` forwards the status, for a fault an inner function already named.
+`__BC_THROW` names one first and returns `__BC__FAILED`.
 
-Two commands are deliberately unguarded, and both are in `__bc_ask`: the array
-assignment, because bash puts text it cannot read as a literal into one
-element and never fails; and running the answer, because its status is a
-*result*. The last line of the prelude is unguarded for the third reason in
-the table — nothing could read what a guard returned there.
+Aliases rather than functions, because `return` has to act in the frame that
+failed. They expand at parse time, so `expand_aliases` is on before anything
+using them is read — the one option the protocol turns on, and it stays on, so
+a subject's own aliases expand where they otherwise would not.
 
-**Aliases, not functions**, because `return` has to act in the frame that
-failed and a function returns from itself. Aliases expand at parse time, so
-`expand_aliases` must be on *before* the code using them is parsed — which is
-why it is set at the top of the file, above everything that uses the guards.
-That option stays on afterwards: it is the one change the protocol makes to
-the subject's shell, and a subject's own aliases will expand where they
-otherwise would not.
+`$?` is read in the first command of each, which is where it survives; a
+command before it would set its own.
 
-`__BC_BAIL` forwards the status untouched — for propagating a failure an inner
-function already reported. `__BC_THROW` complains first and returns
-`__BC__FAILED`, for a fault nothing else will mention.
+Three things are unguarded on purpose:
 
-Two traps this closes, both observed:
+| | why |
+|---|---|
+| the array assignment in `__bc_ask` | cannot fail — text bash cannot read as a literal becomes one element |
+| running the answer | its status is the result the caller asked for |
+| the closing `source` | a `BASH_ENV` file's status is discarded, and errexit does not reach its top level |
 
-- Unguarded, a failed `exec` in `__bc_join` **killed a `set -e` subject** and,
-  without `set -e`, cascaded into a second `Bad file descriptor` from the
-  `printf` that followed. One fault, two behaviours, decided by the subject's
-  options.
-- `(( x -= n ))` returns **1** when the result is zero, so a bare arithmetic
-  *command* fails `errexit` where nothing is wrong. A cursor therefore moves by
-  assignment — `x=$(( x + n ))` — which has no status of its own. This one
-  reached production twice: in the frame walk and in `__bc_split`.
+Two bash properties the code is shaped around:
+
+- **`(( x += n ))` is a command, and its status is false when the result is
+  zero.** Cursors move by assignment — `x=$(( x + n ))` — which has no status
+  of its own.
+- **A trapped signal does not end a blocked `read`.** Bash runs the handler
+  and resumes it, so a shell waiting on an answer waits until one arrives or
+  it is killed.
 
 ### What a failure looks like
 
@@ -131,23 +118,24 @@ subject that asked a question wants what came back.
 
 ## The pipes
 
-| | the up pipe | `rep.<pid>.<seq>` |
+| | the up pipe | `rep.<pid>` |
 |---|---|---|
-| named | `up`, one constant | after the *message* that asks |
+| named | `up`, one constant | after the shell that asks |
 | lives for | the run | one question |
 | created by | the run, in `Wire::create` | the asking shell, per ask |
 | removed by | the workspace going | the run, with the answer |
 | the run holds | `O_RDWR`, `O_NONBLOCK` | `O_WRONLY`, opened and closed per answer |
 | the shell holds | `exec {__BC__up}>"$__BC__UP"` | `exec {__bc_fd}<>"$__bc_reply"`, closed on receipt |
 
-**A reply pipe belongs to a question, not to a shell.** It is named for the
-message — `__bc_send` stamps the sequence number the name is built from — so
-`mkfifo` is one attempt against a name nothing else can hold, and there is no
-existing-pipe case to test for or tolerate. The run removes it as it answers,
-which is why a run of any length holds no descriptor and leaves no file per
-ask. A shell killed between `mkfifo` and its answer leaves one behind, and a
-later question that reached the same `(pid, seq)` would fail on `mkfifo`
-rather than reuse it.
+**A reply pipe is made for one question and removed with its answer.** A shell
+is blocked from the moment it asks until the moment it reads, so the name is
+free again before it can ask anything else, and `mkfifo` is a single attempt
+against a name nothing else holds. Neither side accumulates: the run keeps no
+descriptor per shell, and the workspace keeps no file per ask.
+
+A shell killed between `mkfifo` and its answer leaves its pipe behind. Nothing
+later meets it — a workspace belongs to one run, since creating the up pipe is
+what claims the directory — and within the run the shell that left it is gone.
 
 **Both pipes are held open at both ends by their owner.** The run holds the up
 pipe `O_RDWR`, so its open never blocks, a shell exiting never looks like
@@ -170,8 +158,8 @@ impl Wire {
     /// Everything the pipe currently holds.
     pub fn drain(&mut self) -> Result<Vec<Line>, Failure>;
 
-    /// Answer the shell blocked on one message, and remove its pipe.
-    pub fn answer(&self, pid: Pid, seq: u32, answer: Answer) -> Result<(), Failure>;
+    /// Answer the shell blocked on a question, and remove its pipe.
+    pub fn answer(&self, pid: Pid, answer: Answer) -> Result<(), Failure>;
 
     /// Nothing may be left half-read.
     pub fn finish(self) -> Result<(), Failure>;
@@ -338,13 +326,12 @@ wire from failing to decode. `Snapshot::of` is this shape.
 __bc_ask() {
     [[ $BASHPID == "$__BC__owner" ]] || __bc_join
 
-    local __bc_seq=$(( __BC__seq++ ))
-    local __bc_reply="$__BC__DIR/rep.$BASHPID.$__bc_seq"
+    local __bc_reply="$__BC__DIR/rep.$BASHPID"
     local __bc_fd
     mkfifo "$__bc_reply"
     exec {__bc_fd}<>"$__bc_reply"
 
-    __bc_send ASK "$__bc_seq" "$@"
+    __bc_send ASK "$@"
 
     local __bc_line
     IFS= read -r __bc_line <&"$__bc_fd"
@@ -354,12 +341,6 @@ __bc_ask() {
     "${__bc_answer[@]}"
 }
 ```
-
-The sequence number is **spent by the caller and passed down** —
-`__bc_send <kind> <seq> <words…>`. The counter belongs to the shell, so
-`__bc_send` is a function of what it is handed, and the name of the reply pipe
-does not depend on reading ahead into what another function is about to
-increment.
 
 ```bash
 ```
