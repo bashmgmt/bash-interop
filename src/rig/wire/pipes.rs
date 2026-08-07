@@ -80,8 +80,13 @@ impl Wire {
 }
 
 /// Opening a pipe to write blocks until someone reads it, and a shell that
-/// asked and then died never will: `ENXIO` ends the run rather than hanging
-/// it.
+/// asked and then died never will: `O_NONBLOCK` turns that into `ENXIO`,
+/// which ends the run rather than hanging it.
+///
+/// The flag is cleared once the open has succeeded. Writing is a different
+/// question from opening: an answer past the pipe's 64 KB is handed over in
+/// more than one go, and a descriptor still marked non-blocking would report
+/// `EAGAIN` and lose the rest of it.
 fn reply_pipe(path: &Path) -> Result<File, Failure> {
     let opening = || format!("opening the reply pipe {}", path.display());
 
@@ -92,4 +97,56 @@ fn reply_pipe(path: &Path) -> Result<File, Failure> {
         return Err(io::Error::last_os_error()).doing(opening);
     }
     Ok(pipe)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bash::value::{BashCodec, QuotedNest};
+
+    /// The shell's side of one question: it holds the pipe open before asking,
+    /// and reads to the delimiter. Everything before that is one message.
+    fn asking(path: &Path) -> std::thread::JoinHandle<String> {
+        let mut reading =
+            OpenOptions::new().read(true).write(true).open(path).expect("the asking shell's end");
+
+        std::thread::spawn(move || {
+            let mut got = Vec::new();
+            let mut buffer = [0u8; 8 * 1024];
+
+            while !got.contains(&DELIMITER) {
+                let count = reading.read(&mut buffer).expect("reading the answer");
+                got.extend_from_slice(&buffer[..count]);
+            }
+            got.pop();
+
+            String::from_utf8(got).expect("the answer is text")
+        })
+    }
+
+    /// An answer past the pipe's 64 KB cannot be handed over in one write, so
+    /// the run has to block until the shell has taken the rest. It arrives
+    /// whole, and the pipe goes with it.
+    #[test]
+    fn an_answer_larger_than_the_pipe_buffer_is_written_whole() {
+        let dir = tempfile::tempdir().expect("a workspace");
+        let wire = Wire::create(dir.path()).expect("the up pipe");
+
+        let (pid, seq) = (Pid(4242), 7);
+        let path = super::super::reply(dir.path(), pid, seq);
+        nix::unistd::mkfifo(&path, nix::sys::stat::Mode::S_IRWXU).expect("the reply pipe");
+
+        let shell = asking(&path);
+        let payload = "x".repeat(100_000);
+
+        wire.answer(pid, seq, Answer::of("printf", [payload.clone()])).expect("answering");
+
+        let got = shell.join().expect("the asking shell");
+        assert_eq!(
+            QuotedNest.words(&got).expect("one bash array literal"),
+            ["printf".to_string(), payload],
+            "byte for byte, across more writes than one"
+        );
+        assert!(!path.exists(), "the pipe goes with the answer");
+    }
 }

@@ -246,6 +246,21 @@ mod tests {
         }
     }
 
+    /// An answer is one line, and the shell reads it with `read -r` — which
+    /// stops at a newline. So a word carrying one has to arrive escaped, and
+    /// the delimiter the run appends is the only newline on that pipe.
+    #[test]
+    fn an_answer_is_one_line_whatever_it_carries() {
+        let carried = ["%s", "two\nlines", "a\ttab", "\u{ff}", "it's", ""];
+        let message = Answer::of("printf", carried).to_message();
+
+        assert!(!message.contains('\n'), "a raw newline would truncate the read: {message}");
+
+        let mut expected = vec!["printf".to_string()];
+        expected.extend(carried.iter().map(|word| word.to_string()));
+        assert_eq!(QuotedNest.words(&message).unwrap(), expected, "and it still reads back");
+    }
+
     #[test]
     fn messages_round_trip() {
         let nested = literal(&words(&["INNER", "x y"]));

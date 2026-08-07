@@ -17,7 +17,8 @@ BC_INSTR() {
     __BC__at="${BASH_SOURCE[1]:-?}:${BASH_LINENO[0]:-?}"
 
     case "${1-}" in
-        say) shift; [[ $BASHPID == "$__BC__owner" ]] || __bc_join; __bc_send SAY "$@" ;;
+        say) shift; [[ $BASHPID == "$__BC__owner" ]] || __bc_join
+             __bc_send SAY "$(( __BC__seq++ ))" "$@" ;;
         ask) shift; __bc_ask "$@" ;;
         *)   __bc_complain "unknown verb ${1-}"; return "$__BC__FAILED" ;;
     esac
@@ -57,19 +58,37 @@ properties of the file rather than of a generated string.
 
 ## Error flow is ours, not `set -e`'s
 
-**Every command in `prelude.bash` that can fail is followed by `|| __BC_BAIL`
-or `|| __BC_THROW`.** This is a strict requirement of BC-related bash, not a
-preference, and it buys two things at once: the left side of `||` is exempt
-from `errexit`, and the status arrives in our hands rather than the shell's.
-So this code behaves the same however the subject set its shell, and a failure
-of ours never kills a script halfway through a message.
+**Every command in `prelude.bash` whose failure is a fault is followed by
+`|| __BC_BAIL` or `|| __BC_THROW`.** The reason is narrower than errexit, and
+measured: **a `||` list suppresses errexit for its whole left-hand side,
+including inside the functions it calls.** So `BC_INSTR … || handler` — the
+ordinary way a script uses this — leaves an unguarded function running on past
+its own first failure, and one fault becomes two. The guards are what make a
+function stop where it broke.
+
+| | unguarded | guarded |
+|---|---|---|
+| bare call under `set -e` | shell dies at the failure | shell dies at the guard |
+| call in a `\|\|` list | **runs on past the failure** | returns to the caller |
+| `BASH_ENV` top level | continues either way — a sourced file's status is discarded and errexit does not reach there |
 
 ```bash
 shopt -s expand_aliases
 
-alias __BC_BAIL='{ __BC__rc=$?; return "$__BC__rc"; }'
-alias __BC_THROW='{ __BC__rc=$?; __bc_complain "${FUNCNAME[0]} ($__BC__rc)"; return "$__BC__FAILED"; }'
+alias __BC_BAIL='return $?'
+alias __BC_THROW='{ __bc_complain "${FUNCNAME[0]} ($?)"; return "$__BC__FAILED"; }'
 ```
+
+`$?` survives only in the **first** command of a block — anything before it
+sets its own status — which is why `__BC_THROW` reads it there and `__BC_BAIL`
+is a single command with no ordering hazard at all. Neither needs a variable
+to hold it.
+
+Two commands are deliberately unguarded, and both are in `__bc_ask`: the array
+assignment, because bash puts text it cannot read as a literal into one
+element and never fails; and running the answer, because its status is a
+*result*. The last line of the prelude is unguarded for the third reason in
+the table — nothing could read what a guard returned there.
 
 **Aliases, not functions**, because `return` has to act in the frame that
 failed and a function returns from itself. Aliases expand at parse time, so
@@ -208,7 +227,7 @@ through `emit_q_words` — so framing needs no length prefix and a value
 carrying newlines arrives as one message.
 
 ```rust
-struct Frame { sent_at: Micros, pid: Pid, seq: u32, continues: bool, chunk: String }
+struct Frame { continues: bool, pid: Pid, seq: u32, chunk: String }
 ```
 
 Private to `framing.rs`: a frame exists between the read and the message. The
@@ -216,9 +235,9 @@ header sits outside the message because a continuation must be routed before
 there is a message to parse. `+` means more chunks follow, `.` means this is
 the last, and that is the header's entire semantic content.
 
-Whether the sender is waiting is in the message, as `__ASK__`, where
-`Line::asked` reads it — so a stream written to a file and read back still
-distinguishes questions.
+Whether the sender is waiting is in the *message*, as its leading `SAY` or
+`ASK`, which `Kind::read` shifts off — so the frame header stays the smallest
+thing reassembly can work from.
 
 An answer carries **no header**: the shell that asked is its only reader, so
 `pipes` writes the message and a delimiter and nothing else.
@@ -319,12 +338,13 @@ wire from failing to decode. `Snapshot::of` is this shape.
 __bc_ask() {
     [[ $BASHPID == "$__BC__owner" ]] || __bc_join
 
-    local __bc_reply="$__BC__DIR/rep.$BASHPID.$__BC__seq"
+    local __bc_seq=$(( __BC__seq++ ))
+    local __bc_reply="$__BC__DIR/rep.$BASHPID.$__bc_seq"
     local __bc_fd
     mkfifo "$__bc_reply"
     exec {__bc_fd}<>"$__bc_reply"
 
-    __bc_send ASK "$@"
+    __bc_send ASK "$__bc_seq" "$@"
 
     local __bc_line
     IFS= read -r __bc_line <&"$__bc_fd"
@@ -333,6 +353,15 @@ __bc_ask() {
     local -a __bc_answer="$__bc_line"
     "${__bc_answer[@]}"
 }
+```
+
+The sequence number is **spent by the caller and passed down** —
+`__bc_send <kind> <seq> <words…>`. The counter belongs to the shell, so
+`__bc_send` is a function of what it is handed, and the name of the reply pipe
+does not depend on reading ahead into what another function is about to
+increment.
+
+```bash
 ```
 
 `local -a` is bash's own parser unpacking the array literal; the shell then
