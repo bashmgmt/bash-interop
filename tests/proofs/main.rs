@@ -76,6 +76,18 @@ pub fn beginning(messages: &[&[String]], word: &str) -> usize {
     messages.iter().filter(|words| words.first().is_some_and(|first| first == word)).count()
 }
 
+/// Whether a pid is gone. The kill is immediate; the reaping is init's and
+/// takes a moment.
+pub fn gone(pid: i32) -> bool {
+    for _ in 0..100 {
+        if unsafe { libc::kill(pid, 0) } != 0 {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    false
+}
+
 /// Everything that happened, for an assertion message.
 pub fn report(heard: &[Line]) -> String {
     let lines: Vec<String> = heard

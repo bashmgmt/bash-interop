@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use mb_resolver::bash::rig::{run, run_in, Answer, ExitStatus, Failure, Kind, Line, Rig};
 
 use crate::support::{bash, Scripts};
-use crate::{behind, report, script, Keeping, ENTRY};
+use crate::{behind, gone, report, script, Keeping, ENTRY};
 
 /// `run_in` leaves its workspace where it was told to, so what the run set up
 /// is there to read afterwards.
@@ -124,15 +124,4 @@ fn a_panicking_answer_kills_the_subject() {
         .parse()
         .unwrap();
     assert!(gone(blocked), "{blocked} was left waiting for an answer that will never come");
-}
-
-/// The kill is immediate; the reaping is init's and takes a moment.
-fn gone(pid: i32) -> bool {
-    for _ in 0..100 {
-        if unsafe { libc::kill(pid, 0) } != 0 {
-            return true;
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    false
 }

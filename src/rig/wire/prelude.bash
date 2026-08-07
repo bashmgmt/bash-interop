@@ -76,14 +76,6 @@ __bc_ask() {
     "${__bc_answer[@]}"
 }
 
-# What the run answers with when the rig could not: its reason, at the call
-# site, and the status every other instrumentation failure returns.
-__bc_refused() {
-    __bc_complain "$1"
-
-    return "$__BC__FAILED"
-}
-
 # $1 is the kind; the rest is the client's arglist. The protocol's own words
 # go in front of it, and the reader shifts exactly those back off.
 __bc_send() {

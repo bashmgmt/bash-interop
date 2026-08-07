@@ -1,10 +1,13 @@
-//! When the instrumentation itself is what failed. Every one of these ends
-//! in status 125 at the subject's call site, and in a reason on its stderr.
+//! When the rig cannot do its work. That is the run's failure, not a
+//! conversation with the subject: `run` ends in the reason, and the subject is
+//! killed rather than told something and left to interpret it.
+
+use std::time::Instant;
 
 use mb_resolver::bash::rig::{run, Answer, ExitStatus, Failure, Kind, Line, Rig};
 
 use crate::support::{bash, Scripts};
-use crate::{behind, report, script, ENTRY};
+use crate::{behind, gone, report, script, ENTRY};
 
 /// Fails the first time it is asked anything, and keeps whatever it heard.
 struct Breaking {
@@ -32,83 +35,54 @@ impl Rig for Breaking {
     }
 }
 
-/// The reason reaches the shell that was blocked, at its own call site, and
-/// `BC_INSTR ask` reports that the instrumentation failed rather than that
-/// the answer returned something. Killing the subject first would lose all of
-/// it: a refusal written and then followed by a signal never arrives.
-#[test]
-fn a_rig_that_cannot_answer_tells_the_shell_why() {
-    let scripts = Scripts::of(&[(
-        ENTRY,
-        r#"
-        exec 2> "${BASH_SOURCE[0]%/*}/err"
-        BC_INSTR ask anything
-        echo "ask returned $?" >&2
-        BC_INSTR say REC still running
-        "#,
-    )]);
+/// The subject reports its own pid before the message that breaks the rig, so
+/// a proof can ask whether it outlived the run.
+const REPORTING: &str = "echo $BASHPID > \"${BASH_SOURCE[0]%/*}/pid\"\n";
 
-    let ran = run(&Breaking { on: Kind::Ask }, &bash(scripts.at(ENTRY))).unwrap();
-    let failure = ran.failed.expect("the run must report the rig's failure");
+fn blocked(scripts: &Scripts) -> i32 {
+    std::fs::read_to_string(scripts.at("pid"))
+        .expect("the subject reported its pid")
+        .trim()
+        .parse()
+        .expect("a pid")
+}
+
+/// A shell blocked on an ask can never be answered once the rig has failed,
+/// so it is killed. Nothing is written back: an answer is a command, and there
+/// is no command that means "the operator broke".
+#[test]
+fn a_rig_that_cannot_answer_ends_the_run_and_kills_the_subject() {
+    let scripts = Scripts::of(&[(ENTRY, &format!("{REPORTING}BC_INSTR ask anything\n"))]);
+
+    let failure = run(&Breaking { on: Kind::Ask }, &bash(scripts.at(ENTRY)))
+        .err()
+        .expect("the run must end in the rig's failure");
 
     assert!(failure.to_string().contains("the operator is on fire"), "{failure}");
-    assert_eq!(ran.subject, ExitStatus::Code(0), "and the subject's own status survives it");
-
-    let said = std::fs::read_to_string(scripts.at("err")).unwrap();
-    assert!(said.contains("the operator is on fire"), "the shell was told why: {said:?}");
-    assert!(said.contains(&format!("{ENTRY}:3")), "at its own call site: {said:?}");
-    assert!(said.contains("ask returned 125"), "the instrumentation failed, not the answer");
+    assert!(gone(blocked(&scripts)), "the shell was left waiting for an answer never coming");
 }
 
-/// A subject that asked for `set -e` gets it: the refusal is an ordinary
-/// failing command, so its own error handling ends the script.
+/// `hear` has nobody waiting on it, so there was never anything to write back.
+/// The run ends the same way, and does not wait for a subject that would have
+/// gone on for another half minute.
 #[test]
-fn a_refusal_is_an_ordinary_failure_the_subject_may_act_on() {
-    let scripts = Scripts::of(&[(
-        ENTRY,
-        r#"
-        set -e
-        exec 2> "${BASH_SOURCE[0]%/*}/err"
-        BC_INSTR ask anything
-        echo "NOT REACHED" >&2
-        "#,
-    )]);
+fn a_failure_while_hearing_ends_the_run_and_kills_the_subject() {
+    let scripts =
+        Scripts::of(&[(ENTRY, &format!("{REPORTING}BC_INSTR say REC one\nsleep 30\n"))]);
 
-    let ran = run(&Breaking { on: Kind::Ask }, &bash(scripts.at(ENTRY))).unwrap();
-    assert!(ran.failed.is_some(), "the run reports the rig's failure");
-    assert_eq!(ran.subject, ExitStatus::Code(125), "set -e ended the subject at the refusal");
-
-    let said = std::fs::read_to_string(scripts.at("err")).unwrap();
-    assert!(said.contains("the operator is on fire"), "{said:?}");
-    assert!(!said.contains("NOT REACHED"), "set -e ended the script at the ask: {said:?}");
-}
-
-/// `hear` has no one waiting, so nothing can be said at the time. The run
-/// still ends in the failure, and the next shell to ask is told the reason.
-#[test]
-fn a_failure_while_hearing_still_ends_the_run_and_refuses_later_asks() {
-    let scripts = Scripts::of(&[(
-        ENTRY,
-        r#"
-        exec 2> "${BASH_SOURCE[0]%/*}/err"
-        BC_INSTR say REC one
-        BC_INSTR ask anything
-        echo "ask returned $?" >&2
-        "#,
-    )]);
-
-    let ran = run(&Breaking { on: Kind::Say }, &bash(scripts.at(ENTRY))).unwrap();
-    let failure = ran.failed.expect("the run must report the rig's failure");
+    let started = Instant::now();
+    let failure = run(&Breaking { on: Kind::Say }, &bash(scripts.at(ENTRY)))
+        .err()
+        .expect("the run must end in the rig's failure");
 
     assert!(failure.to_string().contains("the sink is on fire"), "{failure}");
-
-    let said = std::fs::read_to_string(scripts.at("err")).unwrap();
-    assert!(said.contains("the sink is on fire"), "the later ask carried it: {said:?}");
-    assert!(said.contains("ask returned 125"), "{said:?}");
+    assert!(started.elapsed().as_secs() < 5, "the run must not wait the subject out");
+    assert!(gone(blocked(&scripts)), "the subject outlived the run");
 }
 
-/// A verb the protocol does not define is a client's mistake, reported the
-/// same way and leaving the shell able to carry on.
+/// A verb the protocol does not define is the client's mistake and stays in
+/// the client's shell: it is named on stderr, returns 125, and the run carries
+/// on knowing nothing about it.
 #[test]
 fn an_unknown_verb_is_reported_rather_than_ignored() {
     let (seen, status) = script(

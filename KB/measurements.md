@@ -107,9 +107,8 @@ be is left to the compiler. One file per subject.
 
 | `failing.rs` | establishes |
 |---|---|
-| `a_rig_that_cannot_answer_tells_the_shell_why` | the reason reaches the blocked shell at its own call site, `ask` returns 125, and the subject's own status survives |
-| `a_refusal_is_an_ordinary_failure_the_subject_may_act_on` | under `set -e` the refusal ends the script, and the run reports 125 |
-| `a_failure_while_hearing_still_ends_the_run_and_refuses_later_asks` | a `hear` nobody was waiting on still poisons the run, and the next ask carries the reason |
+| `a_rig_that_cannot_answer_ends_the_run_and_kills_the_subject` | `run` yields the rig's reason, and the shell blocked on the ask does not outlive it |
+| `a_failure_while_hearing_ends_the_run_and_kills_the_subject` | the same for a message nobody was waiting on, without waiting out a subject that would have slept 30 seconds |
 | `an_unknown_verb_is_reported_rather_than_ignored` | a verb the protocol does not define is named on stderr and returns 125 |
 
 Bash-level invariants that hold without running anything are asserted against

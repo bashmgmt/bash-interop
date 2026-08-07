@@ -120,17 +120,17 @@ impl<S> Run<S> {
 }
 ```
 
-**`subject` is always the subject's own status**, because the run serves until
-it leaves of its own accord — see [when the rig
-fails](#when-the-rig-fails). `failed` is what went wrong on this side, if
-anything, and the two are independent: a run can fail and still report exactly
-how bash ended.
+**Reaching a `Run` means bash got to its own end**, so `subject` is always the
+subject's own status. `failed` is narrower than that: what went wrong *closing
+up* — a message left half-read, or a session that would not let go. Both
+happen after the subject is gone, which is why they travel beside a status
+rather than replacing it.
 
-A `Failure` in place of a `Run` means something else entirely: the run never
-got that far. It could not be set up, or it lost contact with the subject and
-killed it, and then how the subject *would* have ended is not something anyone
-can say. That is the whole of the distinction, and it is why the status is not
-an `Option`.
+A `Failure` in place of a `Run` means the run never got that far: it could not
+be set up, or the rig could not do its work and the subject was killed — and
+then how the subject *would* have ended is not something anyone can say. That
+is the whole of the distinction, and it is why the status is not an
+`Option`.
 
 `whole()` is for callers that have no use for a partial reading.
 
@@ -148,24 +148,23 @@ Internally the driver is a struct rather than a pile of locals:
 ```rust
 struct Running<'r, R: Rig> {
     rig: &'r R,
-    session: R::Session,
     subject: Subject,
+    session: R::Session,
     wire: Wire,
-
-    /// Set the moment the rig fails, and the run ends in it rather than in a
-    /// status.
-    failed: Option<Failure>,
 }
 ```
 
-with `open` / `drive` / `serve` / `react` / `finish`. `run` owns the `TempDir`
-and calls `run_in`, so the workspace drops one frame above the run that read
-it — after `finish` has reaped the subject.
+with `open` / `drive` / `serve` / `finish`. No state beyond what a run *is*.
+`run` owns the `TempDir` and calls `run_in`, so the workspace drops one frame
+above the run that read it — after `finish` has reaped the subject.
+
+**The field order is the drop order.** Leaving through `?` anywhere drops
+`Running`, and `subject` first means the shell is stopped before the session it
+was feeding is released.
 
 `open` lays down the workspace and the pipe *before* asking the rig to open a
-session, so the session a rig hands over is the last thing acquired before the
-subject exists. That is what makes `end` reachable for every run that started
-one.
+session, so the session is the last thing acquired before the subject exists
+and nothing is held over a setup that failed.
 
 ## The loop
 
@@ -173,18 +172,23 @@ one.
 
 ```rust
 for line in self.wire.drain()? {
-    let waiting = line.pid;
+    let (pid, seq) = (line.pid, line.seq);
 
-    if let Some(answer) = self.react(line) {
-        self.wire.answer(waiting, answer)?;
+    match line.kind {
+        Kind::Say => self.rig.hear(&mut self.session, line)?,
+        Kind::Ask => {
+            let answer = self.rig.answer(&mut self.session, line)?;
+
+            self.wire.answer(pid, seq, answer)?;
+        }
     }
 }
 ```
 
-`react` is where the rig is called and where a failure is caught — see [when
-the rig fails](#when-the-rig-fails). It returns what to write back, if
-anything: only a shell that *asked* is listening, so a `hear` that fails has
-nowhere to reply and yields `None`.
+A shell that asked is blocked until its answer is written, so writing it is
+part of serving rather than something the caller does after. There is no catch
+here and no state: a rig that returns `Err` leaves through `?` — see [when the
+rig fails](#when-the-rig-fails).
 
 The subject's exit is a readable descriptor — a `pidfd` — so one `poll` waits
 on the pipe and on the child at once. A readable `pidfd` does not imply an
@@ -212,27 +216,31 @@ leaves the group.
 
 ## When the rig fails
 
-A rig that returns `Err` **poisons the run**: it is not called again, every
-ask from then on is refused with its reason, and `run` ends in that `Failure`
-rather than a status.
+**A rig that returns `Err` ends the run.** The failure leaves through `?`,
+which drops `Running` — killing the subject's process group and reaping it —
+and `run` yields that reason instead of a `Run`.
 
-The run does not stop at once, and that is the point. A shell blocked on an
-ask waits forever unless it is told something, and — measured, 0 of 120 — a
-subject killed immediately after the refusal is written **never delivers it**.
-So the loop serves on until the subject leaves of its own accord, exactly as a
-successful run does.
+The subject is not told. There is nothing to tell it: an answer is a command,
+and no command means *the operator broke*. Writing one would ask bash to
+interpret a condition that is not its own, and a shell that then carried on
+would be running against a rig that has already stopped working.
 
-The blocked shell is answered with `__bc_refused`, which reports the reason at
-the subject's own call site and returns 125. From the subject's side that is
-an ordinary failing command: under `set -e` its script ends there, otherwise
-it carries on with a status it can test. Nothing is forced on it.
+This is the line the design draws:
 
-`hear` has nobody waiting, so nothing can be said at the time — but the run
-still ends in the failure, and the next shell to ask carries the reason.
+| | whose |
+|---|---|
+| a rig cannot hear, or cannot decide an answer | the run's — kill, and `Err` |
+| an answer that returns non-zero | the subject's — `set -e`, `\|\|`, or ignore it |
 
-A rig that has already failed is not asked to `end`, and a message left
-half-read is treated as a consequence of whatever went wrong before it rather
-than as news of its own: the first failure is the one reported.
+**Every answer is the same kind of thing.** Saying no is a command returning
+non-zero, exactly as saying yes is a command returning zero, and the run only
+waits to see what bash makes of it. There is no refusal on the wire and no
+category for one — `Answer` has `of` and `status`, and the default `answer`
+says the word is unknown with `return 127` like any rig would.
+
+Serving is therefore stateless: no flag, no poisoned mode, no second reading
+of a message already handled. `serve` calls the rig and writes what comes
+back.
 
 None of this costs the status. `bashcap run` still exits with the subject's
 code even when the capture broke, and says on stderr that it did — a wrapper

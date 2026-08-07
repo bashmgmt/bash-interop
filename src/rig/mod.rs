@@ -71,9 +71,9 @@ use std::fmt;
 /// What a run produced.
 ///
 /// Reaching one of these means bash was started and seen out. A `Failure`
-/// instead means the run never got that far: it could not be set up, or it
-/// lost contact with the subject and killed it, and then how the subject
-/// would have ended is not something anyone can say.
+/// instead means the run never got that far: it could not be set up, or the
+/// rig could not do its work and the subject was killed — and then how the
+/// subject would have ended is not something anyone can say.
 pub struct Run<S> {
     /// The client's own state, whatever it made of what it heard.
     pub session: S,
@@ -82,9 +82,9 @@ pub struct Run<S> {
     /// leaves of its own accord, whether or not anything went wrong.
     pub subject: ExitStatus,
 
-    /// What went wrong on this side, if anything. The subject was told
-    /// whatever could be told and still reached its own end, so `subject` is
-    /// its status rather than a consequence of this.
+    /// What went wrong closing up, if anything: a message left half-read, or
+    /// a session that would not let go. Both happen after the subject reached
+    /// its own end, so `subject` is news of its own either way.
     pub failed: Option<Failure>,
 }
 
@@ -142,6 +142,11 @@ pub trait Rig {
     fn open(&self) -> Result<Self::Session, Failure>;
 
     /// A message nobody is waiting on.
+    ///
+    /// A `Failure` from either this or [`answer`](Rig::answer) ends the run:
+    /// the subject is killed and `run` yields that reason. It is not told and
+    /// not given a status to interpret — a rig that cannot do its work is not
+    /// something bash can be asked about.
     fn hear(&self, _session: &mut Self::Session, _said: Line) -> Result<(), Failure> {
         Ok(())
     }
@@ -149,6 +154,10 @@ pub trait Rig {
     /// A message a shell is blocked on; the run frames what comes back and
     /// writes it to that shell. Hearing the question and telling the shell
     /// the word is unknown, unless a rig says otherwise.
+    ///
+    /// An answer is a command, and every answer is the same kind of thing.
+    /// Saying no is a command that returns non-zero — what the subject makes
+    /// of that is its own business, and the run only waits to see.
     fn answer(&self, session: &mut Self::Session, asked: Line) -> Result<Answer, Failure> {
         self.hear(session, asked)?;
 
