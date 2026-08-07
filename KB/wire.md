@@ -300,8 +300,8 @@ with the `key=value` headers the protocol writes in front of one, which
 
 `words` is what the subject passed, in order, an empty arglist included.
 `behind` and `field` are conveniences a decoder opts into. An element may
-itself be a literal, decoded with `Schema::n_d(k)`, which is how a payload
-carries structure without sentinel words.
+itself be a literal, decoded with `QuotedNest::words` or `::rows`, which is
+how a payload carries structure without sentinel words.
 
 Both clocks are kept because they answer different questions: `sent_at` orders
 messages across the process tree as the shells saw it, `heard_at` says when
