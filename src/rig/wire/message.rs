@@ -9,7 +9,7 @@ use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::vec;
 
-use crate::bash::value::{self, BashCodec, QuotedNest};
+use crate::bash::value::{emit_array, parse_array};
 use crate::failure::{Doing, Failure};
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
@@ -111,7 +111,7 @@ impl Line {
     ) -> Result<Self, Failure> {
         let at = || format!("reading the message {literal:?}");
 
-        let words = QuotedNest.words(literal).doing(at)?;
+        let words = parse_array(literal).doing(at)?;
 
         Self::shifted(pid, seq, heard_at, words).doing(at)
     }
@@ -187,12 +187,8 @@ impl Answer {
     }
 
     pub(crate) fn to_message(&self) -> String {
-        literal(&self.0)
+        emit_array(&self.0)
     }
-}
-
-pub(crate) fn literal(words: &[String]) -> String {
-    format!("({})", value::emit_q_words(words))
 }
 
 #[cfg(test)]
@@ -207,7 +203,7 @@ mod tests {
         let mut all = words(&["SAY", "at=1.000002", "parent=7", "shlvl=4"]);
         all.extend(words(payload));
 
-        literal(&all)
+        emit_array(&all)
     }
 
     #[test]
@@ -233,11 +229,11 @@ mod tests {
     #[test]
     fn a_header_the_protocol_did_not_write_is_an_error() {
         let bad = [
-            literal(&words(&["MUMBLE", "at=1.000002", "parent=7", "shlvl=4"])),
-            literal(&words(&["SAY", "when=1.000002", "parent=7", "shlvl=4"])),
-            literal(&words(&["SAY", "at=1.0", "parent=7", "shlvl=4"])),
-            literal(&words(&["SAY", "at=1.000002", "parent=x", "shlvl=4"])),
-            literal(&words(&["SAY", "at=1.000002", "parent=7"])),
+            emit_array(&words(&["MUMBLE", "at=1.000002", "parent=7", "shlvl=4"])),
+            emit_array(&words(&["SAY", "when=1.000002", "parent=7", "shlvl=4"])),
+            emit_array(&words(&["SAY", "at=1.0", "parent=7", "shlvl=4"])),
+            emit_array(&words(&["SAY", "at=1.000002", "parent=x", "shlvl=4"])),
+            emit_array(&words(&["SAY", "at=1.000002", "parent=7"])),
             "(unquoted".to_string(),
         ];
         for literal in bad {
@@ -257,12 +253,12 @@ mod tests {
 
         let mut expected = vec!["printf".to_string()];
         expected.extend(carried.iter().map(|word| word.to_string()));
-        assert_eq!(QuotedNest.words(&message).unwrap(), expected, "and it still reads back");
+        assert_eq!(parse_array(&message).unwrap(), expected, "and it still reads back");
     }
 
     #[test]
     fn messages_round_trip() {
-        let nested = literal(&words(&["INNER", "x y"]));
+        let nested = emit_array(&words(&["INNER", "x y"]));
         let payload = words(&["TAG", "quote'inside", "two\nlines", &nested]);
 
         let line = Line::read(Pid(1), 0, Micros(0), &sent(&["TAG", "quote'inside", "two\nlines", &nested]))
@@ -270,6 +266,6 @@ mod tests {
         assert_eq!(line.words, payload, "a message is one line, whatever it carries");
 
         // A word may itself be a message, decoded one level at a time.
-        assert_eq!(QuotedNest.words(&nested).unwrap(), words(&["INNER", "x y"]));
+        assert_eq!(parse_array(&nested).unwrap(), words(&["INNER", "x y"]));
     }
 }

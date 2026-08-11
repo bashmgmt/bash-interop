@@ -270,7 +270,7 @@ epoch fails the run rather than reading as zero.
 ## Messages
 
 One bash array literal — `declare -a x="$msg"` on the bash side,
-`QuotedNest::words` on the Rust side, the same shape both ways.
+`parse_array` on the Rust side, the same shape both ways.
 
 ```rust
 /// What one shell said, once, with the provenance the wire gives it.

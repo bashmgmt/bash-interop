@@ -123,7 +123,7 @@ impl Frame {
 mod tests {
     use super::*;
 
-    use super::super::message::literal;
+    use crate::bash::value::emit_array;
 
     const AT: Micros = Micros(9);
 
@@ -134,7 +134,7 @@ mod tests {
         let words: Vec<String> =
             ahead.iter().chain(payload).map(|word| word.to_string()).collect();
 
-        literal(&words)
+        emit_array(&words)
     }
 
     fn frame(pid: u32, seq: u32, body: &str) -> String {
@@ -212,7 +212,7 @@ mod tests {
             format!(". 7 z {}\n", whole(&[])),
             ". 7 0\n".to_string(),
             ". 7 0 (unquoted\n".to_string(),
-            format!(". 7 0 {}\n", literal(&["MUMBLE".to_string()])),
+            format!(". 7 0 {}\n", emit_array(&["MUMBLE".to_string()])),
         ];
         for frame in bad {
             assert!(

@@ -103,7 +103,7 @@ fn reply_pipe(path: &Path) -> Result<File, Failure> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bash::value::{BashCodec, QuotedNest};
+    use crate::bash::value::parse_array;
 
     /// The shell's side of one question: it holds the pipe open before asking,
     /// and reads to the delimiter. Everything before that is one message.
@@ -171,7 +171,7 @@ mod tests {
 
         let got = shell.join().expect("the asking shell");
         assert_eq!(
-            QuotedNest.words(&got).expect("one bash array literal"),
+            parse_array(&got).expect("one bash array literal"),
             ["printf".to_string(), payload],
             "byte for byte, across more writes than one"
         );

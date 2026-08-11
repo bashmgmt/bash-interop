@@ -12,6 +12,7 @@ KB/mb_resolver/bash/                              src/bash/
   rig.md            Rig, ExitStatus, run            rig/mod.rs, rig/run.rs
   tree.md           shells and the process forest   rig/tree.rs
   measurements.md   numbers, limits, proofs
+  scoping.md        where a name binds              every *.bash we ship
   bashcap.md        the reference tool              bashcap/
 ```
 
