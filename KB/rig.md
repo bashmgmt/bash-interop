@@ -86,6 +86,7 @@ whatever the client says it is:
 | bashcap | `Capturing { written, sink }` | `startup`; `hear` decodes and writes; `end` flushes |
 | `examples/snapshotting.rs` | `Vec<Capture>` | `startup`; `hear` decodes and keeps |
 | `examples/answering.rs` | what it has heard | `startup`; `answer` decides from it |
+| `examples/bashprof.rs` | `Timing { open, roots }` | `startup`; `hear` pairs BEGIN with END into a tree |
 | `proofs/answering.rs` | `Soak { heard, answered }` | `startup`, `hear`, `answer`; the tally lives in the session because a rig is `&self` |
 | `proofs/owning.rs` | `()` | `answer`, which never returns |
 
@@ -290,4 +291,5 @@ useful answer to is an outcome, not an error.
 
 - [wire.md](wire.md) — what `drain` hands back, and what an answer is
 - [tree.md](tree.md) — views over what a session kept
+- [stack.md](stack.md) — the frame walk any instrument can reuse
 - [bashcap.md](bashcap.md) — a rig that streams instead of keeping

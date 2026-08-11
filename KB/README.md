@@ -1,9 +1,11 @@
 # Bash interop
 
-Two layers. **Values** (`src/bash/value/`) read and write bash's own quoted
+Three layers. **Values** (`src/bash/value/`) read and write bash's own quoted
 forms — `@Q`, `@A`, `declare -p`. **The rig** (`src/bash/rig/`) runs a bash
 program with instrumentation injected, receives messages from every shell in
-the resulting process tree, and answers questions those shells ask.
+the resulting process tree, and answers questions those shells ask. **The
+stack** (`src/bash/stack.bash`, `src/bash/stack.rs`) is the frame walk every
+instrument shares.
 
 ```
 KB/mb_resolver/bash/                              src/bash/
@@ -11,6 +13,7 @@ KB/mb_resolver/bash/                              src/bash/
   wire.md           the bash, the pipe, the frame   rig/wire/
   rig.md            Rig, ExitStatus, run            rig/mod.rs, rig/run.rs
   tree.md           shells and the process forest   rig/tree.rs
+  stack.md          the call stack, both halves     stack.bash, stack.rs
   measurements.md   numbers, limits, proofs
   scoping.md        where a name binds              every *.bash we ship
   bashcap.md        the reference tool              bashcap/
@@ -81,9 +84,9 @@ about them. Then call `run`. Provenance, ordering, the process forest,
 subshell capture, concurrent-writer integrity and the control channel come
 with the transport.
 
-`tests/examples/` is four worked rigs against the public API alone.
+`tests/examples/` is worked rigs against the public API alone.
 
 ## Reading order
 
 README → rig.md → wire.md, then whichever concern applies. Changing the
-transport: wire.md → measurements.md. Writing a tool: bashcap.md.
+transport: wire.md → measurements.md. Writing a tool: stack.md → bashcap.md.

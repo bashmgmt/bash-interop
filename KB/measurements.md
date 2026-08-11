@@ -30,8 +30,8 @@ Per message, inside bash, minimum of seven runs of 4000:
 | sending through one bash function | 28 |
 
 Message assembly dominates either way, and a tool reading real state costs
-far more: a full `bashcap` snapshot is ~611 µs, so the 7 µs difference between
-an inlined send and a function call is under one percent of what an
+far more: a full `bashcap` snapshot is ~480 µs, so the 7 µs difference between
+an inlined send and a function call is under two percent of what an
 instrumented call site actually costs.
 
 Joining — the first `say` in a new shell, which opens the pipe — costs 10 µs
@@ -45,6 +45,33 @@ them, against a floor of 1.8 µs for the bare loop, that measures **32.9
 µs/op**; inlining `__bc_send` into the `say` arm as well measures 31.5, and
 the remaining 1.4 µs costs a second copy of packing and shipping, which `ask`
 and `join` still need.
+
+## The frame walk
+
+Assembling whole frames in bash, against shipping bash's five stack arrays as
+they are. Depth 8, three arguments per frame, 4000 iterations, empty-loop floor
+2.7 µs:
+
+| | µs/op | payload bytes |
+|---|---:|---:|
+| rows, with the argument walk in bash | 201 | 522 |
+| six raw `${arr[*]@Q}` expansions | 21 | 314 |
+
+The bytes are the second `@Q`: nesting re-escapes every quote, and the payload
+counts against `__BC__limit`. See [stack.md](stack.md).
+
+## Cost of a snapshot
+
+`bashcap run` over 2000 `BASHCAP` calls at a six-deep stack, wall clock per
+snapshot — the whole path, bash through the wire to the decoded JSON:
+
+| | untraced | `--trace-calls` |
+|---|---:|---:|
+| the walk assembled in bash | 572 µs | 737 µs |
+| the walk shipped as columns | 482 µs | 527 µs |
+
+Arguments used to cost 165 µs a snapshot and now cost 45: what is left is the
+two extra expansions and the wider payload, rather than a loop.
 
 ## Cost end to end
 
@@ -144,6 +171,11 @@ rather than accumulated: each of those costs one message instead of a run.
 **`$?` must be read as a frame's first statement.** `local a=$1 b=${x[$a]}`
 does not work: bash expands every right-hand side before assigning any of
 them.
+
+**A bash arithmetic *command* is false when its result is 0.** `(( at += n ))`
+returns 1 whenever the running total is still 0, which under the subject's own
+`set -e` ends the script part-way through a snapshot. `x=$(( x + n ))` has no
+such status. This is why no instrument in the crate counts in bash.
 
 **Under `extdebug`, a `DEBUG` handler returning non-zero skips the command it
 fired for.** An instrument propagating `$?` faithfully would skip everything
