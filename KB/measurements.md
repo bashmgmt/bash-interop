@@ -95,8 +95,8 @@ be is left to the compiler. One file per subject.
 
 | `starting.rs` | establishes |
 |---|---|
-| `a_rig_may_wrap_the_command_line_and_add_to_the_environment` | a launcher runs in front of the command line, that command line arrives intact, and `Startup::env` reaches the process the launcher started |
-| `the_command_line_is_run_as_asked_by_default` | `transform_command` is identity unless a rig says otherwise |
+| `a_rig_may_add_to_the_environment_and_reach_every_shell` | `Startup::env` reaches the subject and a child it starts, and `Startup::bash` puts the rig's word in both |
+| `the_command_line_is_run_as_asked` | the run starts the program the argv names, with nothing appended |
 
 | `owning.rs` | establishes |
 |---|---|

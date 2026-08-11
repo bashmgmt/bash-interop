@@ -18,10 +18,6 @@ pub trait Rig {
     /// What the run needs before there is a shell to talk to.
     fn startup(&self) -> Startup;
 
-    /// The command line actually run, given the one the caller asked for.
-    /// Identity by default.
-    fn transform_command(&self, argv: Vec<OsString>) -> Vec<OsString>;
-
     fn open(&self) -> Result<Self::Session, Failure>;
 
     /// A message nobody is waiting on.
@@ -37,13 +33,11 @@ pub trait Rig {
 ```
 
 **`open` is the only required method.** The rest default to: injecting
-nothing, running the command line as asked, keeping nothing, hearing the
-question and telling the shell the word is unknown (`return 127`), and doing
-nothing. A rig that ignores everything is a session type and one line; a rig
-that only listens adds `hear`.
+nothing, keeping nothing, hearing the question and telling the shell the word
+is unknown (`return 127`), and doing nothing. A rig that ignores everything is
+a session type and one line; a rig that only listens adds `hear`.
 
-The two that inform the run split by kind. `Startup` is **data** — what the
-process needs before it exists:
+`Startup` is what a rig tells the run about the process before it exists:
 
 ```rust
 #[derive(Default)]
@@ -57,14 +51,15 @@ pub struct Startup {
 }
 ```
 
-`transform_command` is **behaviour** — a rig may put a launcher in front of
-the command line, wrap the payload, or replace it outright. It cannot mislay
-what the caller asked for by accident, because identity is the default.
+**The command line is run as it is given, and carries its own program.**
+`run(&rig, &["bash", "x.bash"])`, not `&["x.bash"]` — so a run is not bound to
+bash at the top, and a caller wanting a launcher writes one into the argv it
+passes. `&["make", "test"]` works too, and every bash `make` starts joins the
+wire.
 
-**The command line carries its own program.** `run(&rig, &["bash", "x.bash"])`,
-not `&["x.bash"]` — so a run is not bound to bash at the top. Instrumentation
-travels by `BASH_ENV`, so `&["make", "test"]` works too, and every bash `make`
-starts joins the wire.
+A rig has no say in the command line, and needs none: what it would want to
+put there — a word, a variable, an option — reaches *every* shell through
+`Startup`, which a command line cannot do.
 
 `answer`'s default routes through `hear`, so a rig that does not answer still
 keeps what it was asked.
@@ -172,14 +167,14 @@ and nothing is held over a setup that failed.
 
 ```rust
 for line in self.wire.drain()? {
-    let (pid, seq) = (line.pid, line.seq);
+    let asking = line.pid;
 
     match line.kind {
         Kind::Say => self.rig.hear(&mut self.session, line)?,
         Kind::Ask => {
             let answer = self.rig.answer(&mut self.session, line)?;
 
-            self.wire.answer(pid, seq, answer)?;
+            self.wire.answer(asking, answer)?;
         }
     }
 }

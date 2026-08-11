@@ -59,8 +59,8 @@ struct Running<'r, R: Rig> {
 
 impl<'r, R: Rig> Running<'r, R> {
     fn open<S: AsRef<OsStr>>(rig: &'r R, dir: &Path, argv: &[S]) -> Result<Self, Failure> {
-        let asked = argv.iter().map(|word| word.as_ref().to_os_string()).collect();
-        let command = rig.transform_command(asked);
+        let command: Vec<OsString> =
+            argv.iter().map(|word| word.as_ref().to_os_string()).collect();
         let startup = rig.startup();
 
         let wire = Wire::create(dir)?;

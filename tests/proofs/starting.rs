@@ -1,23 +1,14 @@
-//! What a rig tells the run about the process it is about to start: the
-//! environment it is given, and the command line actually run.
-
-use std::ffi::OsString;
-use std::path::PathBuf;
+//! What a rig tells the run about the process it is about to start.
 
 use mb_resolver::bash::rig::{run, ExitStatus, Failure, Line, Rig, Startup};
 
 use crate::support::{bash, Scripts};
 use crate::{behind, report, ENTRY};
 
-const WRAPPER: &str = "wrapper.bash";
+/// Hands the subject a word of its own and a variable of its own.
+struct Deploying;
 
-/// Puts a launcher in front of the command line and hands the subject a
-/// variable of its own.
-struct Launching {
-    wrapper: PathBuf,
-}
-
-impl Rig for Launching {
+impl Rig for Deploying {
     type Session = Vec<Line>;
 
     fn startup(&self) -> Startup {
@@ -25,15 +16,6 @@ impl Rig for Launching {
             bash: "TELL() { BC_INSTR say TELL \"$@\"; }".to_string(),
             env: vec![("DEPLOY_TARGET".into(), "staging".into())],
         }
-    }
-
-    /// The caller asked for `bash main.bash`; what runs is the wrapper, with
-    /// that command line behind it as its own arguments.
-    fn transform_command(&self, argv: Vec<OsString>) -> Vec<OsString> {
-        let mut wrapped = bash(self.wrapper.clone());
-        wrapped.extend(argv);
-
-        wrapped
     }
 
     fn open(&self) -> Result<Vec<Line>, Failure> {
@@ -47,60 +29,50 @@ impl Rig for Launching {
     }
 }
 
-/// The launcher runs, the command line it was given arrives intact, and the
-/// environment reaches the subject the launcher started rather than only the
-/// process the run spawned.
+/// `Startup::env` reaches the subject, and so does a child it starts —
+/// the environment is inherited, and `BASH_ENV` puts the rig's own word in
+/// both shells.
 #[test]
-fn a_rig_may_wrap_the_command_line_and_add_to_the_environment() {
+fn a_rig_may_add_to_the_environment_and_reach_every_shell() {
     let scripts = Scripts::of(&[
-        (
-            WRAPPER,
-            r#"
-            TELL wrapper "$#" "${@: -1}"
-            "$@"
-            "#,
-        ),
         (
             ENTRY,
             r#"
-            TELL subject "$DEPLOY_TARGET" "$BASH_SOURCE"
+            TELL subject "$DEPLOY_TARGET" "$#"
+            bash "${BASH_SOURCE[0]%/*}/child.bash"
+            "#,
+        ),
+        (
+            "child.bash",
+            r#"
+            TELL child "$DEPLOY_TARGET"
             "#,
         ),
     ]);
 
-    let launching = Launching { wrapper: scripts.at(WRAPPER) };
-    let (seen, status) =
-        run(&launching, &bash(scripts.at(ENTRY))).unwrap().whole().unwrap();
+    let (seen, status) = run(&Deploying, &bash(scripts.at(ENTRY))).unwrap().whole().unwrap();
 
     assert_eq!(status, ExitStatus::Code(0), "{}", report(&seen));
-
-    let told = behind(&seen, "TELL");
-    let said = |lead: &str| {
-        told.iter().find(|words| words[0] == lead).unwrap_or_else(|| panic!("no {lead} message"))
-    };
-
-    let wrapper = said("wrapper");
-    assert_eq!(wrapper[1], "2", "the caller's whole command line, as two words");
-    assert_eq!(wrapper[2], scripts.at(ENTRY).to_string_lossy(), "and unaltered");
-
-    let subject = said("subject");
-    assert_eq!(subject[1], "staging", "the rig's variable reached the wrapped command");
-    assert_eq!(subject[2], scripts.at(ENTRY).to_string_lossy(), "which is the one asked for");
+    assert_eq!(
+        behind(&seen, "TELL"),
+        [["subject", "staging", "0"].as_slice(), ["child", "staging"].as_slice()],
+        "{}",
+        report(&seen)
+    );
 }
 
-/// The default is identity, and a run that transforms nothing starts exactly
-/// what it was handed.
+/// The run starts exactly the command line it was handed — no launcher in
+/// front of it, and no argument the caller did not write.
 #[test]
-fn the_command_line_is_run_as_asked_by_default() {
+fn the_command_line_is_run_as_asked() {
     let scripts = Scripts::of(&[(ENTRY, "BC_INSTR say REC \"$0\" \"$#\"")]);
-    let (seen, status) =
-        run(&crate::Keeping, &bash(scripts.at(ENTRY))).unwrap().whole().unwrap();
+    let (seen, status) = run(&crate::Keeping, &bash(scripts.at(ENTRY))).unwrap().whole().unwrap();
 
     assert_eq!(status, ExitStatus::Code(0));
     assert_eq!(
         behind(&seen, "REC"),
         [[scripts.at(ENTRY).to_string_lossy().to_string(), "0".to_string()]],
-        "no launcher, no extra arguments{}",
+        "the program it names, and nothing appended{}",
         report(&seen)
     );
 }

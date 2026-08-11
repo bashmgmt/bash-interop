@@ -53,13 +53,14 @@
 //! ```
 //!
 //! An answer is a command the shell runs, so its expressiveness is bash's.
-//! Only `open` is required: `startup`, `transform_command`, `hear`, `answer`
-//! and `end` default to injecting nothing, running the command line as asked,
-//! keeping nothing, saying the word is unknown, and doing nothing.
+//! Only `open` is required: `startup`, `hear`, `answer` and `end` default to
+//! injecting nothing, keeping nothing, saying the word is unknown, and doing
+//! nothing.
 //!
-//! The command line carries its own program, so a run is not bound to bash at
-//! the top: instrumentation travels by `BASH_ENV`, and any bash the subject
-//! starts joins the wire whether or not the subject is one.
+//! The command line is run as it is given, and carries its own program — so a
+//! run is not bound to bash at the top, and a caller wanting a launcher puts
+//! one there. Instrumentation travels by `BASH_ENV` instead, which is what
+//! reaches the shells a command line never could.
 
 mod run;
 mod tree;
@@ -130,13 +131,6 @@ pub trait Rig {
     /// What the run needs before there is a shell to talk to.
     fn startup(&self) -> Startup {
         Startup::default()
-    }
-
-    /// The command line actually run, given the one the caller asked for —
-    /// which carries its own program, so a rig may put a launcher in front,
-    /// wrap the payload, or replace it outright. Identity by default.
-    fn transform_command(&self, argv: Vec<OsString>) -> Vec<OsString> {
-        argv
     }
 
     fn open(&self) -> Result<Self::Session, Failure>;
