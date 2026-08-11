@@ -86,7 +86,7 @@ whatever the client says it is:
 | bashcap | `Capturing { written, sink }` | `startup`; `hear` decodes and writes; `end` flushes |
 | `examples/snapshotting.rs` | `Vec<Capture>` | `startup`; `hear` decodes and keeps |
 | `examples/answering.rs` | what it has heard | `startup`; `answer` decides from it |
-| `examples/bashprof.rs` | `Timing { open, roots }`, resolved to a `Profile` | `startup`; `hear` pairs BEGIN with END into a tree |
+| `examples/bashprof.rs` | `Recording`, yielding the tree as recorded | `startup`; `hear` pairs BEGIN with END, and a hylic fold reads it as timings |
 | `proofs/answering.rs` | `Soak { heard, answered }` | `startup`, `hear`, `answer`; the tally lives in the session because a rig is `&self` |
 | `proofs/owning.rs` | `()` | `answer`, which never returns |
 
