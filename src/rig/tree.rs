@@ -53,16 +53,26 @@ pub fn shells(lines: &[Line]) -> Vec<Shell<'_>> {
     shells
 }
 
-/// Shells linked through `Shell::parent`, choosing the newest candidate that
-/// opened no later than the child. A shell whose parent never emitted — the
-/// outermost one, whose parent is the run itself — is a root.
-pub fn forest<'a>(shells: &[Shell<'a>]) -> Vec<ShellNode<'a>> {
+/// For each shell, the shell it was forked from: the newest generation of its
+/// parent pid that had opened by then. `None` is a shell whose parent never
+/// emitted — the outermost one, whose parent is the run itself.
+///
+/// A parent's index is always below its child's, so walking this upward
+/// terminates: a shell can only name a parent that had already spoken, and
+/// speaking is what puts a shell in this list.
+pub fn forked_from(shells: &[Shell<'_>]) -> Vec<Option<usize>> {
     let generations = generations(shells);
+
+    (0..shells.len()).map(|index| parent_of(shells, &generations, index)).collect()
+}
+
+/// Shells linked through [`forked_from`], every root carrying what it started.
+pub fn forest<'a>(shells: &[Shell<'a>]) -> Vec<ShellNode<'a>> {
     let mut children: HashMap<usize, Vec<usize>> = HashMap::new();
     let mut roots: Vec<usize> = Vec::new();
 
-    for index in 0..shells.len() {
-        match parent_of(shells, &generations, index) {
+    for (index, forked_from) in forked_from(shells).into_iter().enumerate() {
+        match forked_from {
             Some(parent) => children.entry(parent).or_default().push(index),
             None => roots.push(index),
         }
@@ -85,6 +95,10 @@ fn generations(shells: &[Shell<'_>]) -> HashMap<Pid, Vec<usize>> {
 /// Which generation of the parent pid this shell belongs to: the last one that
 /// opened no later than the child did. The candidates are ordered by
 /// `opened_at`, so the boundary is a partition rather than a scan.
+///
+/// A parent spoke before it forked, so its own first message is ahead of the
+/// child's in the stream and its index below. Taking that as the rule rather
+/// than merely excluding the shell itself is what makes the relation acyclic.
 fn parent_of(
     shells: &[Shell<'_>],
     generations: &HashMap<Pid, Vec<usize>>,
@@ -94,7 +108,7 @@ fn parent_of(
     let candidates = generations.get(&shell.parent)?;
     let upto = candidates.partition_point(|&at| shells[at].opened_at <= shell.opened_at);
 
-    candidates[..upto].iter().rev().find(|&&at| at != index).copied()
+    candidates[..upto].iter().rev().find(|&&at| at < index).copied()
 }
 
 fn node<'a>(
@@ -178,6 +192,18 @@ mod tests {
         assert_eq!(forest[1].shell.opened_at, Micros(200));
         assert_eq!(forest[1].children.len(), 1);
         assert_eq!(forest[1].children[0].shell.pid, Pid(9), "the later child");
+    }
+
+    /// A shell can only have been forked from one that had already spoken, so
+    /// the relation points strictly backwards and a walk up it ends. Two
+    /// shells naming each other's pid in one instant is the input that would
+    /// otherwise close a loop.
+    #[test]
+    fn the_fork_relation_points_strictly_backwards() {
+        let heard = [line(100, 7, 8, 0), line(100, 8, 7, 0)];
+        let shells = shells(&heard);
+
+        assert_eq!(forked_from(&shells), [None, Some(0)]);
     }
 
     /// A shell whose parent pid never emitted is a root: nothing is invented
