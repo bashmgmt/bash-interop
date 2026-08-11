@@ -37,7 +37,8 @@ impl Rig for Breaking {
 
 /// The subject reports its own pid before the message that breaks the rig, so
 /// a proof can ask whether it outlived the run.
-const REPORTING: &str = "echo $BASHPID > \"${BASH_SOURCE[0]%/*}/pid\"\n";
+const REPORTING: &str = r#"echo $BASHPID > "${BASH_SOURCE[0]%/*}/pid"
+"#;
 
 fn blocked(scripts: &Scripts) -> i32 {
     std::fs::read_to_string(scripts.at("pid"))
@@ -52,7 +53,7 @@ fn blocked(scripts: &Scripts) -> i32 {
 /// is no command that means "the operator broke".
 #[test]
 fn a_rig_that_cannot_answer_ends_the_run_and_kills_the_subject() {
-    let scripts = Scripts::of(&[(ENTRY, &format!("{REPORTING}BC_INSTR ask anything\n"))]);
+    let scripts = Scripts::of(&[(ENTRY, &format!("{REPORTING}BC_INSTR ask anything"))]);
 
     let failure = run(&Breaking { on: Kind::Ask }, &bash(scripts.at(ENTRY)))
         .err()
@@ -67,8 +68,15 @@ fn a_rig_that_cannot_answer_ends_the_run_and_kills_the_subject() {
 /// gone on for another half minute.
 #[test]
 fn a_failure_while_hearing_ends_the_run_and_kills_the_subject() {
-    let scripts =
-        Scripts::of(&[(ENTRY, &format!("{REPORTING}BC_INSTR say REC one\nsleep 30\n"))]);
+    let scripts = Scripts::of(&[(
+        ENTRY,
+        &format!(
+            r#"{REPORTING}
+            BC_INSTR say REC one
+            sleep 30
+            "#
+        ),
+    )]);
 
     let started = Instant::now();
     let failure = run(&Breaking { on: Kind::Say }, &bash(scripts.at(ENTRY)))

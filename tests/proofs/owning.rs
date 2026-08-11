@@ -42,7 +42,13 @@ fn every_reply_pipe_goes_with_its_answer() {
             exit 0
             "#,
         ),
-        ("other.bash", "for i in 1 2 3; do BC_INSTR ask step \"$i\"; done\nexit 0\n"),
+        (
+            "other.bash",
+            r#"
+            for i in 1 2 3; do BC_INSTR ask step "$i"; done
+            exit 0
+            "#,
+        ),
     ]);
 
     let (seen, status) = run_in(&Keeping, &at, &bash(scripts.at(ENTRY))).unwrap().whole().unwrap();
@@ -125,7 +131,10 @@ impl Rig for Exploding {
 fn a_panicking_answer_kills_the_subject() {
     let scripts = Scripts::of(&[(
         ENTRY,
-        "echo $BASHPID > \"${BASH_SOURCE[0]%/*}/pid\"\nBC_INSTR ask anything\n",
+        r#"
+        echo $BASHPID > "${BASH_SOURCE[0]%/*}/pid"
+        BC_INSTR ask anything
+        "#,
     )]);
     let argv = bash(scripts.at(ENTRY));
 

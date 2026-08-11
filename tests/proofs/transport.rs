@@ -19,7 +19,13 @@ fn every_descendant_shell_reaches_the_wire() {
             BC_INSTR say REC after
             "#,
         ),
-        ("child.bash", "BC_INSTR say REC child\n( BC_INSTR say REC grandchild )\n"),
+        (
+            "child.bash",
+            r#"
+            BC_INSTR say REC child
+            ( BC_INSTR say REC grandchild )
+            "#,
+        ),
     ]);
 
     assert_eq!(
@@ -104,8 +110,12 @@ fn concurrent_writers_never_interleave() {
 #[test]
 fn nothing_is_lost_at_the_end() {
     for _ in 0..10 {
-        let (seen, status) =
-            script("for i in $(seq 1 200); do BC_INSTR say REC \"r$i\"; done\nexit 3");
+        let (seen, status) = script(
+            r#"
+            for i in $(seq 1 200); do BC_INSTR say REC "r$i"; done
+            exit 3
+            "#,
+        );
         assert_eq!(behind(&seen, "REC").len(), 200);
         assert_eq!(status, ExitStatus::Code(3));
     }
@@ -115,8 +125,12 @@ fn nothing_is_lost_at_the_end() {
 /// carrying one arrives whole — and as one word, beside the next.
 #[test]
 fn a_newline_inside_a_value_is_escaped_not_framed() {
-    let (seen, _) =
-        script("payload=$'first\\nsecond\\tthird\\\\fourth'\nBC_INSTR say REC \"$payload\" plain\n");
+    let (seen, _) = script(
+        r#"
+        payload=$'first\nsecond\tthird\\fourth'
+        BC_INSTR say REC "$payload" plain
+        "#,
+    );
 
     assert_eq!(
         behind(&seen, "REC"),

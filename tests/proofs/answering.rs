@@ -90,7 +90,13 @@ fn a_session_survives_every_way_of_answering() {
             BC_INSTR say REC marks ${!mark_@}
             "#,
         ),
-        ("other.bash", "BC_INSTR ask step 4\nBC_INSTR say REC other done\n"),
+        (
+            "other.bash",
+            r#"
+            BC_INSTR ask step 4
+            BC_INSTR say REC other done
+            "#,
+        ),
     ]);
 
     let answering = Answering { steps: scripts.dir().to_path_buf() };

@@ -53,8 +53,19 @@ impl Rig for Launching {
 #[test]
 fn a_rig_may_wrap_the_command_line_and_add_to_the_environment() {
     let scripts = Scripts::of(&[
-        (WRAPPER, "TELL wrapper \"$#\" \"${@: -1}\"\n\"$@\"\n"),
-        (ENTRY, "TELL subject \"$DEPLOY_TARGET\" \"$BASH_SOURCE\"\n"),
+        (
+            WRAPPER,
+            r#"
+            TELL wrapper "$#" "${@: -1}"
+            "$@"
+            "#,
+        ),
+        (
+            ENTRY,
+            r#"
+            TELL subject "$DEPLOY_TARGET" "$BASH_SOURCE"
+            "#,
+        ),
     ]);
 
     let launching = Launching { wrapper: scripts.at(WRAPPER) };
