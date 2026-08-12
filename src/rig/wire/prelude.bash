@@ -5,9 +5,14 @@
 __BC__DIR="${BASH_SOURCE[0]%/*}"
 __BC__UP="$__BC__DIR/up"
 
-# Under PIPE_BUF (4096) with room for the frame header and the delimiter, so a
-# frame is always one atomic write.
-__BC__limit=3900
+# One frame is one atomic write, so it has to fit PIPE_BUF whole, header and
+# delimiter included. Bash measures and slices text in characters and PIPE_BUF
+# counts bytes: `__BC__narrow` is the width at which that cannot matter, a
+# character being at most four bytes in every locale glibc ships and the
+# header and delimiter under 24. Anything wider goes through `__bc_frame`,
+# which works in bytes and fills the frame.
+__BC__PIPE_BUF=4096
+__BC__narrow=$(( (__BC__PIPE_BUF - 24) / 4 ))
 
 # `BC_INSTR` could not do its job — as distinct from an answer that ran and
 # returned non-zero, which is the subject's own business. 125 is what `env`
@@ -91,13 +96,13 @@ __bc_send() {
     printf -v __bc_msg '%s ' "${@@Q}"
     __bc_msg="(${__bc_msg% })"
 
-    if (( ${#__bc_msg} <= __BC__limit )); then
+    if (( ${#__bc_msg} <= __BC__narrow )); then
         printf '. %s %s %s\n' \
             "$BASHPID" "$__bc_seq" "$__bc_msg" >&"$__BC__up" || __BC_THROW
         return 0
     fi
 
-    __bc_split "$__bc_seq" "$__bc_msg" || __BC_BAIL
+    __bc_frame "$__bc_seq" "$__bc_msg" || __BC_BAIL
 }
 
 # A shell announces nothing: its first message carries seq 0, which is what
@@ -110,19 +115,37 @@ __bc_join() {
     __BC__seq=0
 }
 
-# $1 the sequence number, $2 a message too wide for one frame. Every chunk
-# repeats `pid seq`, the key the reader rejoins them by. The cursor moves by
-# assignment: `(( x += n ))` is a command, and its status is false when the
-# result is 0.
-__bc_split() {
+# $1 the sequence number, $2 a message the narrow lane would not take. Every
+# chunk repeats `pid seq`, the key the reader rejoins them by.
+#
+# `LC_ALL` is taken for this frame only, and restored by `local` on return. It
+# is what makes `${#…}` and `${…:from:room}` count the bytes PIPE_BUF counts;
+# the message itself was quoted by the caller, in the subject's own locale, so
+# what goes on the wire is unchanged. Taking it costs about 7 µs, which is why
+# the narrow lane exists and why it is measured in characters.
+#
+# A cut may fall inside a character. The reader joins chunks as bytes and
+# decodes the message once, for the same reason it buffers reads as bytes.
+#
+# The cursor moves by assignment: `(( x += n ))` is a command, and its status
+# is false when the result is 0.
+__bc_frame() {
+    local LC_ALL=C
     local __bc_head="$BASHPID $1"
     local __bc_msg="$2"
-    local __bc_from=0
+    local __bc_size=${#__bc_msg}
+    local __bc_room=$(( __BC__PIPE_BUF - ${#__bc_head} - 4 ))
 
-    while (( __bc_from + __BC__limit < ${#__bc_msg} )); do
+    if (( __bc_size <= __bc_room )); then
+        printf '. %s %s\n' "$__bc_head" "$__bc_msg" >&"$__BC__up" || __BC_THROW
+        return 0
+    fi
+
+    local __bc_from=0
+    while (( __bc_from + __bc_room < __bc_size )); do
         printf '+ %s %s\n' \
-            "$__bc_head" "${__bc_msg:__bc_from:__BC__limit}" >&"$__BC__up" || __BC_THROW
-        __bc_from=$(( __bc_from + __BC__limit ))
+            "$__bc_head" "${__bc_msg:__bc_from:__bc_room}" >&"$__BC__up" || __BC_THROW
+        __bc_from=$(( __bc_from + __bc_room ))
     done
 
     printf '. %s %s\n' "$__bc_head" "${__bc_msg:__bc_from}" >&"$__BC__up" || __BC_THROW

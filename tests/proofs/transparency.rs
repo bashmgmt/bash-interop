@@ -35,3 +35,28 @@ fn a_clients_own_trap_and_ifs_are_untouched() {
 
     assert_eq!(behind(&seen, "REC"), [["one", "two"]], "{}", report(&seen));
 }
+
+/// A message wider than the narrow lane is framed in bytes, which takes
+/// `LC_ALL` for as long as that frame lasts. It is a `local`, so it is gone
+/// before the send returns — and the subject, which runs everything of its own
+/// between sends, never sees it.
+///
+/// Observed rather than asserted about: `${#text}` counts characters in a
+/// UTF-8 locale and bytes in `C`, so the subject can say which one it is in.
+#[test]
+fn a_clients_own_locale_is_untouched_by_a_wide_message() {
+    let (seen, _) = script(
+        r#"
+        export LC_ALL=C.UTF-8
+        wide="ä"
+
+        BC_INSTR say REC before "${#wide}" "$LC_ALL"
+        BC_INSTR say REC "$(printf 'x%.0s' {1..9000})"
+        BC_INSTR say REC after "${#wide}" "$LC_ALL"
+        "#,
+    );
+
+    let said = behind(&seen, "REC");
+    assert_eq!(said[0], ["before", "1", "C.UTF-8"], "{}", report(&seen));
+    assert_eq!(said[2], ["after", "1", "C.UTF-8"], "{}", report(&seen));
+}

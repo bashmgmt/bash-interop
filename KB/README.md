@@ -51,6 +51,11 @@ change, and no `eval`. A client's own traps, `IFS` and options are therefore
 its own. The one option the protocol does turn on is `expand_aliases`, which
 the guards require — see [wire.md](wire.md#error-flow-is-ours-not-set--es).
 
+The one name outside `__BC_*` the protocol touches is `LC_ALL`, taken `local`
+for the length of one wide frame so that framing counts the bytes `PIPE_BUF`
+counts. It is restored before the send returns, and the subject runs nothing
+of its own in between — asserted in `proofs/transparency.rs`.
+
 **Error flow is taken from `set -e` deliberately.** Every command that can
 fail in the protocol's bash is guarded with `|| __BC_BAIL` or `|| __BC_THROW`,
 so it behaves the same however the subject set its shell, and a fault of ours

@@ -25,8 +25,10 @@ pub struct Reassembly {
     bytes: Vec<u8>,
 
     /// Messages whose last chunk has not arrived, by the `(pid, seq)` their
-    /// chunks share.
-    partial: HashMap<(Pid, u32), String>,
+    /// chunks share. Bytes for the same reason as above: the sender cuts a
+    /// message where the frame fills, which is a byte and may be inside a
+    /// character.
+    partial: HashMap<(Pid, u32), Vec<u8>>,
 }
 
 impl Reassembly {
@@ -40,14 +42,12 @@ impl Reassembly {
     pub fn feed(&mut self, bytes: &[u8], heard_at: Micros) -> Result<Vec<Line>, Failure> {
         self.bytes.extend_from_slice(bytes);
 
-        let mut framed: Vec<String> = Vec::new();
+        let mut framed: Vec<Vec<u8>> = Vec::new();
         let mut cut = 0;
         while let Some(offset) = self.bytes[cut..].iter().position(|byte| *byte == DELIMITER) {
             let end = cut + offset;
-            let text = std::str::from_utf8(&self.bytes[cut..end])
-                .doing(|| format!("reading a frame of {} bytes", end - cut))?;
 
-            framed.push(text.to_string());
+            framed.push(self.bytes[cut..end].to_vec());
             cut = end + 1;
         }
         self.bytes.drain(..cut);
@@ -70,50 +70,65 @@ impl Reassembly {
             return cut(format!("a frame was cut short: {text:?}"));
         }
         match self.partial.into_iter().next() {
-            Some(((pid, seq), text)) => cut(format!("message {pid}.{seq} stopped at {text:?}")),
+            Some(((pid, seq), bytes)) => {
+                let text = String::from_utf8_lossy(&bytes);
+                cut(format!("message {pid}.{seq} stopped at {text:?}"))
+            }
             None => Ok(()),
         }
     }
 
     /// One frame in; a `Line` out once it completed a message.
-    fn accept(&mut self, framed: &str, heard_at: Micros) -> Result<Option<Line>, Failure> {
-        let frame = Frame::read(framed).doing(|| format!("reading the frame {framed:?}"))?;
+    ///
+    /// A message is decoded when its last chunk arrives, never before: the
+    /// sender cuts where the frame fills, so a character can span two of them.
+    fn accept(&mut self, framed: &[u8], heard_at: Micros) -> Result<Option<Line>, Failure> {
+        let shown = || format!("reading the frame {:?}", String::from_utf8_lossy(framed));
+        let frame = Frame::read(framed).doing(shown)?;
         let key = (frame.pid, frame.seq);
 
-        let message = match self.partial.remove(&key) {
-            Some(head) => head + &frame.chunk,
-            None => frame.chunk,
-        };
+        let mut message = self.partial.remove(&key).unwrap_or_default();
+        message.extend_from_slice(frame.chunk);
+
         if frame.continues {
             self.partial.insert(key, message);
             return Ok(None);
         }
 
-        Line::read(frame.pid, frame.seq, heard_at, &message).map(Some)
+        let (pid, seq) = key;
+        let text = String::from_utf8(message)
+            .doing(|| format!("reading message {pid}.{seq} as text"))?;
+
+        Line::read(pid, seq, heard_at, &text).map(Some)
     }
 }
 
-struct Frame {
+/// A frame's header, and the bytes behind it. The header is the protocol's own
+/// and is always ASCII; the chunk is whatever the subject wrote.
+struct Frame<'a> {
     continues: bool,
     pid: Pid,
     seq: u32,
-    chunk: String,
+    chunk: &'a [u8],
 }
 
-impl Frame {
+impl<'a> Frame<'a> {
     /// `&'static str` for the cause: the frame's own text is attached once,
     /// by the caller.
-    fn read(raw: &str) -> Result<Self, &'static str> {
-        let mut fields = raw.splitn(4, ' ');
+    fn read(raw: &'a [u8]) -> Result<Self, &'static str> {
+        let mut fields = raw.splitn(4, |byte| *byte == b' ');
+        let number = |field: Option<&[u8]>| {
+            field.and_then(|raw| std::str::from_utf8(raw).ok()).and_then(|raw| raw.parse().ok())
+        };
 
         let continues = match fields.next() {
-            Some(CONTINUES) => true,
-            Some(ENDS) => false,
+            Some(marker) if marker == CONTINUES.as_bytes() => true,
+            Some(marker) if marker == ENDS.as_bytes() => false,
             _ => return Err("bad marker"),
         };
-        let pid = fields.next().and_then(|raw| raw.parse().ok()).map(Pid).ok_or("bad pid")?;
-        let seq = fields.next().and_then(|raw| raw.parse().ok()).ok_or("bad sequence number")?;
-        let chunk = fields.next().ok_or("no message")?.to_string();
+        let pid = number(fields.next()).map(Pid).ok_or("bad pid")?;
+        let seq = number(fields.next()).ok_or("bad sequence number")?;
+        let chunk = fields.next().ok_or("no message")?;
 
         Ok(Self { continues, pid, seq, chunk })
     }

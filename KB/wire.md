@@ -42,7 +42,7 @@ workspace:
 ```bash
 __BC__DIR="${BASH_SOURCE[0]%/*}"
 __BC__UP="$__BC__DIR/up"
-__BC__limit=3900
+__BC__narrow=$(( (__BC__PIPE_BUF - 24) / 4 ))
 …
 source "$__BC__DIR/rig.bash"
 ```
@@ -231,20 +231,34 @@ An answer carries **no header**: the shell that asked is its only reader, so
 `pipes` writes the message and a delimiter and nothing else.
 
 ```bash
-__BC__limit=3900
+__BC__PIPE_BUF=4096
+__BC__narrow=$(( (__BC__PIPE_BUF - 24) / 4 ))
 ```
 
-Below `PIPE_BUF` (4096) with room for the ~37-byte header and the delimiter,
-so every frame is one atomic write. It lives in the bash because only the
-writer splits: reassembly is driven by the `+`/`.` marker, so Rust never needs
-the number. A longer message goes through
-`__bc_split`, which chunks it with `+`, terminates with `.`, and reuses one
-header so every chunk shares a `(pid, seq)` — the reassembly key. See
+Every frame is one atomic write, so it fits `PIPE_BUF` whole. The limit lives
+in the bash because only the writer splits: reassembly is driven by the `+`/`.`
+marker, so Rust never needs the number.
+
+**Two widths, because the boundary is bytes and bash counts characters.**
+`__BC__narrow` is what fits however the text is encoded — a character is at
+most four bytes, the header and delimiter under 24 — and a message that narrow
+is written where it is built. Anything wider goes through `__bc_frame`, which
+takes `LC_ALL` for its own frame so `${#…}` and `${…:from:room}` count the
+bytes `PIPE_BUF` counts, fills the frame exactly, chunks with `+`, terminates
+with `.`, and reuses one header so every chunk shares a `(pid, seq)` — the
+reassembly key.
+
+`LC_ALL` is a `local`, restored when the frame returns and gone before the
+subject runs anything of its own; the message itself was quoted before it, in
+the subject's own locale, so nothing about the wire's content changes. See
 [measurements.md](measurements.md#the-pipe_buf-boundary).
+
+A byte-exact cut can fall **inside a character**, which is why reassembly
+joins chunks as bytes and decodes the message once, at its last chunk.
 
 ```rust
 #[derive(Default)]
-pub struct Reassembly { bytes: Vec<u8>, partial: HashMap<(Pid, u32), String> }
+pub struct Reassembly { bytes: Vec<u8>, partial: HashMap<(Pid, u32), Vec<u8>> }
 
 impl Reassembly {
     pub fn feed(&mut self, bytes: &[u8], heard_at: Micros) -> Result<Vec<Line>, Failure>;

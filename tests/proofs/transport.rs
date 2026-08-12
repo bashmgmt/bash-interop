@@ -105,6 +105,31 @@ fn concurrent_writers_never_interleave() {
     );
 }
 
+/// A frame is filled to the byte, because `PIPE_BUF` is bytes. A message is
+/// text. The two meet where a chunk boundary falls inside a character — which
+/// it does here, the frame's room not dividing by three — and neither side has
+/// to know what the other did: the sender cuts where the frame fills, the
+/// reader joins the chunks as bytes and decodes the message once.
+#[test]
+fn a_message_of_wide_characters_survives_being_cut() {
+    let (seen, _) = heard(&[(
+        ENTRY,
+        r#"
+        wide="$(printf '€%.0s' {1..6000})"
+        for name in a b c d; do ( BC_INSTR say REC "$name" "$wide" ) & done
+        wait
+        "#,
+    )]);
+
+    let records = behind(&seen, "REC");
+    assert_eq!(records.len(), 4, "one per writer{}", report(&seen));
+
+    for words in &records {
+        assert_eq!(words[1].chars().count(), 6000, "every character back, and only those");
+        assert!(words[1].chars().all(|glyph| glyph == '€'), "and each of them itself");
+    }
+}
+
 /// Messages written immediately before the last writer exits must still be
 /// readable once the subject is gone.
 #[test]

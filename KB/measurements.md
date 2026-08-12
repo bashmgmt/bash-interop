@@ -15,8 +15,21 @@ Eight shells writing to one FIFO, one `printf` per line, 160 lines expected:
 | 9001 | 123 | **37** |
 
 `PIPE_BUF` is 4096, and the boundary is sharp: at or below it a write lands
-whole; one byte past it, concurrent writers interleave. `__BC__limit` is 3900,
-leaving room for the ~37-byte header and the delimiter.
+whole; one byte past it, concurrent writers interleave.
+
+**The boundary is bytes and bash counts characters.** `${#text}` and
+`${text:from:room}` are character operations in a multibyte locale, so a limit
+expressed in characters bounds nothing: 3900 characters of UTF-8 is up to
+15600 bytes. Two widths follow.
+
+| | |
+|---|---|
+| `__BC__narrow` = `(4096 - 24) / 4` = 1018 | characters, safe in any encoding — a character is at most four bytes and the header and delimiter are under 24 |
+| `4096 - ${#head} - 4` | bytes, exact, used inside `__bc_frame` under `LC_ALL=C` |
+
+The narrow lane exists because taking `LC_ALL` costs about 7 µs per message,
+measured against 3 µs for the same function without it. A message that fits
+1018 characters skips that and is written where it is built.
 
 ## Cost in bash
 
@@ -60,12 +73,12 @@ they are. Depth 8, three arguments per frame, 4000 iterations, empty-loop floor
 The bytes are the second `@Q`: nesting re-escapes every quote, and the payload
 counts against `__BC__limit`. See [stack.md](stack.md).
 
-## A CPS spine in the payload
+## What a function layer costs an instrument
 
-An instrument built as a chain of `with_` steps puts every step's frame on the
-stack of everything measured below it. `BASHPROF_TIME_CPS` as one function
-against the same word as a spine of three, BEGIN payload in bytes by how many
-measured calls enclose it:
+An instrument that separates its layers as **functions** puts every layer's
+frame on the stack of everything measured below it, and every walk carries
+them. `BASHPROF_TIME_CPS` as one function against the same word as a CPS spine
+of three, BEGIN payload in bytes by how many measured calls enclose it:
 
 | enclosing measurements | one function | spine of three |
 |---:|---:|---:|
@@ -76,10 +89,26 @@ measured calls enclose it:
 | **per level** | **~113** | **~566** |
 
 Four frames per level rather than one, and the bytes are mostly the *sources*
-column: each frame repeats the instrument's own path. Against `__BC__limit` of
-3900 that is the single-frame lane up to roughly six levels of nesting rather
-than thirty — past which `__bc_split` chunks the message, which costs writes
-rather than correctness.
+column: each frame repeats the instrument's own path. **Layers that are aliases
+cost none of this** — the same text in the same frame — which is why the
+instrument's are.
+
+At one frame per level, a walk 100 deep is a 17 kB payload in five frames.
+
+## The split path
+
+One message of 40 kB, ten frames, per message:
+
+| | µs |
+|---|---:|
+| length recomputed each turn, characters | 8793 |
+| length hoisted, characters | 6805 |
+| length hoisted, bytes (`LC_ALL=C`) | **1401** |
+
+Recomputing `${#text}` in the loop condition is quadratic and costs a fifth of
+it. The rest is the slice: `${text:from:room}` counts characters from the
+start of the string, so every chunk rescans everything before it. Under
+`LC_ALL=C` the offset is a byte offset and there is nothing to scan.
 
 ## Cost of a snapshot
 
