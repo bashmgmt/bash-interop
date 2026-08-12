@@ -16,8 +16,9 @@ KB/mb_resolver/bash/                              src/bash/
   stack.md          the call stack, both halves     stack.bash, stack.rs
   measurements.md   numbers, limits, proofs
   scoping.md        where a name binds              every *.bash we ship
+  vendoring.md      shipping instrumented bash      assets/
   bashcap.md        the reference tool              bashcap/
-  bashprof.md       a call tree that travels          bashprof/
+  bashprof.md       a call tree that travels        bashprof/
 ```
 
 Every module under `src/bash/rig/` is private; `mod.rs` carries the trait,
