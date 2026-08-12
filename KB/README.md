@@ -17,7 +17,7 @@ KB/mb_resolver/bash/                              src/bash/
   measurements.md   numbers, limits, proofs
   scoping.md        where a name binds              every *.bash we ship
   bashcap.md        the reference tool              bashcap/
-  bashprof.md       placing a call in its tree      tests/examples/bashprof/
+  bashprof.md       a call tree that travels        tests/examples/bashprof/
 ```
 
 Every module under `src/bash/rig/` is private; `mod.rs` carries the trait,
@@ -25,7 +25,7 @@ Every module under `src/bash/rig/` is private; `mod.rs` carries the trait,
 
 ```rust
 pub use run::{run, run_in};
-pub use tree::{forest, forked_from, shells, Shell, ShellNode};
+pub use tree::{forest, shells, Shell, ShellNode};
 pub use wire::{field, Answer, Kind, Line, Micros, Pid};
 pub use crate::failure::{Doing, Failure};
 ```

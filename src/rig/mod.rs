@@ -115,7 +115,7 @@ pub struct Startup {
 
 pub use run::{run, run_in};
 
-pub use tree::{forest, forked_from, shells, Shell, ShellNode};
+pub use tree::{forest, shells, Shell, ShellNode};
 pub use wire::{field, Answer, Kind, Line, Micros, Pid};
 
 pub use crate::failure::{Doing, Failure};

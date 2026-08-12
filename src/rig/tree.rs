@@ -60,13 +60,13 @@ pub fn shells(lines: &[Line]) -> Vec<Shell<'_>> {
 /// A parent's index is always below its child's, so walking this upward
 /// terminates: a shell can only name a parent that had already spoken, and
 /// speaking is what puts a shell in this list.
-pub fn forked_from(shells: &[Shell<'_>]) -> Vec<Option<usize>> {
+fn forked_from(shells: &[Shell<'_>]) -> Vec<Option<usize>> {
     let generations = generations(shells);
 
     (0..shells.len()).map(|index| parent_of(shells, &generations, index)).collect()
 }
 
-/// Shells linked through [`forked_from`], every root carrying what it started.
+/// Shells linked through `forked_from`, every root carrying what it started.
 pub fn forest<'a>(shells: &[Shell<'a>]) -> Vec<ShellNode<'a>> {
     let mut children: HashMap<usize, Vec<usize>> = HashMap::new();
     let mut roots: Vec<usize> = Vec::new();
