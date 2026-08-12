@@ -61,19 +61,35 @@ pub struct Frame {
     pub args: Option<Vec<String>>,
 }
 
+/// A walk, innermost first. Never empty, and one array in JSON.
+pub struct Stack { /* private */ }
+
+impl Stack {
+    pub fn of(frames: Vec<Frame>) -> Option<Self>;   // None for no frames
+    pub fn at(&self) -> &Frame;                      // where the walk was taken
+    pub fn outer(&self) -> &[Frame];                 // the frames above it
+    pub fn frames(&self) -> impl Iterator<Item = &Frame>;
+}
+
 pub struct Args<'a>    { pub argc: &'a str, pub argv: &'a str }
 pub struct Columns<'a> { pub skip: usize, pub funcs: &'a str, pub sources: &'a str,
                          pub lines: &'a str, pub args: Option<Args<'a>> }
 
 impl<'a> Columns<'a> {
     pub fn of(words: &'a [String]) -> Result<Self, Failure>;
-    pub fn frames(&self) -> Result<Vec<Frame>, Failure>;
+    pub fn frames(&self) -> Result<Stack, Failure>;
 }
 ```
 
+A walk is **one value, not a head and a tail.** Which frame is the call site is
+`at()`, and a `Stack` cannot be empty: `Stack::of` is the one place that can
+say so, and `Columns::frames` turns that into a `Failure` where the message is
+read. Nothing downstream carries the question.
+
 Three indices are undone, and all three are arithmetic:
 
-**`skip`** drops the instrument's own frames. It is at least 1.
+**`skip`** drops the instrument's own frames. It is at least 1 and never the
+whole walk — what is left is where the subject is.
 
 **The line shift.** `BASH_LINENO[i]` is where frame `i` *was called from*, so
 where frame `i` is *executing* is `BASH_LINENO[i - 1]`. Because `skip >= 1`,
