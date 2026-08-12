@@ -9,10 +9,13 @@ use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::vec;
 
+use serde::Serialize;
+
 use crate::bash::value::{emit_array, parse_array};
 use crate::failure::{Doing, Failure};
 
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize)]
+#[serde(transparent)]
 pub struct Micros(pub u64);
 
 impl Micros {
@@ -37,7 +40,8 @@ impl Micros {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug, Serialize)]
+#[serde(transparent)]
 pub struct Pid(pub u32);
 
 impl fmt::Display for Pid {
@@ -49,7 +53,8 @@ impl fmt::Display for Pid {
 /// What the protocol says a message is. A word outside this set is a defect
 /// in the bash, never a client's choice — a client's own tag is a payload
 /// word, and the protocol never reads one.
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize)]
+#[serde(rename_all = "UPPERCASE")]
 pub enum Kind {
     Say,
     Ask,
@@ -67,7 +72,7 @@ impl Kind {
 
 /// What one shell said, once, with the provenance the protocol put in front
 /// of it.
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct Line {
     pub kind: Kind,
 
