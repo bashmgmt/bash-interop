@@ -86,7 +86,7 @@ whatever the client says it is:
 | bashcap | `Capturing { written, sink }` | `startup`; `hear` decodes and writes; `end` flushes |
 | `examples/snapshotting.rs` | `Vec<Capture>` | `startup`; `hear` decodes and keeps |
 | `examples/answering.rs` | what it has heard | `startup`; `answer` decides from it |
-| `examples/bashprof.rs` | `Vec<Line>` | `startup`; `hear` keeps. Every message carries its own provenance *and* the name of the call it was made inside of, so reading is one pass with a map, then two hylic folds — one to nest, one to read the tree as timings |
+| `bashprof` | `Vec<Line>` | `startup`; `hear` keeps. Every message carries its own provenance *and* the name of the call it was made inside of, so reading is one pass with a map, then two hylic folds — one to nest, one to read the tree as timings |
 | `proofs/answering.rs` | `Soak { heard, answered }` | `startup`, `hear`, `answer`; the tally lives in the session because a rig is `&self` |
 | `proofs/owning.rs` | `()` | `answer`, which never returns |
 
