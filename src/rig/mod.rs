@@ -107,7 +107,7 @@ impl<S> Run<S> {
 /// A frame's source path is only as readable as the file it names, and the
 /// instrument's own frames name a file in here — so anything that reads a walk
 /// after the run has to say where the run put it.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum Workspace {
     /// A directory of the run's own, removed when it ends.
     #[default]
