@@ -60,6 +60,27 @@ they are. Depth 8, three arguments per frame, 4000 iterations, empty-loop floor
 The bytes are the second `@Q`: nesting re-escapes every quote, and the payload
 counts against `__BC__limit`. See [stack.md](stack.md).
 
+## A CPS spine in the payload
+
+An instrument built as a chain of `with_` steps puts every step's frame on the
+stack of everything measured below it. `BASHPROF_TIME_CPS` as one function
+against the same word as a spine of three, BEGIN payload in bytes by how many
+measured calls enclose it:
+
+| enclosing measurements | one function | spine of three |
+|---:|---:|---:|
+| 0 | 349 | 537 |
+| 1 | 471 | 1112 |
+| 2 | 584 | 1678 |
+| 3 | 697 | 2244 |
+| **per level** | **~113** | **~566** |
+
+Four frames per level rather than one, and the bytes are mostly the *sources*
+column: each frame repeats the instrument's own path. Against `__BC__limit` of
+3900 that is the single-frame lane up to roughly six levels of nesting rather
+than thirty — past which `__bc_split` chunks the message, which costs writes
+rather than correctness.
+
 ## Cost of a snapshot
 
 `bashcap run` over 2000 `BASHCAP` calls at a six-deep stack, wall clock per
