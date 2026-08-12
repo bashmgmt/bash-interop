@@ -55,10 +55,21 @@ Each section is a bash array literal, read back with `parse_array` — see
 
 ```rust
 pub struct Frame {
-    pub funcname: String,
-    pub source: String,
+    pub site: Site,
+    pub source: Source,
     pub lineno: u32,
     pub args: Option<Vec<String>>,
+}
+
+/// What a frame is. `main` and `source` are bash's own words, not names.
+pub enum Site { Function(String), Script, Sourced }
+
+/// Where its code came from. `environment` and `main` are not paths.
+pub enum Source { File(PathBuf), Environment, Prompt }
+
+impl Source {
+    pub fn found(&self) -> Option<&Path>;     // a file, and it is there
+    pub fn missing(&self) -> Option<&Path>;   // a file, and it is not
 }
 
 /// A walk, innermost first. Never empty, and one array in JSON.
@@ -90,6 +101,49 @@ Three indices are undone, and all three are arithmetic:
 
 **`skip`** drops the instrument's own frames. It is at least 1 and never the
 whole walk — what is left is where the subject is.
+
+## Bash's own words
+
+Measured against 5.3.9. `eval`, traps, subshells and command substitution add
+no frame at all.
+
+| in `FUNCNAME` | |
+|---|---|
+| `main` | the top level of the script bash was given |
+| `source` | the top level of a file the subject sourced |
+
+| in `BASH_SOURCE` | |
+|---|---|
+| `environment` | the function came in through the environment (`export -f`) |
+| `main` | the function was defined at an interactive prompt |
+| `$0` | the function was defined inline in `bash -c` or on stdin |
+
+The last is not a word but whatever `$0` is — `/bin/bash`, or any name a
+caller passed — so it is read as the path it looks like. A script that defines
+a function called `main` or `source` is likewise indistinguishable from bash's
+own use of those words: bash reports the same string either way.
+
+## Where a source path lands
+
+`BASH_SOURCE` holds the path **as it was written**, relative or not and never
+normalised:
+
+```
+$ cd probe && bash sub/main.bash
+BASH_SOURCE=('sub/../lib.bash' 'sub/main.bash')
+```
+
+`stack.bash` therefore ships `$PWD` with the walk, and `Source::File` is that
+joined with what bash said — absolute, with nothing resolved: no symlink
+followed, no `..` collapsed.
+
+Bash does not record what a relative path was relative to **when the file was
+sourced**, only where the shell is now. A subject that changed directory in
+between leaves a path that resolves to nothing, and that is what `missing`
+reports. It is not an error: the path was true when it was written. `bashprof`
+prints one line per missing source on stderr, and a rig whose reading outlives
+the run keeps its own workspace so the instrument's frames stay readable — see
+[rig.md](rig.md).
 
 **The line shift.** `BASH_LINENO[i]` is where frame `i` *was called from*, so
 where frame `i` is *executing* is `BASH_LINENO[i - 1]`. Because `skip >= 1`,

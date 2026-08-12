@@ -6,18 +6,13 @@
 
 use std::collections::HashMap;
 
-use crate::bash::rig::wire::{Line, Micros, Pid};
+use crate::bash::rig::wire::{Line, Pid, Sent};
 
 #[derive(Clone, Debug)]
 pub struct Shell<'a> {
-    pub pid: Pid,
-
-    /// The shell that emitted before this one forked.
-    pub parent: Pid,
-
-    pub shlvl: u32,
-
-    pub opened_at: Micros,
+    /// The provenance of the line this shell joined with, which is every fact
+    /// the wire has about the shell itself.
+    pub opened: Sent,
 
     pub lines: Vec<&'a Line>,
 }
@@ -36,17 +31,11 @@ pub fn shells(lines: &[Line]) -> Vec<Shell<'_>> {
     let mut newest: HashMap<Pid, usize> = HashMap::new();
 
     for line in lines {
-        match newest.get(&line.pid) {
-            Some(&index) if line.seq > 0 => shells[index].lines.push(line),
+        match newest.get(&line.sent.pid) {
+            Some(&index) if line.sent.seq > 0 => shells[index].lines.push(line),
             _ => {
-                newest.insert(line.pid, shells.len());
-                shells.push(Shell {
-                    pid: line.pid,
-                    parent: line.parent,
-                    shlvl: line.shlvl,
-                    opened_at: line.sent_at,
-                    lines: vec![line],
-                });
+                newest.insert(line.sent.pid, shells.len());
+                shells.push(Shell { opened: line.sent.clone(), lines: vec![line] });
             }
         }
     }
@@ -87,7 +76,7 @@ fn generations(shells: &[Shell<'_>]) -> HashMap<Pid, Vec<usize>> {
     let mut generations: HashMap<Pid, Vec<usize>> = HashMap::new();
 
     for (index, shell) in shells.iter().enumerate() {
-        generations.entry(shell.pid).or_default().push(index);
+        generations.entry(shell.opened.pid).or_default().push(index);
     }
     generations
 }
@@ -105,8 +94,8 @@ fn parent_of(
     index: usize,
 ) -> Option<usize> {
     let shell = &shells[index];
-    let candidates = generations.get(&shell.parent)?;
-    let upto = candidates.partition_point(|&at| shells[at].opened_at <= shell.opened_at);
+    let candidates = generations.get(&shell.opened.parent)?;
+    let upto = candidates.partition_point(|&at| shells[at].opened.sent_at <= shell.opened.sent_at);
 
     candidates[..upto].iter().rev().find(|&&at| at < index).copied()
 }
@@ -130,17 +119,19 @@ fn node<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bash::rig::wire::Kind;
+    use crate::bash::rig::wire::{Kind, Micros};
 
     fn line(at: u64, pid: u32, parent: u32, seq: u32) -> Line {
         Line {
             kind: Kind::Say,
-            sent_at: Micros(at),
-            heard_at: Micros(at + 1),
-            pid: Pid(pid),
-            parent: Pid(parent),
-            shlvl: 5,
-            seq,
+            sent: Sent {
+                pid: Pid(pid),
+                parent: Pid(parent),
+                shlvl: 5,
+                seq,
+                sent_at: Micros(at),
+                heard_at: Micros(at + 1),
+            },
             words: Vec::new(),
         }
     }
@@ -160,13 +151,13 @@ mod tests {
         assert_eq!(shells.len(), 4, "the reused pid opens a fourth shell");
         assert_eq!(shells[0].lines.len(), 2);
         assert_eq!(shells[1].lines.len(), 2);
-        assert_eq!(shells[3].pid, Pid(7));
+        assert_eq!(shells[3].opened.pid, Pid(7));
 
         let forest = forest(&shells);
         assert_eq!(forest.len(), 2, "the outermost shell, and the pid-reusing one");
-        assert_eq!(forest[0].shell.pid, Pid(7));
-        assert_eq!(forest[0].children[0].shell.pid, Pid(8));
-        assert_eq!(forest[0].children[0].children[0].shell.pid, Pid(9));
+        assert_eq!(forest[0].shell.opened.pid, Pid(7));
+        assert_eq!(forest[0].children[0].shell.opened.pid, Pid(8));
+        assert_eq!(forest[0].children[0].children[0].shell.opened.pid, Pid(9));
     }
 
     /// A child names a pid, not a generation of one. Two shells carried pid 7,
@@ -185,13 +176,13 @@ mod tests {
         let forest = forest(&shells);
 
         assert_eq!(forest.len(), 2, "two generations of pid 7, both roots");
-        assert_eq!(forest[0].shell.opened_at, Micros(100));
+        assert_eq!(forest[0].shell.opened.sent_at, Micros(100));
         assert_eq!(forest[0].children.len(), 1, "only the earlier child");
-        assert_eq!(forest[0].children[0].shell.pid, Pid(8));
+        assert_eq!(forest[0].children[0].shell.opened.pid, Pid(8));
 
-        assert_eq!(forest[1].shell.opened_at, Micros(200));
+        assert_eq!(forest[1].shell.opened.sent_at, Micros(200));
         assert_eq!(forest[1].children.len(), 1);
-        assert_eq!(forest[1].children[0].shell.pid, Pid(9), "the later child");
+        assert_eq!(forest[1].children[0].shell.opened.pid, Pid(9), "the later child");
     }
 
     /// A shell can only have been forked from one that had already spoken, so

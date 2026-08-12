@@ -47,7 +47,7 @@
 //! let (heard, status) = run(&Deploying, &["bash", "deploy.bash"])?.whole()?;
 //!
 //! for line in &heard {
-//!     println!("pid {} said {:?}", line.pid, line.words);
+//!     println!("pid {} said {:?}", line.sent.pid, line.words);
 //! }
 //! # Ok::<(), Failure>(())
 //! ```
@@ -68,6 +68,7 @@ mod wire;
 
 use std::ffi::OsString;
 use std::fmt;
+use std::path::PathBuf;
 
 /// What a run produced.
 ///
@@ -100,6 +101,22 @@ impl<S> Run<S> {
     }
 }
 
+/// Where the run lays its bash and its pipes, and how long that outlives the
+/// run.
+///
+/// A frame's source path is only as readable as the file it names, and the
+/// instrument's own frames name a file in here — so anything that reads a walk
+/// after the run has to say where the run put it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub enum Workspace {
+    /// A directory of the run's own, removed when it ends.
+    #[default]
+    Temporary,
+
+    /// One of the caller's, created if it is not there and left behind.
+    At(PathBuf),
+}
+
 /// What a rig tells the run about the process it is about to start.
 #[derive(Default)]
 pub struct Startup {
@@ -113,10 +130,10 @@ pub struct Startup {
     pub env: Vec<(OsString, OsString)>,
 }
 
-pub use run::{run, run_in};
+pub use run::run;
 
 pub use tree::{forest, shells, Shell, ShellNode};
-pub use wire::{field, Answer, Kind, Line, Micros, Pid};
+pub use wire::{field, Answer, Kind, Line, Micros, Pid, Sent};
 
 pub use crate::failure::{Doing, Failure};
 
@@ -131,6 +148,13 @@ pub trait Rig {
     /// What the run needs before there is a shell to talk to.
     fn startup(&self) -> Startup {
         Startup::default()
+    }
+
+    /// Where the run lays its own bash. A rig whose reading outlives the run —
+    /// anything that resolves a frame's source afterwards — names a directory
+    /// it keeps.
+    fn workspace(&self) -> Workspace {
+        Workspace::Temporary
     }
 
     fn open(&self) -> Result<Self::Session, Failure>;

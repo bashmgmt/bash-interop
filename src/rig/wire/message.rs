@@ -9,13 +9,12 @@ use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::vec;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::bash::value::{emit_array, parse_array};
 use crate::failure::{Doing, Failure};
 
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize)]
-#[serde(transparent)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 pub struct Micros(pub u64);
 
 impl Micros {
@@ -40,8 +39,7 @@ impl Micros {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug, Serialize)]
-#[serde(transparent)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 pub struct Pid(pub u32);
 
 impl fmt::Display for Pid {
@@ -70,18 +68,13 @@ impl Kind {
     }
 }
 
-/// What one shell said, once, with the provenance the protocol put in front
-/// of it.
-#[derive(Debug, Serialize)]
-pub struct Line {
-    pub kind: Kind,
-
-    /// The sending shell's `$EPOCHREALTIME`.
-    pub sent_at: Micros,
-
-    /// The run's clock when the last frame of the message arrived.
-    pub heard_at: Micros,
-
+/// The provenance the protocol puts in front of every message: which shell
+/// said it, where that shell sits, and both clocks.
+///
+/// Every decoder in the crate carries one of these rather than copying its
+/// fields, so nothing a message arrived with is lost on the way to a record.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Sent {
     pub pid: Pid,
 
     /// The shell that emitted before this one forked. Not `$PPID`, which
@@ -93,6 +86,20 @@ pub struct Line {
     /// Counted per shell from its first message, so `0` is a shell that has
     /// just joined.
     pub seq: u32,
+
+    /// The sending shell's `$EPOCHREALTIME`.
+    pub sent_at: Micros,
+
+    /// The run's clock when the last frame of the message arrived.
+    pub heard_at: Micros,
+}
+
+/// What one shell said, once, with the provenance the protocol put in front
+/// of it.
+#[derive(Debug, Serialize)]
+pub struct Line {
+    pub kind: Kind,
+    pub sent: Sent,
 
     /// The client's arglist, and nothing of the protocol's.
     pub words: Vec<String>,
@@ -134,7 +141,11 @@ impl Line {
         let parent = ahead.header("parent")?.parse().map(Pid).map_err(|_| "bad parent")?;
         let shlvl = ahead.header("shlvl")?.parse().map_err(|_| "bad shlvl")?;
 
-        Ok(Self { kind, sent_at, heard_at, pid, parent, shlvl, seq, words: ahead.rest() })
+        Ok(Self {
+            kind,
+            sent: Sent { pid, parent, shlvl, seq, sent_at, heard_at },
+            words: ahead.rest(),
+        })
     }
 }
 
@@ -216,9 +227,9 @@ mod tests {
         let line = Line::read(Pid(9), 3, Micros(50), &sent(&["REC", "a space", ""])).unwrap();
 
         assert_eq!(line.kind, Kind::Say);
-        assert_eq!(line.sent_at, Micros(1_000_002));
-        assert_eq!(line.heard_at, Micros(50), "the run's clock, not the wire's");
-        assert_eq!((line.pid, line.parent, line.shlvl, line.seq), (Pid(9), Pid(7), 4, 3));
+        assert_eq!(line.sent.sent_at, Micros(1_000_002));
+        assert_eq!(line.sent.heard_at, Micros(50), "the run's clock, not the wire's");
+        assert_eq!((line.sent.pid, line.sent.parent, line.sent.shlvl, line.sent.seq), (Pid(9), Pid(7), 4, 3));
         assert_eq!(line.words, words(&["REC", "a space", ""]), "the payload alone");
         assert_eq!(line.behind("REC"), Some(words(&["a space", ""]).as_slice()));
     }

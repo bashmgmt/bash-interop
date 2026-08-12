@@ -3,7 +3,7 @@
 
 use std::time::{Duration, Instant};
 
-use mb_resolver::bash::rig::{run, run_in, Answer, ExitStatus, Failure, Kind, Line, Rig};
+use mb_resolver::bash::rig::{run, Answer, ExitStatus, Failure, Kind, Line, Rig};
 
 use crate::support::{bash, Scripts};
 use crate::{behind, gone, report, script, Keeping, ENTRY};
@@ -16,7 +16,7 @@ fn a_named_workspace_is_left_behind() {
     let at = temp.path().join("under").join("here");
     let scripts = Scripts::of(&[(ENTRY, "BC_INSTR say REC one")]);
 
-    let (seen, status) = run_in(&Keeping, &at, &bash(scripts.at(ENTRY))).unwrap().whole().unwrap();
+    let (seen, status) = run(&Keeping::at(&at), &bash(scripts.at(ENTRY))).unwrap().whole().unwrap();
 
     assert_eq!(status, ExitStatus::Code(0));
     assert_eq!(behind(&seen, "REC"), [["one"]]);
@@ -51,7 +51,7 @@ fn every_reply_pipe_goes_with_its_answer() {
         ),
     ]);
 
-    let (seen, status) = run_in(&Keeping, &at, &bash(scripts.at(ENTRY))).unwrap().whole().unwrap();
+    let (seen, status) = run(&Keeping::at(&at), &bash(scripts.at(ENTRY))).unwrap().whole().unwrap();
 
     assert_eq!(status, ExitStatus::Code(0));
     assert_eq!(seen.iter().filter(|line| line.kind == Kind::Ask).count(), 43, "two shells asked");
@@ -74,10 +74,10 @@ fn a_workspace_belongs_to_one_run() {
     let at = temp.path().join("workspace");
     let scripts = Scripts::of(&[(ENTRY, "BC_INSTR say REC one")]);
 
-    let first = run_in(&Keeping, &at, &bash(scripts.at(ENTRY))).unwrap().whole().unwrap();
+    let first = run(&Keeping::at(&at), &bash(scripts.at(ENTRY))).unwrap().whole().unwrap();
     assert_eq!(first.1, ExitStatus::Code(0));
 
-    let again = run_in(&Keeping, &at, &bash(scripts.at(ENTRY)))
+    let again = run(&Keeping::at(&at), &bash(scripts.at(ENTRY)))
         .err()
         .expect("a second run must not reuse it");
 

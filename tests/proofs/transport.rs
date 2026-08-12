@@ -62,7 +62,7 @@ fn descend(
     nodes
         .iter()
         .flat_map(|node| {
-            let shlvl = node.shell.shlvl;
+            let shlvl = node.shell.opened.shlvl;
             let shell = Descendant { depth: above.map_or(1, |up| up.depth + 1), shlvl };
 
             std::iter::once((shell, above)).chain(descend(&node.children, Some(shell)))

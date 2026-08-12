@@ -171,9 +171,9 @@ mod tests {
         let seen = fed(&mut Reassembly::default(), stream.as_bytes());
         assert_eq!(seen.len(), 2);
         assert_eq!(words(&seen[0]), ["A", "one"]);
-        assert_eq!(seen[0].sent_at, Micros(1_000_002), "the sender's clock, from the message");
-        assert_eq!(seen[0].heard_at, AT, "the reader's, as it was handed in");
-        assert_eq!((seen[0].pid, seen[0].seq), (Pid(7), 0), "from the frame header");
+        assert_eq!(seen[0].sent.sent_at, Micros(1_000_002), "the sender's clock, from the message");
+        assert_eq!(seen[0].sent.heard_at, AT, "the reader's, as it was handed in");
+        assert_eq!((seen[0].sent.pid, seen[0].sent.seq), (Pid(7), 0), "from the frame header");
 
         let mut dribbled = Reassembly::default();
         let mut byte_at_a_time = Vec::new();

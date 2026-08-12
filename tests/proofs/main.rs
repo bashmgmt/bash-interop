@@ -13,6 +13,7 @@
 //! | [`owning`] | the run's workspace, and the process group it takes with it |
 //! | [`failing`] | what a fault on either side does to the run and to the subject |
 //! | [`malformed`] | what the reader does with a stream the protocol did not write |
+//! | [`walking`] | bash's own words in a walk, and where a source path lands |
 //!
 //! This file holds what more than one of them needs.
 //!
@@ -25,11 +26,12 @@ mod owning;
 mod starting;
 mod transparency;
 mod transport;
+mod walking;
 
 #[path = "../support/mod.rs"]
 mod support;
 
-use mb_resolver::bash::rig::{run, ExitStatus, Failure, Line, Rig};
+use mb_resolver::bash::rig::{run, ExitStatus, Failure, Line, Rig, Workspace};
 
 use support::{bash, Scripts};
 
@@ -38,10 +40,24 @@ pub const ENTRY: &str = "main.bash";
 
 /// Keeps every message in arrival order, and answers nothing — the default
 /// `answer` hears the question and tells the shell the word is unknown.
-pub struct Keeping;
+#[derive(Default)]
+pub struct Keeping {
+    workspace: Workspace,
+}
+
+impl Keeping {
+    /// A workspace of the caller's, left behind to read.
+    pub fn at(path: &std::path::Path) -> Self {
+        Self { workspace: Workspace::At(path.to_path_buf()) }
+    }
+}
 
 impl Rig for Keeping {
     type Session = Vec<Line>;
+
+    fn workspace(&self) -> Workspace {
+        self.workspace.clone()
+    }
 
     fn open(&self) -> Result<Vec<Line>, Failure> {
         Ok(Vec::new())
@@ -58,7 +74,7 @@ impl Rig for Keeping {
 /// reading proves nothing.
 pub fn heard(files: &[(&str, &str)]) -> (Vec<Line>, ExitStatus) {
     let scripts = Scripts::of(files);
-    let ran = run(&Keeping, &bash(scripts.at(ENTRY))).unwrap_or_else(|error| panic!("{error}"));
+    let ran = run(&Keeping::default(), &bash(scripts.at(ENTRY))).unwrap_or_else(|error| panic!("{error}"));
 
     ran.whole().unwrap_or_else(|error| panic!("{error}"))
 }
@@ -94,7 +110,7 @@ pub fn gone(pid: i32) -> bool {
 pub fn report(heard: &[Line]) -> String {
     let lines: Vec<String> = heard
         .iter()
-        .map(|line| format!("  pid {:>7} | {}", line.pid, line.words.join(" ")))
+        .map(|line| format!("  pid {:>7} | {}", line.sent.pid, line.words.join(" ")))
         .collect();
 
     format!("\ncapture:\n{}", lines.join("\n"))

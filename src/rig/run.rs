@@ -8,25 +8,33 @@ use std::path::Path;
 use std::process::{Child, Command};
 
 use crate::bash::rig::wire::{prelude, Kind, Wire};
-use crate::bash::rig::{ExitStatus, Rig, Run};
+use crate::bash::rig::{ExitStatus, Rig, Run, Workspace};
 use crate::failure::{Doing, Failure};
 
 /// Run `argv` under `rig`, and hand back the session it drove and how bash
-/// ended. The workspace is the run's, made and discarded with it — it drops
-/// after `run_in` has reaped the subject that was reading it.
+/// ended.
+///
+/// Where the run lays its bash is [`Rig::workspace`]. A temporary one is
+/// removed here, after the subject that was reading it has been reaped; one
+/// the rig named is left where it is.
 pub fn run<R: Rig, S: AsRef<OsStr>>(
     rig: &R,
     argv: &[S],
 ) -> Result<Run<R::Session>, Failure> {
-    let workspace = tempfile::tempdir().doing(|| "opening a workspace for the run".into())?;
+    match rig.workspace() {
+        Workspace::At(at) => run_in(rig, &at, argv),
+        Workspace::Temporary => {
+            let temporary =
+                tempfile::tempdir().doing(|| "opening a workspace for the run".into())?;
 
-    run_in(rig, workspace.path(), argv)
+            run_in(rig, temporary.path(), argv)
+        }
+    }
 }
 
-/// The same, in a directory of your choosing, left behind to read. The
-/// workspace is canonicalised: every shell reads its own location from the
+/// The workspace is canonicalised: every shell reads its own location from the
 /// path `BASH_ENV` names, so a relative one would move with the subject.
-pub fn run_in<R: Rig, S: AsRef<OsStr>>(
+fn run_in<R: Rig, S: AsRef<OsStr>>(
     rig: &R,
     at: &Path,
     argv: &[S],
@@ -96,7 +104,7 @@ impl<'r, R: Rig> Running<'r, R> {
         for line in self.wire.drain()? {
             // The rig consumes the message, and the reply pipe is named after
             // the shell that sent it.
-            let asking = line.pid;
+            let asking = line.sent.pid;
 
             match line.kind {
                 Kind::Say => self.rig.hear(&mut self.session, line)?,

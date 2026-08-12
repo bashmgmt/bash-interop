@@ -109,7 +109,7 @@ fn a_reply_pipe_name_already_taken_is_the_subjects_to_handle() {
         "#,
     )]);
 
-    let (seen, status) = run(&Keeping, &bash(scripts.at(ENTRY))).unwrap().whole().unwrap();
+    let (seen, status) = run(&Keeping::default(), &bash(scripts.at(ENTRY))).unwrap().whole().unwrap();
 
     assert_eq!(status, ExitStatus::Code(0), "the subject carried on and ended its own way");
     assert_eq!(behind(&seen, "REC"), [["still running"]], "{}", report(&seen));

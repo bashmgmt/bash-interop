@@ -66,7 +66,7 @@ fn a_rig_may_add_to_the_environment_and_reach_every_shell() {
 #[test]
 fn the_command_line_is_run_as_asked() {
     let scripts = Scripts::of(&[(ENTRY, "BC_INSTR say REC \"$0\" \"$#\"")]);
-    let (seen, status) = run(&crate::Keeping, &bash(scripts.at(ENTRY))).unwrap().whole().unwrap();
+    let (seen, status) = run(&crate::Keeping::default(), &bash(scripts.at(ENTRY))).unwrap().whole().unwrap();
 
     assert_eq!(status, ExitStatus::Code(0));
     assert_eq!(

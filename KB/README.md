@@ -25,9 +25,9 @@ Every module under `src/bash/rig/` is private; `mod.rs` carries the trait,
 `ExitStatus`, and one re-export list that is the API:
 
 ```rust
-pub use run::{run, run_in};
+pub use run::run;
 pub use tree::{forest, shells, Shell, ShellNode};
-pub use wire::{field, Answer, Kind, Line, Micros, Pid};
+pub use wire::{field, Answer, Kind, Line, Micros, Pid, Sent};
 pub use crate::failure::{Doing, Failure};
 ```
 
@@ -39,7 +39,7 @@ produces is the client's, expressed as its `Session` — see
 
 | moment | started by | effect |
 |---|---|---|
-| setup | `run`, once | two bash files are laid into the workspace, and `BASH_ENV` reaches every shell with them |
+| setup | `run`, once | two bash files are laid into the workspace `Rig::workspace` chose, and `BASH_ENV` reaches every shell with them |
 | say | the subject | `BC_INSTR say …` ships an arglist and returns |
 | ask | the subject | `BC_INSTR ask …` ships one, blocks, and runs what comes back |
 

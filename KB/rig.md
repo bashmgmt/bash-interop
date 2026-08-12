@@ -99,9 +99,11 @@ including nothing.
 pub fn run<R: Rig, S: AsRef<OsStr>>(rig: &R, argv: &[S])
     -> Result<Run<R::Session>, Failure>;
 
-/// The same, in a directory of your choosing, left behind to read.
-pub fn run_in<R: Rig, S: AsRef<OsStr>>(rig: &R, at: &Path, argv: &[S])
-    -> Result<Run<R::Session>, Failure>;
+/// Where the run lays its own bash, and how long that outlives the run.
+pub enum Workspace {
+    Temporary,        // the default: made with the run, removed with it
+    At(PathBuf),      // one of the caller's, created if absent and left behind
+}
 
 /// What a run produced.
 pub struct Run<S> {
@@ -151,8 +153,11 @@ struct Running<'r, R: Rig> {
 ```
 
 with `open` / `drive` / `serve` / `finish`. No state beyond what a run *is*.
-`run` owns the `TempDir` and calls `run_in`, so the workspace drops one frame
-above the run that read it — after `finish` has reaped the subject.
+A temporary workspace drops one frame above the run that read it, after
+`finish` has reaped the subject. `Rig::workspace` is what decides: a rig whose
+reading outlives the run names a directory it keeps, because the instrument's
+own frames name a file in there and a source path is only as readable as the
+file it names — see [stack.md](stack.md#where-a-source-path-lands).
 
 **The field order is the drop order.** Leaving through `?` anywhere drops
 `Running`, and `subject` first means the shell is stopped before the session it

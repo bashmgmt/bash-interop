@@ -25,7 +25,7 @@ fn an_unfinished_message_is_reported_beside_the_subjects_status() {
         "#,
     )]);
 
-    let ran = run(&Keeping, &bash(scripts.at(ENTRY))).unwrap();
+    let ran = run(&Keeping::default(), &bash(scripts.at(ENTRY))).unwrap();
     let failed = ran.failed.as_ref().expect("the half-read message must be reported");
 
     assert!(failed.to_string().contains("never finished"), "{failed}");
@@ -52,7 +52,7 @@ fn a_message_that_will_not_read_ends_the_run() {
         "#,
     )]);
 
-    let failure = run(&Keeping, &bash(scripts.at(ENTRY)))
+    let failure = run(&Keeping::default(), &bash(scripts.at(ENTRY)))
         .err()
         .expect("a message that will not read must end the run");
 
