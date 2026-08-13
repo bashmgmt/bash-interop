@@ -172,6 +172,11 @@ A client that keeps talking after the session ended writes into a fifo whose
 reader is gone and takes `SIGPIPE`. Releasing last — from a `trap … EXIT` — is
 what a client does about it.
 
+`__fixtures/joining/session.bash` is the whole recipe, and `tests/joining.rs`
+runs it: a `coproc`, one `read` for the address, `declare -a` to run it, and a
+release-and-`wait` at the end. That test is a program rather than a harness,
+because a script that starts its own server has to have something to start.
+
 ## One exit
 
 | | the descriptor | the session's extent | who cleans up |

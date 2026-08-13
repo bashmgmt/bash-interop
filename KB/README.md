@@ -108,7 +108,8 @@ Declare a session type and implement `Rig::open`; add `bash` if the subject
 needs a word of your own; then implement `Master`, `Slave`, or both.
 
 `tests/examples/` is worked rigs against the public API alone, meant to be read
-top to bottom. A corner case of one building block belongs beside it, in
+top to bottom, and `tests/joining.rs` is the same from bash's side: a fixture
+script that starts a session, asks it questions and closes it. A corner case of one building block belongs beside it, in
 `src/<module>/tests/`.
 
 ## Reading order

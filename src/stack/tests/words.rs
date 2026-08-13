@@ -10,8 +10,7 @@ use crate::tests::scripts::{bash, Scripts};
 
 /// The whole instrument: a word that walks and says what it found. The 2 is
 /// `__bc_stack`'s own frame and `WALK`'s, so the walk starts at the subject.
-/// `stack`
-/// tests itself with nothing but `stack`.
+/// `stack` tests itself with nothing but `stack`.
 const BASH: &str = r#"
 WALK() {
     local -a __w=()

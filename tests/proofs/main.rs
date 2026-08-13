@@ -9,7 +9,8 @@
 //! | [`transport`] | every shell reaches the wire, and a message arrives whole |
 //! | [`transparency`] | what the subject keeps: its status, its trap, its `IFS` |
 //! | [`answering`] | every form of answer, under load, from two shells at once |
-//! | [`starting`] | what a rig tells the run about the process it starts |
+//! | [`starting`] | what a driven run starts, and what a rig puts in every shell |
+//! | [`serving`] | a session a script joins for itself, and how far it reaches |
 //! | [`owning`] | the run's workspace, and the process group it takes with it |
 //! | [`failing`] | what a fault on either side does to the run and to the subject |
 //! | [`malformed`] | what the reader does with a stream the protocol did not write |

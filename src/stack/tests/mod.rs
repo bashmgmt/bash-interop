@@ -2,7 +2,6 @@
 
 mod words;
 
-
 use std::path::Path;
 
 use super::*;

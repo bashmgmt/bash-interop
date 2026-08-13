@@ -8,8 +8,8 @@ use mb_resolver::bash::rig::{Answer, ExitStatus, Failure, Kind, Line, Master, Ri
 use crate::support::{bash, Scripts};
 use crate::{behind, gone, report, script, Keeping, ENTRY};
 
-/// `run_in` leaves its workspace where it was told to, so what the run set up
-/// is there to read afterwards.
+/// A workspace the rig named is left where it was told to, so what the session
+/// laid down is there to read afterwards.
 #[test]
 fn a_named_workspace_is_left_behind() {
     let temp = tempfile::tempdir().unwrap();
