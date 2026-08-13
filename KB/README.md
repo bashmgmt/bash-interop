@@ -1,19 +1,22 @@
 # Bash interop
 
 Three layers. **Values** (`src/bash/value/`) read and write bash's own quoted
-forms — `@Q`, `@A`, `declare -p`. **The rig** (`src/bash/rig/`) runs a bash
-program with instrumentation injected, receives messages from every shell in
-the resulting process tree, and answers questions those shells ask. **The
-stack** (`src/bash/stack.bash`, `src/bash/stack.rs`) is the frame walk every
-instrument shares.
+forms — `@Q`, `@A`, `declare -p`. **The stack** (`src/bash/stack/`) is the
+frame walk every instrument shares, both halves: the bash that ships bash's
+five arrays, and the Rust that puts them back together. **The rig**
+(`src/bash/rig/`) runs a bash program with instrumentation injected, receives
+messages from every shell in the resulting process tree, and answers questions
+those shells ask.
+
+`stack` and `rig` are siblings; neither knows the other. A tool composes them.
 
 ```
 KB/mb_resolver/bash/                              src/bash/
   values.md         quoted forms, BashVal, codecs   value/
   wire.md           the bash, the pipe, the frame   rig/wire/
-  rig.md            Rig, ExitStatus, run            rig/mod.rs, rig/run.rs
+  rig.md            Rig, Startup, run               rig/mod.rs, rig/run.rs
   tree.md           shells and the process forest   rig/tree.rs
-  stack.md          the call stack, both halves     stack.bash, stack.rs
+  stack.md          the call stack, both halves     stack/
   measurements.md   numbers, limits, proofs
   scoping.md        where a name binds              every *.bash we ship
   vendoring.md      shipping instrumented bash      assets/
@@ -22,10 +25,11 @@ KB/mb_resolver/bash/                              src/bash/
 ```
 
 Every module under `src/bash/rig/` is private; `mod.rs` carries the trait,
-`ExitStatus`, and one re-export list that is the API:
+`Run`, `Startup`, `Workspace`, and one re-export list that is the API:
 
 ```rust
 pub use run::run;
+pub use status::ExitStatus;
 pub use tree::{forest, shells, Shell, ShellNode};
 pub use wire::{field, Answer, Kind, Line, Micros, Pid, Sent};
 pub use crate::failure::{Doing, Failure};
@@ -35,11 +39,15 @@ pub use crate::failure::{Doing, Failure};
 produces is the client's, expressed as its `Session` — see
 [rig.md](rig.md#what-a-session-is-for).
 
+Every instrument that reports a walk is composed by `stack::with(&[…])`, which
+puts `stack.bash` first: `__bc_stack` has to be defined before anything calls
+it, and that rule lives there rather than at each tool.
+
 ## Three moments
 
 | moment | started by | effect |
 |---|---|---|
-| setup | `run`, once | two bash files are laid into the workspace `Rig::workspace` chose, and `BASH_ENV` reaches every shell with them |
+| setup | `run`, once | two bash files are laid into the workspace `Startup::workspace` chose, and `BASH_ENV` reaches every shell with them |
 | say | the subject | `BC_INSTR say …` ships an arglist and returns |
 | ask | the subject | `BC_INSTR ask …` ships one, blocks, and runs what comes back |
 
@@ -91,7 +99,9 @@ about them. Then call `run`. Provenance, ordering, the process forest,
 subshell capture, concurrent-writer integrity and the control channel come
 with the transport.
 
-`tests/examples/` is worked rigs against the public API alone.
+`tests/examples/` is worked rigs against the public API alone, meant to be read
+top to bottom. A corner case of one building block belongs beside it, in
+`src/<module>/tests/`.
 
 ## Reading order
 
