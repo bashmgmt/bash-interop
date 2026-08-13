@@ -31,7 +31,7 @@ mod walking;
 #[path = "../support/mod.rs"]
 mod support;
 
-use mb_resolver::bash::rig::{run, ExitStatus, Failure, Line, Rig, Workspace};
+use mb_resolver::bash::rig::{run, ExitStatus, Failure, Line, Rig, Startup, Workspace};
 
 use support::{bash, Scripts};
 
@@ -55,8 +55,8 @@ impl Keeping {
 impl Rig for Keeping {
     type Session = Vec<Line>;
 
-    fn workspace(&self) -> Workspace {
-        self.workspace.clone()
+    fn startup(&self) -> Startup {
+        Startup { workspace: self.workspace.clone(), ..Default::default() }
     }
 
     fn open(&self) -> Result<Vec<Line>, Failure> {

@@ -1,6 +1,6 @@
 //! A bash call stack, as an instrument records it — both halves.
 //!
-//! `stack.bash` ships bash's five parallel arrays as they are; [`columns`]
+//! `stack.bash` ships bash's five parallel arrays as they are; [`Columns`]
 //! puts them back together. What comes out is a [`Stack`]: the frames one
 //! instrument reported, innermost first, never empty.
 

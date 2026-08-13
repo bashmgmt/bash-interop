@@ -15,6 +15,7 @@ impl Rig for Deploying {
         Startup {
             bash: "TELL() { BC_INSTR say TELL \"$@\"; }".to_string(),
             env: vec![("DEPLOY_TARGET".into(), "staging".into())],
+            ..Default::default()
         }
     }
 

@@ -117,7 +117,7 @@ pub enum Workspace {
     At(PathBuf),
 }
 
-/// What a rig tells the run about the process it is about to start.
+/// Everything a rig tells the run about the process it is about to start.
 #[derive(Default)]
 pub struct Startup {
     /// Injected into every shell, after the protocol's own. This is the only
@@ -128,6 +128,11 @@ pub struct Startup {
     /// Added to the environment the subject is started with, beside the
     /// `BASH_ENV` the run sets itself.
     pub env: Vec<(OsString, OsString)>,
+
+    /// Where the run lays that bash, and how long it outlives the run. A rig
+    /// whose reading resolves a frame's source afterwards names a directory it
+    /// keeps.
+    pub workspace: Workspace,
 }
 
 pub use run::run;
@@ -148,13 +153,6 @@ pub trait Rig {
     /// What the run needs before there is a shell to talk to.
     fn startup(&self) -> Startup {
         Startup::default()
-    }
-
-    /// Where the run lays its own bash. A rig whose reading outlives the run —
-    /// anything that resolves a frame's source afterwards — names a directory
-    /// it keeps.
-    fn workspace(&self) -> Workspace {
-        Workspace::Temporary
     }
 
     fn open(&self) -> Result<Self::Session, Failure>;

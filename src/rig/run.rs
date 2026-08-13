@@ -8,26 +8,28 @@ use std::path::Path;
 use std::process::{Child, Command};
 
 use crate::bash::rig::wire::{prelude, Kind, Wire};
-use crate::bash::rig::{ExitStatus, Rig, Run, Workspace};
+use crate::bash::rig::{ExitStatus, Rig, Run, Startup, Workspace};
 use crate::failure::{Doing, Failure};
 
 /// Run `argv` under `rig`, and hand back the session it drove and how bash
 /// ended.
 ///
-/// Where the run lays its bash is [`Rig::workspace`]. A temporary one is
+/// Where the run lays its bash is [`Startup::workspace`]. A temporary one is
 /// removed here, after the subject that was reading it has been reaped; one
 /// the rig named is left where it is.
 pub fn run<R: Rig, S: AsRef<OsStr>>(
     rig: &R,
     argv: &[S],
 ) -> Result<Run<R::Session>, Failure> {
-    match rig.workspace() {
-        Workspace::At(at) => run_in(rig, &at, argv),
+    let startup = rig.startup();
+
+    match startup.workspace.clone() {
+        Workspace::At(at) => run_in(rig, startup, &at, argv),
         Workspace::Temporary => {
             let temporary =
                 tempfile::tempdir().doing(|| "opening a workspace for the run".into())?;
 
-            run_in(rig, temporary.path(), argv)
+            run_in(rig, startup, temporary.path(), argv)
         }
     }
 }
@@ -36,6 +38,7 @@ pub fn run<R: Rig, S: AsRef<OsStr>>(
 /// path `BASH_ENV` names, so a relative one would move with the subject.
 fn run_in<R: Rig, S: AsRef<OsStr>>(
     rig: &R,
+    startup: Startup,
     at: &Path,
     argv: &[S],
 ) -> Result<Run<R::Session>, Failure> {
@@ -44,7 +47,7 @@ fn run_in<R: Rig, S: AsRef<OsStr>>(
     fs::create_dir_all(at).doing(opening)?;
     let dir = fs::canonicalize(at).doing(opening)?;
 
-    let mut running = Running::open(rig, &dir, argv)?;
+    let mut running = Running::open(rig, startup, &dir, argv)?;
 
     // A failure here leaves through `?`, dropping `running` — which kills the
     // subject's process group and reaps it. Reaching `finish` means bash got
@@ -66,10 +69,14 @@ struct Running<'r, R: Rig> {
 }
 
 impl<'r, R: Rig> Running<'r, R> {
-    fn open<S: AsRef<OsStr>>(rig: &'r R, dir: &Path, argv: &[S]) -> Result<Self, Failure> {
+    fn open<S: AsRef<OsStr>>(
+        rig: &'r R,
+        startup: Startup,
+        dir: &Path,
+        argv: &[S],
+    ) -> Result<Self, Failure> {
         let command: Vec<OsString> =
             argv.iter().map(|word| word.as_ref().to_os_string()).collect();
-        let startup = rig.startup();
 
         let wire = Wire::create(dir)?;
         let entry = prelude(dir, &startup.bash)?;
