@@ -1,70 +1,63 @@
 //! bash orchestrates: a script that is already running started the server,
-//! takes the address it is handed, and says when the session is over.
+//! takes the address it is handed, and lets go when it is done.
 //!
 //! Nothing here starts a process or ends one. What the client started, the
-//! client cleans up — which is why the only thing this side can watch is the
-//! handle, and why a session that is closed properly is closed by a message.
+//! client cleans up, which is why the only thing this side watches is the
+//! handle.
 
-use std::io;
-use std::os::fd::{FromRawFd, OwnedFd};
+use std::os::fd::OwnedFd;
 
-use super::serving::{Served, Serving, Until};
+use super::serving::{Serving, Until};
 use super::{Answer, Rig};
-use crate::failure::{Doing, Failure};
+use crate::failure::Failure;
 
-/// The handle an initiator holds open for as long as its session lasts.
+/// What a served session produced.
 ///
-/// It hangs up when the last holder has let go, which is the only thing that
-/// can end a session nobody is left to close. An initiator that closes
-/// properly never reaches it.
-pub struct Held(OwnedFd);
+/// Reaching one of these means the conversation ran and was seen out. A
+/// `Failure` instead means it never got that far: the workspace could not be
+/// laid, or the rig could not do its work.
+pub struct Served<S> {
+    /// The client's own state, whatever it made of what it heard.
+    pub session: S,
 
-impl Held {
-    pub fn of(handle: OwnedFd) -> Self {
-        Self(handle)
-    }
-
-    /// This process's own standard input — what a client holds the other end
-    /// of when it started the server as a coprocess.
-    pub fn stdin() -> Result<Self, Failure> {
-        let raw = unsafe { libc::dup(libc::STDIN_FILENO) };
-        if raw < 0 {
-            return Err(io::Error::last_os_error()).doing(|| "taking the session handle".into());
-        }
-
-        Ok(Self(unsafe { OwnedFd::from_raw_fd(raw) }))
-    }
+    /// What went wrong closing up, if anything: a message left half-read, or a
+    /// session that would not let go. Both happen after the conversation
+    /// reached its own end.
+    pub failed: Option<Failure>,
 }
 
 /// A rig a running bash may attach to.
 ///
-/// `announce` is handed the session's address: one command, which the client
-/// runs to join. It is called once, before anything is served, so a client
-/// that is waiting for it is unblocked before the first message can arrive.
+/// `held` is a descriptor the initiator holds open for as long as it wants the
+/// session: serving ends when the last holder has let go, whether the client
+/// released it or died with it. Releasing it and waiting for the process it
+/// started is how a client closes and learns that the reading is written.
 ///
-/// What reaches the address is the client's decision. Sourcing it instruments
+/// `announce` is handed the session's address — one command, which the client
+/// runs to join. It is called once, before anything is served, so a client
+/// waiting for it is unblocked before the first message can arrive.
+///
+/// What the address reaches is the client's decision. Sourcing it instruments
 /// that shell, its functions, its subshells and what it sources; exporting
-/// `BASH_ENV` to it as well instruments the processes it starts.
+/// `BASH_ENV` to the same path instruments the processes it starts.
 pub trait Slave: Rig {
-    fn serve<A>(&self, held: Held, announce: A) -> Result<Served<Self::Session>, Failure>
+    fn serve<A>(&self, held: OwnedFd, announce: A) -> Result<Served<Self::Session>, Failure>
     where
         A: FnOnce(&Answer) -> Result<(), Failure>,
         Self: Sized,
     {
         let mut serving = Serving::lay(self)?;
 
-        let address = {
-            let prelude = serving.prelude();
-            let path = prelude.to_str().ok_or_else(|| {
-                Failure::new("announcing the session", format!("{} is not text", prelude.display()))
-            })?;
+        let prelude = serving.prelude();
+        let path = prelude.to_str().ok_or_else(|| {
+            Failure::new("announcing the session", format!("{} is not text", prelude.display()))
+        })?;
+        announce(&Answer::of("source", [path]))?;
 
-            Answer::of("source", [path])
-        };
-        announce(&address)?;
+        serving.drive(&Until::held(held))?;
 
-        let closed = serving.drive(&Until::held(held.0))?;
+        let (session, failed) = serving.finish();
 
-        Ok(serving.finish(closed))
+        Ok(Served { session, failed })
     }
 }

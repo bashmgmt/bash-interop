@@ -4,7 +4,7 @@
 //! `BASH_SOURCE`, and it keeps a source path exactly as it was written. None
 //! of that is visible in generated source, so it is read off a shell.
 
-use crate::bash::rig::{Failure, Halt, Line, Master, Rig};
+use crate::bash::rig::{Failure, Line, Master, Rig};
 use crate::bash::stack::{self, Columns, Site, Source, Stack};
 use crate::tests::scripts::{bash, Scripts};
 
@@ -33,7 +33,7 @@ impl Rig for Walking {
         Ok(Vec::new())
     }
 
-    fn hear(&self, seen: &mut Self::Session, said: Line) -> Result<(), Halt> {
+    fn hear(&self, seen: &mut Self::Session, said: Line) -> Result<(), Failure> {
         let Some(words) = said.behind("WALK") else { return Ok(()) };
 
         seen.push(Columns::of(words)?.frames()?);

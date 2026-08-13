@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use mb_resolver::bash::rig::{Answer, ExitStatus, Failure, Halt, Line, Master, Rig, Run};
+use mb_resolver::bash::rig::{Answer, ExitStatus, Failure, Line, Master, Rig, Run};
 
 use crate::support::{bash, sourcing, Scripts};
 use crate::{beginning, behind, report, ENTRY};
@@ -37,7 +37,7 @@ impl Rig for Answering {
         Ok(Soak::default())
     }
 
-    fn hear(&self, soak: &mut Soak, said: Line) -> Result<(), Halt> {
+    fn hear(&self, soak: &mut Soak, said: Line) -> Result<(), Failure> {
         soak.heard.push(said);
 
         Ok(())

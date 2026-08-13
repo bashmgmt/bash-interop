@@ -20,8 +20,8 @@ pub struct Run<S> {
     /// The client's own state, whatever it made of what it heard.
     pub session: S,
 
-    /// How bash ended. `Signal(9)` where the rig cut the run short, since the
-    /// group it owned was killed to do so.
+    /// How bash ended. Always its own: the run serves until the subject leaves
+    /// of its own accord, whether or not anything went wrong.
     pub subject: ExitStatus,
 
     /// What went wrong closing up, if anything. It happens after the subject
@@ -58,11 +58,11 @@ pub trait Master: Rig {
         // `?` below stops the subject before releasing what it was feeding.
         let mut subject = Subject::spawn(argv, serving.prelude())?;
 
-        let closed = serving.drive(&Until::process(subject.pid())?)?;
+        serving.drive(&Until::process(subject.pid())?)?;
         let subject = ExitStatus::from(subject.finish().doing(|| "waiting for bash".into())?);
-        let served = serving.finish(closed);
+        let (session, failed) = serving.finish();
 
-        Ok(Run { session: served.session, subject, failed: served.failed })
+        Ok(Run { session, subject, failed })
     }
 }
 

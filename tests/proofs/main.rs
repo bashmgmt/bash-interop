@@ -30,15 +30,15 @@ mod transport;
 #[path = "../support/mod.rs"]
 mod support;
 
-use mb_resolver::bash::rig::{Answer, ExitStatus, Failure, Halt, Line, Master, Rig, Workspace};
+use mb_resolver::bash::rig::{ExitStatus, Failure, Line, Master, Rig, Workspace};
 
 use support::{bash, Scripts};
 
 /// Every proof starts the same script, beside whatever else it wrote.
 pub const ENTRY: &str = "main.bash";
 
-/// Keeps every message in arrival order, questions included, and tells a shell
-/// that asks that the word is unknown.
+/// Keeps every message in arrival order, and answers nothing — the default
+/// `answer` hears the question and tells the shell the word is unknown.
 #[derive(Default)]
 pub struct Keeping {
     workspace: Workspace,
@@ -62,16 +62,10 @@ impl Rig for Keeping {
         Ok(Vec::new())
     }
 
-    fn hear(&self, heard: &mut Vec<Line>, said: Line) -> Result<(), Halt> {
+    fn hear(&self, heard: &mut Vec<Line>, said: Line) -> Result<(), Failure> {
         heard.push(said);
 
         Ok(())
-    }
-
-    fn answer(&self, heard: &mut Vec<Line>, asked: Line) -> Result<Answer, Failure> {
-        heard.push(asked);
-
-        Ok(Answer::status(127))
     }
 }
 

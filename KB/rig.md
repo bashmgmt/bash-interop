@@ -27,7 +27,7 @@ pub trait Rig {
     fn open(&self) -> Result<Self::Session, Failure>;
 
     /// A message nobody is waiting on.
-    fn hear(&self, session: &mut Self::Session, said: Line) -> Result<(), Halt>;
+    fn hear(&self, session: &mut Self::Session, said: Line) -> Result<(), Failure>;
 
     /// A message a shell is blocked on; the session frames what comes back and
     /// writes it to that shell.
@@ -39,10 +39,10 @@ pub trait Rig {
 ```
 
 **`open` is the only required method.** The rest default to: no words of the
-subject's own, a workspace thrown away, keeping nothing, telling the shell the
-word is unknown (`return 127`), and doing nothing at the end. A rig that
-ignores everything is a session type and one line; a rig that only listens adds
-`hear`.
+subject's own, a workspace thrown away, keeping nothing, hearing a question and
+telling the shell the word is unknown (`return 127`), and doing nothing at the
+end. A rig that ignores everything is a session type and one line; a rig that
+only listens adds `hear`.
 
 `Line` arrives **by value**: a session that keeps it does so without cloning,
 one that ignores it drops it for free.
@@ -60,25 +60,10 @@ because the instrument's own frames name a file in there and a source path is
 only as readable as the file it names — see
 [stack.md](stack.md#where-a-source-path-lands).
 
-## `Halt`, and why only `hear` may raise it
-
-```rust
-pub enum Halt { Done, Failed(Failure) }
-impl From<Failure> for Halt { … }
-```
-
-`Done` ends the conversation cleanly; `Failed` ends it as a fault. A `Failure`
-raised anywhere in a rig's own code becomes `Failed` through `?`, so `Done` is
-the only variant a rig ever writes out.
-
-`answer` returns `Result<Answer, Failure>` and cannot halt. A shell that asked
-is blocked in `read` on a fifo it holds read-write, so that read sees no end of
-input and no timeout; the answer is what unblocks it. Under `Master` the group
-is killed afterwards and the difference does not show, and under `Slave`
-nothing kills anything. The signature carries the rule so no code has to.
-
-The default `answer` therefore returns `Answer::status(127)` on its own. A rig
-that wants questions kept implements `answer` and keeps them.
+**Nothing in a rig ends a session.** A rig reacts; when the conversation is
+over is decided by whoever started the shells, which is the role's business and
+not the reaction's. A `Failure` is the only thing a rig can raise, and it means
+the rig could not do its work rather than that it is finished.
 
 ## `Master` — Rust orchestrates
 
@@ -109,10 +94,9 @@ What a rig wants in *every* shell goes through `Rig::bash` instead, which
 `BASH_ENV` carries where a command line cannot reach.
 
 **Reaching a `Run` means bash got to its own end**, so `subject` is always the
-subject's own status — `Signal(9)` where the rig cut the run short, since the
-group it owned was killed to do so. `failed` is narrower: what went wrong
-*closing up*, after the subject is gone, which is why it travels beside a
-status rather than replacing it.
+subject's own status. `failed` is narrower: what went wrong *closing up*, after
+the subject is gone, which is why it travels beside a status rather than
+replacing it.
 
 A `Failure` in place of a `Run` means the run never got that far: it could not
 be set up, or the rig could not do its work and the subject was killed.
@@ -134,30 +118,27 @@ answers `kill(pid, 0)`.
 
 `Subject` is a local of `Master::run`, declared after the serving, so leaving
 through `?` drops it first and the shell is stopped before what was feeding it
-is released. A process that means to survive detaches with `setsid`, which
-leaves the group.
+is released. The kill on the way out is also what collects anything that
+outlived the leader; a process that means to survive detaches with `setsid`,
+which leaves the group.
 
 ## `Slave` — bash orchestrates
 
 ```rust
 pub trait Slave: Rig {
-    fn serve<A>(&self, held: Held, announce: A) -> Result<Served<Self::Session>, Failure>
+    fn serve<A>(&self, held: OwnedFd, announce: A) -> Result<Served<Self::Session>, Failure>
     where A: FnOnce(&Answer) -> Result<(), Failure>;
 }
 
 pub struct Served<S> {
     pub session: S,
-    pub closed: Closed,
     pub failed: Option<Failure>,
 }
-
-pub enum Closed { Said, Gone }
-pub struct Held(OwnedFd);
 ```
 
 A script that is already running starts the server, takes the address it is
-handed, and says when the session is over. Nothing on this side starts a
-process or ends one.
+handed, and lets go when it is done. Nothing on this side starts a process or
+ends one.
 
 `announce` is called once, before anything is served, with the session's
 address: `Answer::of("source", [prelude])`. It is one command, `Display`s as
@@ -173,26 +154,33 @@ its functions, its subshells and what it sources; exporting `BASH_ENV` to the
 same path as well instruments the processes it starts — see
 [scoping.md](scoping.md).
 
-`Held` is the handle the initiator holds open for as long as its session lasts;
-it hangs up when the last holder has let go. An initiator that closes properly
-never reaches it: it closes with a word of its own, which its rig reads as
-`Halt::Done`. `Closed` says which of the two happened, and what a tool makes of
-`Gone` is the tool's business.
+`held` is a descriptor the initiator keeps open for as long as it wants the
+session. Serving ends when the last holder has let go, and a client releases it
+either deliberately or by dying:
 
-A client that keeps talking after the session closed writes into a fifo whose
-reader is gone and takes `SIGPIPE`. Closing last — from a `trap … EXIT` — is
+```bash
+exec {BASHPROF[1]}>&-      # release
+wait "$BASHPROF_PID"       # the reading is on disk
+```
+
+One mechanism covers both, which is why there is no closing word, no reserved
+payload word, and no interception in the serving loop. A descendant that
+inherited the handle keeps the session open — correctly, since it can still
+speak, and by the same rule `Master` applies to its process group.
+
+A client that keeps talking after the session ended writes into a fifo whose
+reader is gone and takes `SIGPIPE`. Releasing last — from a `trap … EXIT` — is
 what a client does about it.
 
-## Both have both exits
+## One exit
 
-| | the handle became ready | the rig said `Halt::Done` |
-|---|---|---|
-| `Master` | bash is finished — reap, report its status | cut short — the group is killed, status `Signal(9)` |
-| `Slave` | the initiator vanished — `Closed::Gone` | the client closed — `Closed::Said` |
+| | the descriptor | the session's extent | who cleans up |
+|---|---|---|---|
+| `Master` | a pidfd on the subject the run started | its process group | the run: kill, reap, report the status |
+| `Slave` | the handle the initiator holds | whoever inherited it | nobody — not our process |
 
-Which of the two is the ordinary one is a fact about who started what. The
-serving loop knows neither, and neither entry point branches on it: `Master`
-kills-then-reaps either way, and `Slave` reports what happened.
+**A session lasts as long as anyone who could still speak.** One sentence for
+both, and the loop below is the whole of it.
 
 ## `Serving` — what they share
 
@@ -208,40 +196,27 @@ struct Serving<'r, R: Rig> {
 
 `lay` writes the workspace and the pipe *before* asking the rig to open a
 session, so the session is the last thing acquired and nothing is held over a
-setup that failed. `prelude` is the session's only address. `finish` reports a
-message left half-read before asking the rig to end, since it is the earlier
-fault.
+setup that failed. `prelude` is the session's only address. `finish` hands back
+`(session, Option<Failure>)` — each role names the fields of its own result —
+and reports a message left half-read before asking the rig to end, since it is
+the earlier fault.
 
 There is no interval and no timer.
 
 ```rust
-fn step(&mut self, until: &Until) -> Result<Ready, Halt> {
-    self.deliver()?;
-
-    match wait_for(&self.wire, until)? {
-        Ready::Spoke => Ok(Ready::Spoke),
-        Ready::Gone => { self.deliver()?; Ok(Ready::Gone) }
+fn drive(&mut self, until: &Until) -> Result<(), Failure> {
+    while let Ready::Spoke = wait_for(&self.wire, until)? {
+        self.deliver()?;
     }
-}
 
-fn drive(&mut self, until: &Until) -> Result<Closed, Failure> {
-    loop {
-        match self.step(until) {
-            Ok(Ready::Spoke)       => continue,
-            Ok(Ready::Gone)        => return Ok(Closed::Gone),
-            Err(Halt::Done)        => return Ok(Closed::Said),
-            Err(Halt::Failed(why)) => return Err(why),
-        }
-    }
+    self.deliver()
 }
 ```
 
-`drive` is the one place where the rig's vocabulary becomes the run's: above it
-there is no `Halt`, below it no `Closed`.
-
 `deliver` hands every message the pipe holds to the rig one at a time, and
-writes the answer to a shell that asked before moving on. A ready handle does
-not imply an empty pipe, so `Gone` is reported only after a last delivery.
+writes the answer to a shell that asked before moving on. `wait_for` polls the
+pipe first, so a message already waiting is read before the end is noticed, and
+the delivery behind the loop takes what arrived with it.
 
 ```rust
 struct Until(OwnedFd);
@@ -273,12 +248,13 @@ accumulator, no collection type, and no rig implementation.
 | `examples/answering.rs` | what it has heard | `bash`; `answer` decides from it |
 | `bashprof` | `Vec<Line>` | `bash`; `hear` keeps. Every message carries its own provenance *and* the name of the call it was made inside of, so reading is one pass with a map, then two hylic folds — one to nest, one to read the tree as timings |
 | `proofs/answering.rs` | `Soak { heard, answered }` | `bash`, `hear`, `answer` |
-| `proofs/serving.rs` | `Vec<Line>` | `bash`; `hear` keeps, and reads one word as the end |
+| `proofs/serving.rs` | `Vec<Line>` | `bash`; `hear` keeps, and has no say in the end |
 | `proofs/owning.rs` | `()` | `answer`, which never returns |
 
 ## When the rig fails
 
-**`Halt::Failed` ends the conversation.** Under `Master` it leaves through `?`,
+**A `Failure` from `hear` or `answer` ends the conversation.** Under `Master` it
+leaves through `?`,
 dropping `Subject` — killing the group and reaping it — and `run` yields that
 reason instead of a `Run`.
 

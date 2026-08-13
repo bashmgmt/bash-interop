@@ -23,13 +23,12 @@ KB/mb_resolver/bash/                              src/bash/
   bashprof.md       a call tree that travels        bashprof/
 ```
 
-Every module under `src/bash/rig/` is private; `mod.rs` carries `Rig`, `Halt`,
+Every module under `src/bash/rig/` is private; `mod.rs` carries `Rig`,
 `Workspace` and one re-export list that is the API:
 
 ```rust
 pub use master::{Master, Run};
-pub use serving::{Closed, Served};
-pub use slave::{Held, Slave};
+pub use slave::{Served, Slave};
 pub use status::ExitStatus;
 pub use tree::{forest, shells, Shell, ShellNode};
 pub use wire::{field, Answer, Kind, Line, Micros, Pid, Sent};
@@ -38,9 +37,10 @@ pub use crate::failure::{Doing, Failure};
 
 **A rig is the reaction; who started what is a second question.** `Master` runs
 a command line of its own and owns its process group; `Slave` hands its address
-to a bash script that started the server and closes when that script says so.
-Both are traits extending `Rig` with one provided method, so a rig declares
-which orchestrations it supports by implementing them.
+to a bash script that started the server and serves while that script holds the
+handle. Both are traits extending `Rig` with one provided method, so a rig
+declares which orchestrations it supports by implementing them. A session lasts
+as long as anyone who could still speak, and nothing inside a rig ends one.
 
 **The library ships no accumulator and no rig implementation.** What a run
 produces is the client's, expressed as its `Session` — see

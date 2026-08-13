@@ -1,6 +1,6 @@
 //! What the run starts, and what a rig puts in the shells it reaches.
 
-use mb_resolver::bash::rig::{ExitStatus, Failure, Halt, Line, Master, Rig};
+use mb_resolver::bash::rig::{ExitStatus, Failure, Line, Master, Rig};
 
 use crate::support::{bash, Scripts};
 use crate::{behind, report, ENTRY};
@@ -19,7 +19,7 @@ impl Rig for Deploying {
         Ok(Vec::new())
     }
 
-    fn hear(&self, heard: &mut Vec<Line>, said: Line) -> Result<(), Halt> {
+    fn hear(&self, heard: &mut Vec<Line>, said: Line) -> Result<(), Failure> {
         heard.push(said);
 
         Ok(())

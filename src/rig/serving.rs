@@ -1,11 +1,9 @@
 //! The conversation itself: a workspace with a wire in it, a session beside
-//! it, and the loop that serves until something says stop.
+//! it, and the loop that serves until nobody can speak any more.
 //!
-//! A serving has exactly two exits, and both exist however it was started. An
-//! [`Until`] is one of them — a descriptor that becomes ready when nobody can
-//! speak any more; [`Halt::Done`] from the rig is the other. Which of the two
-//! is the ordinary one is a fact about who started what, so neither the loop
-//! nor this module asks.
+//! What that means is an [`Until`] — a descriptor the role built. Which shells
+//! it stands for, and whether anything is owed to them afterwards, belongs to
+//! the role and not here.
 
 use std::fs;
 use std::io;
@@ -15,36 +13,8 @@ use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
 use super::wire::{prelude, Kind, Wire};
-use super::{Halt, Rig, Workspace};
+use super::{Rig, Workspace};
 use crate::failure::{Doing, Failure};
-
-/// What a serving produced.
-///
-/// Reaching one of these means the conversation ran and was seen out. A
-/// `Failure` instead means it never got that far: the workspace could not be
-/// laid, or the rig could not do its work.
-pub struct Served<S> {
-    /// The client's own state, whatever it made of what it heard.
-    pub session: S,
-
-    /// Which of the two exits was taken.
-    pub closed: Closed,
-
-    /// What went wrong closing up, if anything: a message left half-read, or a
-    /// session that would not let go. Both happen after the conversation
-    /// reached its own end.
-    pub failed: Option<Failure>,
-}
-
-/// How a serving came to an end.
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
-pub enum Closed {
-    /// The rig said so.
-    Said,
-
-    /// What else it ends on became ready: nobody is left who could say it.
-    Gone,
-}
 
 /// A laid conversation: the workspace is written, the pipe is open, the
 /// session is up. What is missing is who speaks and what ends it.
@@ -94,7 +64,7 @@ impl<'r, R: Rig> Serving<'r, R> {
     /// Every message the pipe holds, handed to the rig one at a time. A shell
     /// that asked is blocked until its answer is written, so writing it is
     /// part of delivering rather than something a caller does afterwards.
-    fn deliver(&mut self) -> Result<(), Halt> {
+    fn deliver(&mut self) -> Result<(), Failure> {
         for line in self.wire.drain()? {
             // The rig consumes the message, and the reply pipe is named after
             // the shell that sent it.
@@ -112,50 +82,33 @@ impl<'r, R: Rig> Serving<'r, R> {
         Ok(())
     }
 
-    /// One step: deliver what is there, then wait. `Gone` is reported only
-    /// after a last delivery, because a ready descriptor does not mean the
-    /// pipe is empty.
-    fn step(&mut self, until: &Until) -> Result<Ready, Halt> {
-        self.deliver()?;
-
-        match wait_for(&self.wire, until)? {
-            Ready::Spoke => Ok(Ready::Spoke),
-            Ready::Gone => {
-                self.deliver()?;
-
-                Ok(Ready::Gone)
-            }
-        }
-    }
-
-    /// Serve until something says stop. There is no interval and no timer.
+    /// Serve until nobody can speak any more. There is no interval and no
+    /// timer.
     ///
-    /// This is the one place where the rig's vocabulary becomes the run's:
-    /// above it there is no [`Halt`], below it no [`Closed`].
-    pub(super) fn drive(&mut self, until: &Until) -> Result<Closed, Failure> {
-        loop {
-            match self.step(until) {
-                Ok(Ready::Spoke) => continue,
-                Ok(Ready::Gone) => return Ok(Closed::Gone),
-                Err(Halt::Done) => return Ok(Closed::Said),
-                Err(Halt::Failed(why)) => return Err(why),
-            }
+    /// The pipe is polled first, so a message already waiting is read before
+    /// the end is noticed, and the delivery behind the loop takes what arrived
+    /// with it.
+    pub(super) fn drive(&mut self, until: &Until) -> Result<(), Failure> {
+        while let Ready::Spoke = wait_for(&self.wire, until)? {
+            self.deliver()?;
         }
+
+        self.deliver()
     }
 
     /// Release what the session holds. A message left half-read is reported
     /// before the rig is asked to end, since it is the earlier fault.
-    pub(super) fn finish(self, closed: Closed) -> Served<R::Session> {
+    pub(super) fn finish(self) -> (R::Session, Option<Failure>) {
         let Self { rig, mut session, wire, .. } = self;
 
         let failed = wire.finish().err().or_else(|| rig.end(&mut session).err());
 
-        Served { session, closed, failed }
+        (session, failed)
     }
 }
 
-/// What ends a serving when the rig does not: a descriptor that becomes ready
-/// when nobody can speak any more.
+/// What a serving ends on: a descriptor that becomes ready when nobody who
+/// could speak is left.
 ///
 /// It is only ever watched. Signalling and reaping belong to whoever started
 /// the thing being watched, which is never this.

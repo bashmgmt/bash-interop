@@ -4,7 +4,7 @@
 
 use std::time::Instant;
 
-use mb_resolver::bash::rig::{Answer, ExitStatus, Failure, Halt, Kind, Line, Master, Rig};
+use mb_resolver::bash::rig::{Answer, ExitStatus, Failure, Kind, Line, Master, Rig};
 
 use crate::support::{bash, Scripts};
 use crate::{behind, gone, report, script, Keeping, ENTRY};
@@ -21,9 +21,9 @@ impl Rig for Breaking {
         Ok(Vec::new())
     }
 
-    fn hear(&self, heard: &mut Vec<Line>, said: Line) -> Result<(), Halt> {
+    fn hear(&self, heard: &mut Vec<Line>, said: Line) -> Result<(), Failure> {
         if self.on == Kind::Say {
-            return Err(Failure::new("keeping what was said", "the sink is on fire").into());
+            return Err(Failure::new("keeping what was said", "the sink is on fire"));
         }
         heard.push(said);
 

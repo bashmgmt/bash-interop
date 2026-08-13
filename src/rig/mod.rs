@@ -10,18 +10,16 @@
 //! started what — that is a second question with exactly two answers, and each
 //! is a trait that carries its own orchestration:
 //!
-//! | | who started the subject | what ends it | what comes back |
+//! | | who started the shells | what the session lasts for | what comes back |
 //! |---|---|---|---|
-//! | [`Master`] | the run — `BASH_ENV`, own process group | bash reached its own end | [`Run`], with the subject's [`ExitStatus`] |
-//! | [`Slave`] | a bash script, which took the address | the rig said so | [`Served`], with [`Closed`] |
+//! | [`Master`] | the run — `BASH_ENV`, own process group | that process group | [`Run`], with the subject's [`ExitStatus`] |
+//! | [`Slave`] | a bash script, which took the address | whoever holds the handle | [`Served`] |
 //!
-//! Both have both exits: a rig may [`Halt::Done`] under `Master` too, and a
-//! `Slave` session whose initiator vanished ends on its handle. Which of the
-//! two is the ordinary one is a fact about who started what, so the serving
-//! loop knows neither and reports which was taken.
+//! One sentence covers both: **a session lasts as long as anyone who could
+//! still speak.** Nothing inside a rig ends one.
 //!
 //! ```no_run
-//! use mb_resolver::bash::rig::{Answer, Failure, Halt, Line, Master, Rig};
+//! use mb_resolver::bash::rig::{Answer, Failure, Line, Master, Rig};
 //!
 //! /// Keeps every message, and tells a shell that asks to use staging.
 //! struct Deploying;
@@ -38,7 +36,7 @@
 //!         Ok(Vec::new())
 //!     }
 //!
-//!     fn hear(&self, heard: &mut Vec<Line>, said: Line) -> Result<(), Halt> {
+//!     fn hear(&self, heard: &mut Vec<Line>, said: Line) -> Result<(), Failure> {
 //!         heard.push(said);
 //!         Ok(())
 //!     }
@@ -66,8 +64,8 @@
 //!
 //! An answer is a command the shell runs, so its expressiveness is bash's.
 //! Only `open` is required: the rest default to giving the subject no words of
-//! its own, a workspace the run throws away, keeping nothing, saying the word
-//! is unknown, and doing nothing at the end.
+//! its own, a workspace the run throws away, keeping nothing, hearing a
+//! question and saying the word is unknown, and doing nothing at the end.
 
 mod master;
 mod serving;
@@ -93,24 +91,8 @@ pub enum Workspace {
     At(PathBuf),
 }
 
-/// Why a rig stopped: because it is finished, or because nothing more can be
-/// done. A `Failure` raised anywhere in a rig's own code becomes `Failed`
-/// through `?`, so only `Done` is ever written out.
-#[derive(Debug)]
-pub enum Halt {
-    Done,
-    Failed(Failure),
-}
-
-impl From<Failure> for Halt {
-    fn from(why: Failure) -> Self {
-        Self::Failed(why)
-    }
-}
-
 pub use master::{Master, Run};
-pub use serving::{Closed, Served};
-pub use slave::{Held, Slave};
+pub use slave::{Served, Slave};
 pub use status::ExitStatus;
 
 pub use tree::{forest, shells, Shell, ShellNode};
@@ -145,28 +127,24 @@ pub trait Rig {
 
     /// A message nobody is waiting on.
     ///
-    /// [`Halt::Done`] ends the conversation cleanly and is the whole of what a
-    /// `Slave` client's closing word means. [`Halt::Failed`] ends it as a
-    /// fault: under `Master` the subject is killed and the run yields that
-    /// reason. Neither is negotiated with bash — a rig that cannot do its work
-    /// is not something bash can be asked about.
-    fn hear(&self, _session: &mut Self::Session, _said: Line) -> Result<(), Halt> {
+    /// A `Failure` from either this or [`answer`](Rig::answer) ends the
+    /// conversation: under `Master` the subject is killed and the run yields
+    /// that reason. It is not negotiated with bash — a rig that cannot do its
+    /// work is not something bash can be asked about.
+    fn hear(&self, _session: &mut Self::Session, _said: Line) -> Result<(), Failure> {
         Ok(())
     }
 
     /// A message a shell is blocked on; the session frames what comes back and
-    /// writes it to that shell. Telling the shell the word is unknown, unless
-    /// a rig says otherwise.
-    ///
-    /// It cannot halt, and that is a rule the signature carries: the asking
-    /// shell is blocked on a pipe it holds read-write, so there is no end of
-    /// input and no timeout, and a rig that walked away from a question would
-    /// hang it for good.
+    /// writes it to that shell. Hearing the question and telling the shell the
+    /// word is unknown, unless a rig says otherwise.
     ///
     /// An answer is a command, and every answer is the same kind of thing.
     /// Saying no is a command that returns non-zero — what the subject makes of
     /// that is its own business, and the session only waits to see.
-    fn answer(&self, _session: &mut Self::Session, _asked: Line) -> Result<Answer, Failure> {
+    fn answer(&self, session: &mut Self::Session, asked: Line) -> Result<Answer, Failure> {
+        self.hear(session, asked)?;
+
         Ok(Answer::status(127))
     }
 
