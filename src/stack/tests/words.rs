@@ -2,24 +2,31 @@
 //!
 //! Bash writes two of its own words into `FUNCNAME` and two more into
 //! `BASH_SOURCE`, and it keeps a source path exactly as it was written. None
-//! of that is visible in generated source, so it is proved against a shell.
+//! of that is visible in generated source, so it is read off a shell.
 
-use mb_resolver::bash::rig::{run, Failure, Line, Rig, Startup};
-use mb_resolver::bash::stack::{Site, Source};
-use mb_resolver::bashcap::{instrument, Capture, Tracing};
+use crate::bash::rig::{run, Failure, Line, Rig, Startup};
+use crate::bash::stack::{self, Columns, Site, Source, Stack};
+use crate::tests::scripts::{bash, Scripts};
 
-use crate::support::{bash, Scripts};
-use crate::ENTRY;
+/// The whole instrument: a word that walks and says what it found. The 2 is
+/// `__bc_stack`'s own frame and `WALK`'s, so the walk starts at the subject.
+/// `stack`
+/// tests itself with nothing but `stack`.
+const BASH: &str = r#"
+WALK() {
+    local -a __w=()
+    __bc_stack __w 2
+    BC_INSTR say WALK "${__w[@]}"
+}
+"#;
 
-/// A rig with bashcap's instrument and nothing else, so a proof can ask a real
-/// shell where it is.
 struct Walking;
 
 impl Rig for Walking {
-    type Session = Vec<Capture>;
+    type Session = Vec<Stack>;
 
     fn startup(&self) -> Startup {
-        Startup { bash: instrument(Tracing::Off), ..Default::default() }
+        Startup { bash: stack::with(&[BASH]), ..Default::default() }
     }
 
     fn open(&self) -> Result<Self::Session, Failure> {
@@ -27,18 +34,19 @@ impl Rig for Walking {
     }
 
     fn hear(&self, seen: &mut Self::Session, said: Line) -> Result<(), Failure> {
-        if let Some(decoded) = Capture::of(&said) {
-            seen.push(decoded?);
-        }
+        let Some(words) = said.behind("WALK") else { return Ok(()) };
+
+        seen.push(Columns::of(words)?.frames()?);
+
         Ok(())
     }
 }
 
-/// Every snapshot the run heard, in arrival order — and the scripts, which
-/// stay alive: a source path is only as readable as the file it names.
-fn walks(files: &[(&str, &str)]) -> (Scripts, Vec<Capture>) {
+/// Every walk the run heard — and the scripts, which stay alive: a source path
+/// is only as readable as the file it names.
+fn walks(files: &[(&str, &str)]) -> (Scripts, Vec<Stack>) {
     let scripts = Scripts::of(files);
-    let ran = run(&Walking, &bash(scripts.at(ENTRY))).unwrap_or_else(|error| panic!("{error}"));
+    let ran = run(&Walking, &bash(scripts.at("main.bash"))).unwrap_or_else(|e| panic!("{e}"));
 
     (scripts, ran.whole().unwrap().0)
 }
@@ -49,12 +57,12 @@ fn walks(files: &[(&str, &str)]) -> (Scripts, Vec<Capture>) {
 #[test]
 fn bashs_own_words_for_a_frame_come_back_as_what_they_are() {
     let (_scripts, seen) = walks(&[
-        ("lib.bash", "BASHCAP -BCS:sourced\n"),
-        (ENTRY, "source \"$(dirname \"${BASH_SOURCE[0]}\")/lib.bash\"\nBASHCAP -BCS:body\n"),
+        ("lib.bash", "WALK\n"),
+        ("main.bash", "source \"$(dirname \"${BASH_SOURCE[0]}\")/lib.bash\"\nWALK\n"),
     ]);
 
     let sites = |at: usize| -> Vec<Site> {
-        seen[at].snapshot.stack.frames().map(|frame| frame.site.clone()).collect()
+        seen[at].frames().map(|frame| frame.site.clone()).collect()
     };
 
     assert_eq!(seen.len(), 2);
@@ -68,9 +76,9 @@ fn bashs_own_words_for_a_frame_come_back_as_what_they_are() {
 #[test]
 fn a_relative_source_comes_back_absolute() {
     let (_scripts, seen) = walks(&[
-        ("lib.bash", "where() { BASHCAP -BCS:relative; }\n"),
+        ("lib.bash", "where() { WALK; }\n"),
         (
-            ENTRY,
+            "main.bash",
             "cd \"$(dirname \"${BASH_SOURCE[0]}\")\"\n\
              mkdir -p sub\n\
              source ./sub/../lib.bash\n\
@@ -78,14 +86,14 @@ fn a_relative_source_comes_back_absolute() {
         ),
     ]);
 
-    let Source::File(path) = &seen[0].snapshot.stack.at().source else {
+    let Source::File(path) = &seen[0].at().source else {
         panic!("a sourced file is a file, not one of bash's own words")
     };
 
     assert!(path.is_absolute(), "{}", path.display());
     assert!(path.ends_with("sub/../lib.bash"), "bash's own text, uncollapsed: {}", path.display());
     assert_eq!(
-        seen[0].snapshot.stack.at().source.found(),
+        seen[0].at().source.found(),
         Some(path.as_path()),
         "and `..` and all, it is there"
     );
@@ -97,9 +105,9 @@ fn a_relative_source_comes_back_absolute() {
 #[test]
 fn a_subject_that_moved_leaves_a_source_that_is_not_there() {
     let (_scripts, seen) = walks(&[
-        ("lib.bash", "where() { BASHCAP -BCS:moved; }\n"),
+        ("lib.bash", "where() { WALK; }\n"),
         (
-            ENTRY,
+            "main.bash",
             "cd \"$(dirname \"${BASH_SOURCE[0]}\")\"\n\
              source ./lib.bash\n\
              cd /\n\
@@ -107,7 +115,7 @@ fn a_subject_that_moved_leaves_a_source_that_is_not_there() {
         ),
     ]);
 
-    let source = &seen[0].snapshot.stack.at().source;
+    let source = &seen[0].at().source;
 
     assert_eq!(source, &Source::File("/lib.bash".into()), "joined onto the $PWD it now has");
     assert!(source.found().is_none(), "and there is nothing there");

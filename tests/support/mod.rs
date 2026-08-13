@@ -1,40 +1,19 @@
-//! Scratch bash for the proofs and the examples.
+//! Scratch bash for the proofs, the examples and the command-line tests.
+//!
+//! [`Scripts`] and [`bash`] are defined in the source tree beside the crate's
+//! own test helpers, so a unit test and an integration test build a script the
+//! same way.
 
-use std::ffi::OsString;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use mb_resolver::bash::rig::{Answer, Failure};
 
-/// A directory of bash scripts, removed when this is dropped — so it must be
-/// held for as long as the run that reads it.
-pub struct Scripts(tempfile::TempDir);
+#[path = "../../src/tests/scripts.rs"]
+mod scripts;
 
-impl Scripts {
-    /// A fresh directory holding each `(name, body)`.
-    pub fn of(files: &[(&str, &str)]) -> Self {
-        let dir = tempfile::tempdir().expect("a scratch directory");
-        for (name, body) in files {
-            fs::write(dir.path().join(name), body).expect(name);
-        }
-        Self(dir)
-    }
-
-    pub fn dir(&self) -> &Path {
-        self.0.path()
-    }
-
-    /// Where `name` is, written or not yet.
-    pub fn at(&self, name: &str) -> PathBuf {
-        self.dir().join(name)
-    }
-}
-
-/// `bash <script>` — the command line, program included, since a run starts
-/// whatever its argv names.
-pub fn bash(script: PathBuf) -> Vec<OsString> {
-    vec!["bash".into(), script.into()]
-}
+#[allow(unused_imports)]
+pub use scripts::{bash, Scripts};
 
 /// Write bash of your own and answer with a command to source it.
 pub fn sourcing(path: &Path, body: &str) -> Result<Answer, Failure> {

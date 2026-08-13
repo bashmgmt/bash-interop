@@ -1,5 +1,7 @@
-//! What the columns encode, undone — over a walk a real shell produced,
-//! transcribed once and asserted against here.
+//! The two halves of a walk: the columns, and the words bash puts in them.
+
+mod words;
+
 
 use std::path::Path;
 

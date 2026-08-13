@@ -13,7 +13,6 @@
 //! | [`owning`] | the run's workspace, and the process group it takes with it |
 //! | [`failing`] | what a fault on either side does to the run and to the subject |
 //! | [`malformed`] | what the reader does with a stream the protocol did not write |
-//! | [`walking`] | bash's own words in a walk, and where a source path lands |
 //!
 //! This file holds what more than one of them needs.
 //!
@@ -26,7 +25,6 @@ mod owning;
 mod starting;
 mod transparency;
 mod transport;
-mod walking;
 
 #[path = "../support/mod.rs"]
 mod support;
