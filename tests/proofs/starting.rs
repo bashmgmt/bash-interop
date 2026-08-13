@@ -1,40 +1,39 @@
-//! What a rig tells the run about the process it is about to start.
+//! What the run starts, and what a rig puts in the shells it reaches.
 
-use mb_resolver::bash::rig::{run, ExitStatus, Failure, Line, Rig, Startup};
+use mb_resolver::bash::rig::{ExitStatus, Failure, Halt, Line, Master, Rig};
 
 use crate::support::{bash, Scripts};
 use crate::{behind, report, ENTRY};
 
-/// Hands the subject a word of its own and a variable of its own.
+/// Hands the subject a word of its own.
 struct Deploying;
 
 impl Rig for Deploying {
     type Session = Vec<Line>;
 
-    fn startup(&self) -> Startup {
-        Startup {
-            bash: "TELL() { BC_INSTR say TELL \"$@\"; }".to_string(),
-            env: vec![("DEPLOY_TARGET".into(), "staging".into())],
-            ..Default::default()
-        }
+    fn bash(&self) -> String {
+        "TELL() { BC_INSTR say TELL \"$@\"; }".to_string()
     }
 
     fn open(&self) -> Result<Vec<Line>, Failure> {
         Ok(Vec::new())
     }
 
-    fn hear(&self, heard: &mut Vec<Line>, said: Line) -> Result<(), Failure> {
+    fn hear(&self, heard: &mut Vec<Line>, said: Line) -> Result<(), Halt> {
         heard.push(said);
 
         Ok(())
     }
 }
 
-/// `Startup::env` reaches the subject, and so does a child it starts —
-/// the environment is inherited, and `BASH_ENV` puts the rig's own word in
-/// both shells.
+impl Master for Deploying {}
+
+/// A rig's word reaches the subject and a child it starts, because `BASH_ENV`
+/// reaches both. A variable is not the run's business: the command line
+/// carries its own program, so `env` puts one there, and it is inherited the
+/// same way.
 #[test]
-fn a_rig_may_add_to_the_environment_and_reach_every_shell() {
+fn the_rigs_word_reaches_every_shell_and_so_does_the_callers_environment() {
     let scripts = Scripts::of(&[
         (
             ENTRY,
@@ -51,7 +50,10 @@ fn a_rig_may_add_to_the_environment_and_reach_every_shell() {
         ),
     ]);
 
-    let (seen, status) = run(&Deploying, &bash(scripts.at(ENTRY))).unwrap().whole().unwrap();
+    let mut argv = vec!["env".to_string(), "DEPLOY_TARGET=staging".to_string()];
+    argv.extend(bash(scripts.at(ENTRY)).iter().map(|word| word.to_string_lossy().to_string()));
+
+    let (seen, status) = Deploying.run(&argv).unwrap().whole().unwrap();
 
     assert_eq!(status, ExitStatus::Code(0), "{}", report(&seen));
     assert_eq!(
@@ -67,7 +69,7 @@ fn a_rig_may_add_to_the_environment_and_reach_every_shell() {
 #[test]
 fn the_command_line_is_run_as_asked() {
     let scripts = Scripts::of(&[(ENTRY, "BC_INSTR say REC \"$0\" \"$#\"")]);
-    let (seen, status) = run(&crate::Keeping::default(), &bash(scripts.at(ENTRY))).unwrap().whole().unwrap();
+    let (seen, status) = crate::Keeping::default().run(&bash(scripts.at(ENTRY))).unwrap().whole().unwrap();
 
     assert_eq!(status, ExitStatus::Code(0));
     assert_eq!(

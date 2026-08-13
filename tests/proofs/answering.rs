@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use mb_resolver::bash::rig::{run, Answer, ExitStatus, Failure, Line, Rig, Run, Startup};
+use mb_resolver::bash::rig::{Answer, ExitStatus, Failure, Halt, Line, Master, Rig, Run};
 
 use crate::support::{bash, sourcing, Scripts};
 use crate::{beginning, behind, report, ENTRY};
@@ -29,15 +29,15 @@ impl Rig for Answering {
     type Session = Soak;
 
     /// `NOTE` is this rig's own word, called back by several of the answers.
-    fn startup(&self) -> Startup {
-        Startup { bash: SOAK_BASH.to_string(), ..Default::default() }
+    fn bash(&self) -> String {
+        SOAK_BASH.to_string()
     }
 
     fn open(&self) -> Result<Soak, Failure> {
         Ok(Soak::default())
     }
 
-    fn hear(&self, soak: &mut Soak, said: Line) -> Result<(), Failure> {
+    fn hear(&self, soak: &mut Soak, said: Line) -> Result<(), Halt> {
         soak.heard.push(said);
 
         Ok(())
@@ -66,6 +66,8 @@ impl Rig for Answering {
         })
     }
 }
+
+impl Master for Answering {}
 
 /// Every answer form in turn, one deliberately slow, mixed with saying and
 /// with a message too wide for one frame, from two shells asking
@@ -100,7 +102,7 @@ fn a_session_survives_every_way_of_answering() {
     ]);
 
     let answering = Answering { steps: scripts.dir().to_path_buf() };
-    let (soak, status) = run(&answering, &bash(scripts.at(ENTRY)))
+    let (soak, status) = answering.run(&bash(scripts.at(ENTRY)))
         .and_then(Run::whole)
         .unwrap_or_else(|error| panic!("{error}"));
 

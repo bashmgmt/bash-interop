@@ -4,9 +4,8 @@ Three layers. **Values** (`src/bash/value/`) read and write bash's own quoted
 forms — `@Q`, `@A`, `declare -p`. **The stack** (`src/bash/stack/`) is the
 frame walk every instrument shares, both halves: the bash that ships bash's
 five arrays, and the Rust that puts them back together. **The rig**
-(`src/bash/rig/`) runs a bash program with instrumentation injected, receives
-messages from every shell in the resulting process tree, and answers questions
-those shells ask.
+(`src/bash/rig/`) is a session with instrumentation in it: it receives messages
+from every shell that joined and answers the questions those shells ask.
 
 `stack` and `rig` are siblings; neither knows the other. A tool composes them.
 
@@ -14,7 +13,7 @@ those shells ask.
 KB/mb_resolver/bash/                              src/bash/
   values.md         quoted forms, BashVal, codecs   value/
   wire.md           the bash, the pipe, the frame   rig/wire/
-  rig.md            Rig, Startup, run               rig/mod.rs, rig/run.rs
+  rig.md            Rig, Master, Slave, Serving     rig/{mod,master,slave,serving}.rs
   tree.md           shells and the process forest   rig/tree.rs
   stack.md          the call stack, both halves     stack/
   measurements.md   numbers, limits, proofs
@@ -24,16 +23,24 @@ KB/mb_resolver/bash/                              src/bash/
   bashprof.md       a call tree that travels        bashprof/
 ```
 
-Every module under `src/bash/rig/` is private; `mod.rs` carries the trait,
-`Run`, `Startup`, `Workspace`, and one re-export list that is the API:
+Every module under `src/bash/rig/` is private; `mod.rs` carries `Rig`, `Halt`,
+`Workspace` and one re-export list that is the API:
 
 ```rust
-pub use run::run;
+pub use master::{Master, Run};
+pub use serving::{Closed, Served};
+pub use slave::{Held, Slave};
 pub use status::ExitStatus;
 pub use tree::{forest, shells, Shell, ShellNode};
 pub use wire::{field, Answer, Kind, Line, Micros, Pid, Sent};
 pub use crate::failure::{Doing, Failure};
 ```
+
+**A rig is the reaction; who started what is a second question.** `Master` runs
+a command line of its own and owns its process group; `Slave` hands its address
+to a bash script that started the server and closes when that script says so.
+Both are traits extending `Rig` with one provided method, so a rig declares
+which orchestrations it supports by implementing them.
 
 **The library ships no accumulator and no rig implementation.** What a run
 produces is the client's, expressed as its `Session` — see
@@ -47,7 +54,7 @@ it, and that rule lives there rather than at each tool.
 
 | moment | started by | effect |
 |---|---|---|
-| setup | `run`, once | two bash files are laid into the workspace `Startup::workspace` chose, and `BASH_ENV` reaches every shell with them |
+| setup | the role method, once | two bash files are laid into the workspace `Rig::workspace` chose, and either `BASH_ENV` carries them to a subject the run starts or the address goes to a script that joins |
 | say | the subject | `BC_INSTR say …` ships an arglist and returns |
 | ask | the subject | `BC_INSTR ask …` ships one, blocks, and runs what comes back |
 
@@ -93,11 +100,12 @@ An **answer** is an arglist too, and it is a command the shell runs:
 
 ## Building on it
 
-Declare a session type and implement `Rig::open`; add `bash` if the subject
-needs a word of your own, and override `hear`, `answer` or `end` if you care
-about them. Then call `run`. Provenance, ordering, the process forest,
+Provenance, ordering, the process forest,
 subshell capture, concurrent-writer integrity and the control channel come
 with the transport.
+
+Declare a session type and implement `Rig::open`; add `bash` if the subject
+needs a word of your own; then implement `Master`, `Slave`, or both.
 
 `tests/examples/` is worked rigs against the public API alone, meant to be read
 top to bottom. A corner case of one building block belongs beside it, in

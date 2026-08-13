@@ -5,7 +5,7 @@
 //! truncated or colliding one is the whole point. Everything else about the
 //! run is ordinary.
 
-use mb_resolver::bash::rig::{run, ExitStatus};
+use mb_resolver::bash::rig::{ExitStatus, Master};
 
 use crate::support::{bash, Scripts};
 use crate::{behind, report, Keeping, ENTRY};
@@ -25,7 +25,7 @@ fn an_unfinished_message_is_reported_beside_the_subjects_status() {
         "#,
     )]);
 
-    let ran = run(&Keeping::default(), &bash(scripts.at(ENTRY))).unwrap();
+    let ran = Keeping::default().run(&bash(scripts.at(ENTRY))).unwrap();
     let failed = ran.failed.as_ref().expect("the half-read message must be reported");
 
     assert!(failed.to_string().contains("never finished"), "{failed}");
@@ -52,7 +52,7 @@ fn a_message_that_will_not_read_ends_the_run() {
         "#,
     )]);
 
-    let failure = run(&Keeping::default(), &bash(scripts.at(ENTRY)))
+    let failure = Keeping::default().run(&bash(scripts.at(ENTRY)))
         .err()
         .expect("a message that will not read must end the run");
 

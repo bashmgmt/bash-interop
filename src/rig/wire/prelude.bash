@@ -102,7 +102,7 @@ __bc_send() {
         return 0
     fi
 
-    __bc_frame "$__bc_seq" "$__bc_msg" || __BC_BAIL
+    LC_ALL=C __bc_frame "$__bc_seq" "$__bc_msg" || __BC_BAIL
 }
 
 # A shell announces nothing: its first message carries seq 0, which is what
@@ -118,7 +118,8 @@ __bc_join() {
 # $1 the sequence number, $2 a message the narrow lane would not take. Every
 # chunk repeats `pid seq`, the key the reader rejoins them by.
 #
-# `LC_ALL` is taken for this frame only, and restored by `local` on return. It
+# `LC_ALL=C` rides on the call, which scopes it to this frame and gives the
+# subject's back — including one that was unset — without a name to restore. It
 # is what makes `${#…}` and `${…:from:room}` count the bytes PIPE_BUF counts;
 # the message itself was quoted by the caller, in the subject's own locale, so
 # what goes on the wire is unchanged. Taking it costs about 7 µs, which is why
@@ -130,7 +131,6 @@ __bc_join() {
 # The cursor moves by assignment: `(( x += n ))` is a command, and its status
 # is false when the result is 0.
 __bc_frame() {
-    local LC_ALL=C
     local __bc_head="$BASHPID $1"
     local __bc_msg="$2"
     local __bc_size=${#__bc_msg}

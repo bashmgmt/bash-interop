@@ -1,6 +1,6 @@
 # The call stack
 
-`src/bash/stack.bash` writes it, `src/bash/stack.rs` reads it. One instrument
+`src/bash/stack/stack.bash` writes it, the rest of `src/bash/stack/` reads it. One instrument
 and one reader, shared by every tool that reports where a shell is.
 
 ## What bash keeps
@@ -194,7 +194,7 @@ it, and where it is checked without running bash.
 | `BASHPROF_TIME_CPS` (`tests/examples/bashprof.rs`) | 2 | whatever the shell has |
 
 Both reach it through `bash::STACK`, prepended to their own bash in
-`Startup::bash`.
+`Rig::bash`.
 
 ## See also
 

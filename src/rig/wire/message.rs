@@ -202,8 +202,14 @@ impl Answer {
         Self::of("return", [code.to_string()])
     }
 
-    pub(crate) fn to_message(&self) -> String {
-        emit_array(&self.0)
+}
+
+/// One line, whatever it carries: the bash array literal a shell reads back
+/// with `declare -a`. It is how an answer travels the reply pipe, and how a
+/// session's address travels whatever channel its initiator gave it.
+impl fmt::Display for Answer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", emit_array(&self.0))
     }
 }
 
@@ -263,7 +269,7 @@ mod tests {
     #[test]
     fn an_answer_is_one_line_whatever_it_carries() {
         let carried = ["%s", "two\nlines", "a\ttab", "\u{ff}", "it's", ""];
-        let message = Answer::of("printf", carried).to_message();
+        let message = Answer::of("printf", carried).to_string();
 
         assert!(!message.contains('\n'), "a raw newline would truncate the read: {message}");
 

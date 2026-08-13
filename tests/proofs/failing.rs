@@ -4,7 +4,7 @@
 
 use std::time::Instant;
 
-use mb_resolver::bash::rig::{run, Answer, ExitStatus, Failure, Kind, Line, Rig};
+use mb_resolver::bash::rig::{Answer, ExitStatus, Failure, Halt, Kind, Line, Master, Rig};
 
 use crate::support::{bash, Scripts};
 use crate::{behind, gone, report, script, Keeping, ENTRY};
@@ -21,9 +21,9 @@ impl Rig for Breaking {
         Ok(Vec::new())
     }
 
-    fn hear(&self, heard: &mut Vec<Line>, said: Line) -> Result<(), Failure> {
+    fn hear(&self, heard: &mut Vec<Line>, said: Line) -> Result<(), Halt> {
         if self.on == Kind::Say {
-            return Err(Failure::new("keeping what was said", "the sink is on fire"));
+            return Err(Failure::new("keeping what was said", "the sink is on fire").into());
         }
         heard.push(said);
 
@@ -34,6 +34,8 @@ impl Rig for Breaking {
         Err(Failure::new("deciding an answer", "the operator is on fire"))
     }
 }
+
+impl Master for Breaking {}
 
 /// The subject reports its own pid before the message that breaks the rig, so
 /// a proof can ask whether it outlived the run.
@@ -55,7 +57,7 @@ fn blocked(scripts: &Scripts) -> i32 {
 fn a_rig_that_cannot_answer_ends_the_run_and_kills_the_subject() {
     let scripts = Scripts::of(&[(ENTRY, &format!("{REPORTING}BC_INSTR ask anything"))]);
 
-    let failure = run(&Breaking { on: Kind::Ask }, &bash(scripts.at(ENTRY)))
+    let failure = Breaking { on: Kind::Ask }.run(&bash(scripts.at(ENTRY)))
         .err()
         .expect("the run must end in the rig's failure");
 
@@ -79,7 +81,7 @@ fn a_failure_while_hearing_ends_the_run_and_kills_the_subject() {
     )]);
 
     let started = Instant::now();
-    let failure = run(&Breaking { on: Kind::Say }, &bash(scripts.at(ENTRY)))
+    let failure = Breaking { on: Kind::Say }.run(&bash(scripts.at(ENTRY)))
         .err()
         .expect("the run must end in the rig's failure");
 
@@ -109,7 +111,7 @@ fn a_reply_pipe_name_already_taken_is_the_subjects_to_handle() {
         "#,
     )]);
 
-    let (seen, status) = run(&Keeping::default(), &bash(scripts.at(ENTRY))).unwrap().whole().unwrap();
+    let (seen, status) = Keeping::default().run(&bash(scripts.at(ENTRY))).unwrap().whole().unwrap();
 
     assert_eq!(status, ExitStatus::Code(0), "the subject carried on and ended its own way");
     assert_eq!(behind(&seen, "REC"), [["still running"]], "{}", report(&seen));

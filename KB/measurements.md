@@ -89,11 +89,44 @@ of three, BEGIN payload in bytes by how many measured calls enclose it:
 | **per level** | **~113** | **~566** |
 
 Four frames per level rather than one, and the bytes are mostly the *sources*
-column: each frame repeats the instrument's own path. **Layers that are aliases
-cost none of this** — the same text in the same frame — which is why the
-instrument's are.
+column: each frame repeats the instrument's own path.
+
+**What costs this is a layer that is still on the stack while the measured call
+runs.** A layer that returns first does not: `__bp_begin` sends the BEGIN and
+returns before `"$@"`, so it stands in its own walk and in nobody else's. Four
+levels of `BASHPROF_TIME_CPS`, deepest first:
+
+```
+funcs: ('__bc_stack' '__bp_begin' 'BASHPROF_TIME_CPS' 'd3' 'BASHPROF_TIME_CPS'
+        'd2' 'BASHPROF_TIME_CPS' 'd1' 'BASHPROF_TIME_CPS' 'main')
+skip : 3
+```
+
+| enclosing measurements | 0 | 1 | 2 | 3 |
+|---|---:|---:|---:|---:|
+| BEGIN payload, bytes | 261 | 342 | 415 | 492 |
+
+~77 bytes and one frame per level, and the two extra calls per measurement cost
+**~1.0 µs each** (200 000 iterations of an empty function against an empty loop
+body, bash 5.3.9) against the ~7 µs the locale switch on the wide lane already
+costs.
 
 At one frame per level, a walk 100 deep is a 17 kB payload in five frames.
+
+## What a callee's frame gives back
+
+Both measured on bash 5.3.9, and both are why no instrument in the crate saves
+and restores a name by hand.
+
+**`local` restores what was there, including *unset*.** A callee taking
+`local IFS=":"` leaves an unset `IFS` unset and an empty one empty; the
+distinction a manual restore has to make by hand, bash makes itself.
+
+**A command-prefix assignment scopes to the call.** `LC_ALL=C __bc_frame …`
+gives the callee the variable for its own frame, restores the previous state —
+unset included — and reaches expansions inside it, including through a `local
+-n` nameref: `IFS=" " walk got` produces `('walk' 'outer')` from
+`"${FUNCNAME[*]@Q}"` while the caller's `IFS` is `:`.
 
 ## The split path
 
@@ -172,7 +205,7 @@ be is left to the compiler. One file per subject.
 
 | `starting.rs` | establishes |
 |---|---|
-| `a_rig_may_add_to_the_environment_and_reach_every_shell` | `Startup::env` reaches the subject and a child it starts, and `Startup::bash` puts the rig's word in both |
+| `the_rigs_word_reaches_every_shell_and_so_does_the_callers_environment` | `Rig::bash` puts the rig's word in the subject and a child it starts, and a variable the caller put in the command line with `env` is inherited the same way |
 | `the_command_line_is_run_as_asked` | the run starts the program the argv names, with nothing appended |
 
 | `owning.rs` | establishes |

@@ -1,45 +1,101 @@
 # Shipping a script whose call sites outlive the tool
 
-`assets/bashcap_polyfill.bash`, `assets/bashprof_polyfill.bash`
+`assets/bashcap.bash`, `assets/bashprof.bash`
 
-An instrumented call site is source, not a debugging insertion: `BASHPROF_TIME_CPS build make all` names a phase and is committed. Without the tool that word does not exist and the script exits 127, so a script that ships needs a pass-through definition of its own.
+An instrumented call site is source, not a debugging insertion:
+`BASHPROF_TIME_CPS build make all` names a phase and is committed. Without the
+tool that word does not exist and the script exits 127, so a script that ships
+carries the word with it.
 
-Installing that definition is **the client's decision**, and the client makes it:
+## One file, two deliveries
+
+Each tool's words live in one file, and that file is both what the tool injects
+and what a client vendors. What exists twice is only the **effect**: the words
+call a hook, and a hook is either the tool's or an empty definition the client
+installs.
+
+```
+assets/bashcap.bash       BASHCAP, WITH_BASHCAP, __bc_take_flags  → __bc_capture
+src/bashcap/effect.bash   __bc_capture
+
+assets/bashprof.bash      BASHPROF_TIME_CPS                       → __bp_begin, __bp_end
+src/bashprof/effect.bash  __bp_begin, __bp_end
+```
+
+The client sources the words unconditionally and guards the hook:
 
 ```bash
-source lib/bashprof_polyfill.bash
-declare -F BASHPROF_TIME_CPS >/dev/null || __define_bashprof_polyfill
+source lib/bashprof.bash
+declare -F __bp_begin >/dev/null || { __bp_begin() { :; }; __bp_end() { :; }; }
 ```
 
 ```bash
-source lib/bashcap_polyfill.bash
-declare -F BASHCAP >/dev/null || __define_bashcap_polyfill
+source lib/bashcap.bash
+declare -F __bc_capture >/dev/null || __bc_capture() { :; }
 ```
 
-## Why the assets define a definer
+`>/dev/null` is not optional: `declare -F NAME` prints the name and `declare -f
+NAME` prints the entire body.
 
-Sourcing either file installs nothing — it defines one function whose body holds the stubs. Sourcing is therefore free of effect on the shell's semantics and can sit with the client's other unconditional `source` lines, while the decision is taken separately, where the client wants it.
+## Why the guard names the hook
 
-A bash function definition is global wherever it executes, so the guard may sit inside a function of the client's own.
+The tool defines everything through `BASH_ENV`, which bash sources **before the
+script's first line**, in every shell. The client's `source` therefore always
+comes second — and it redefines the words with the same bytes, which changes
+nothing. The guard sits on the half that differs, so a client cannot displace
+the real effect whichever way round the two arrive.
 
-## Why the guard exists
+A bash function definition is global wherever it executes, so the guard may sit
+inside a function of the client's own.
 
-The tool defines the real word through `BASH_ENV`, which bash sources **before the script's first line**, in every shell. A stub installed unconditionally therefore overwrites the real definition, and the run reports nothing measured with no error anywhere. `declare -F` is the whole guard, and `>/dev/null` is not optional: `declare -F NAME` prints the name and `declare -f NAME` prints the entire body.
+## The rule that makes a file shippable both ways
 
-## What a stub owes the call site
+**A words file names nothing that only exists once the protocol has been
+sourced** — no `BC_INSTR`, no `__BC_BAIL`, no `__BC_THROW`, no `__bc_stack`.
+The list is `bash::INJECTED_NAMES`, and each tool's vendoring test asserts its
+words file against it.
 
-The same reading with the tool and without it, which is more than a pass-through:
+Two consequences follow from putting the work in a hook rather than inline:
+
+- **The walk is one frame deeper.** `__bc_stack`'s `$2` counts the leading
+  frames that belong to the instrument, and a hook is one of them. `BASHCAP`
+  passes 3, `WITH_BASHCAP` passes 2 — its own frame is the call site.
+- **`__BC_BAIL` returns from the hook**, since it is `return $?` and acts in
+  the frame it expands in. The word writes `|| return $?` at the call, which
+  reads the same with an empty hook.
+
+What a hook takes for itself, bash gives back when it returns — `local IFS=' '`
+for the `[*]@Q` joins restores the subject's own, including one that was unset.
+A hook that returns before the measured call also stands in nobody else's walk;
+both are in [measurements.md](measurements.md#what-a-callees-frame-gives-back).
+
+## What a word owes its call site
+
+The same reading with the tool and without it, which is more than a
+pass-through:
 
 | | |
 |---|---|
 | `WITH_BASHCAP` | consumes the same leading `-BCV:`/`-BCS:` flags before the continuation, or they are run as a command |
-| `BASHPROF_TIME_CPS` | returns 125 when called without a label — the status the real word returns, and without it a call with no arguments shifts nothing, runs nothing and reports success |
+| `BASHPROF_TIME_CPS` | returns 125 when called without a label — without it a call with no arguments shifts nothing, runs nothing and reports success |
 
-Both are covered where they can fail: `src/bashcap/tests.rs` runs a vendored fixture with no tool at all, and `tests/cli.rs` runs one script both ways — unprofiled, and under bashprof where the guard has to leave the real word standing.
+One file means one definition of each, so there is nothing to keep in step.
+`__bc_take_flags` is the single parser both bashcap words use, and the shift
+width is derived from it: every consumed word lands in one of two arrays, so
+their combined length is how far to shift.
+
+Both directions are covered where they can fail. `src/bashcap/tests/vendoring.rs`
+and `src/bashprof/tests/vendoring.rs` run a vendored script with no tool at
+all, and the same script under the tool where the guard has to leave the real
+hooks standing. Each test writes the file the tool injects, byte for byte.
 
 ## Where the files are
 
-Under `assets/`, not `src/`, because nothing in the crate injects or exports them; every `.bash` under `src/` is `include_str!`d into the instrument. The tests reach the assets by `include_str!` so they cannot rot, and `__fixtures/bashcap_demo/polyfill.bash` is a vendored copy that `make bashcap-demo` diffs against the asset.
+Under `assets/`, because they are shipped to a client. Every one is
+`include_str!`d into the instrument as well, which is what makes a client's
+copy and the injected one the same bytes.
+`__fixtures/bashcap_demo/bashcap.bash` is a vendored copy that `make
+bashcap-demo` diffs against the asset.
 
 ## See also
 

@@ -4,7 +4,7 @@
 //! `BASH_SOURCE`, and it keeps a source path exactly as it was written. None
 //! of that is visible in generated source, so it is read off a shell.
 
-use crate::bash::rig::{run, Failure, Line, Rig, Startup};
+use crate::bash::rig::{Failure, Halt, Line, Master, Rig};
 use crate::bash::stack::{self, Columns, Site, Source, Stack};
 use crate::tests::scripts::{bash, Scripts};
 
@@ -25,15 +25,15 @@ struct Walking;
 impl Rig for Walking {
     type Session = Vec<Stack>;
 
-    fn startup(&self) -> Startup {
-        Startup { bash: stack::with(&[BASH]), ..Default::default() }
+    fn bash(&self) -> String {
+        stack::with(&[BASH])
     }
 
     fn open(&self) -> Result<Self::Session, Failure> {
         Ok(Vec::new())
     }
 
-    fn hear(&self, seen: &mut Self::Session, said: Line) -> Result<(), Failure> {
+    fn hear(&self, seen: &mut Self::Session, said: Line) -> Result<(), Halt> {
         let Some(words) = said.behind("WALK") else { return Ok(()) };
 
         seen.push(Columns::of(words)?.frames()?);
@@ -42,11 +42,13 @@ impl Rig for Walking {
     }
 }
 
+impl Master for Walking {}
+
 /// Every walk the run heard — and the scripts, which stay alive: a source path
 /// is only as readable as the file it names.
 fn walks(files: &[(&str, &str)]) -> (Scripts, Vec<Stack>) {
     let scripts = Scripts::of(files);
-    let ran = run(&Walking, &bash(scripts.at("main.bash"))).unwrap_or_else(|e| panic!("{e}"));
+    let ran = Walking.run(&bash(scripts.at("main.bash"))).unwrap_or_else(|e| panic!("{e}"));
 
     (scripts, ran.whole().unwrap().0)
 }

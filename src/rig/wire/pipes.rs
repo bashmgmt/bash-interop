@@ -68,7 +68,7 @@ impl Wire {
         let answering = || format!("answering pid {pid}");
 
         let mut pipe = reply_pipe(&path)?;
-        pipe.write_all(answer.to_message().as_bytes()).doing(answering)?;
+        pipe.write_all(answer.to_string().as_bytes()).doing(answering)?;
         pipe.write_all(&[DELIMITER]).doing(answering)?;
 
         fs::remove_file(&path).doing(|| format!("removing the reply pipe {}", path.display()))
