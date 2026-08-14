@@ -273,15 +273,25 @@ half, and a server that wants a channel of its own calls `serve` directly.
 Unlike a tool's words, `joining.bash` is only ever vendored — it runs before
 there is anything to inject, and it is what brings the protocol into a shell.
 
+Both shipped tools expose this as a subcommand, so a script that wants what one
+of them already does starts that rather than writing a server:
+
+```bash
+BC_JOIN bashprof serve --into build.times
+BC_JOIN bashcap  serve --into capture.jsonl --trace-calls
+```
+
 `coproc` takes a literal NAME, so the session's fds live in `BC_SESSION` and
 there is one per shell — the count the protocol already keeps in `__BC__owner`.
 `BC_LEAVE` returns the server's status, so a client under `set -e` stops on a
 server that failed, and by the time it returns whatever the server writes is
 written.
 
-`__fixtures/joined/` holds two scripts that use it, and `tests/joined/` the
-programs they start. Those are programs rather than harnesses, because a script
-that starts its own server has to have something to start.
+`__fixtures/joined/` holds two scripts that use it. `build.bash` starts the
+shipped `bashprof serve` and is driven from `tests/cli.rs`; `merging.bash`
+starts `tests/joined/merging.rs`, which is a program rather than a harness
+because a script that starts its own server has to have something to start —
+and because that rig answers questions, which no shipped tool does.
 
 ## One exit
 

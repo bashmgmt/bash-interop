@@ -76,8 +76,9 @@ dependency on either side's idea of encoding.
 ### 3. Instrumentation reaches shells through `BASH_ENV`, not argv
 
 A command line reaches one process. `BASH_ENV` reaches every non-interactive
-bash in the tree the subject creates, which is what makes `bashcap run --into
-out make test` work: every recipe shell `make` starts joins by itself.
+bash in the tree the subject creates, which is what makes `bashcap
+run_bash_env --into out make test` work: every recipe shell `make` starts joins
+by itself.
 
 So the run lays two files into a workspace — the protocol's bash and the rig's
 — and points `BASH_ENV` at the first. Nothing is templated into either: the
@@ -122,6 +123,15 @@ address to a bash script that started the server and serves while that script
 holds the handle. Both are traits extending `Rig` with one provided method, so
 a rig declares which orchestrations it supports by implementing them, and its
 reaction is the same code either way.
+
+Both tools expose the pair as two symmetric verbs taking one shared options
+type — `run_bash_env` and `serve` — so the command line says the same thing the
+traits do:
+
+```
+bashprof run_bash_env --into build.times -- make test
+bashprof serve        --into build.times      # started by BC_JOIN, from a script
+```
 
 One sentence covers both ends: **a session lasts as long as anyone who could
 still speak.** `Until` is a descriptor — a pidfd, or the handle an initiator
