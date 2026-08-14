@@ -99,6 +99,23 @@ each writes `set -euo pipefail` at the top of it — the shape a shipped script
 has, and the option that reaches furthest into a tool. What that costs the
 instrument is in [scoping.md](scoping.md#when-the-walk-finds-nothing-set--u).
 
+## Which bash a client needs
+
+The two halves have different floors, and the vendored one is the only floor a
+client can be held to. From the bash changelog rather than measured here — this
+tree has only 5.3.9 on it.
+
+| | needs | for |
+|---|---|---|
+| injected (`prelude.bash`, `stack.bash`, the effects) | **5.0** | `$EPOCHREALTIME`, which every message is stamped with |
+| vendored (`bashcap.bash`, `bashprof.bash`) | **4.4** | `"$@"` with no positional parameters under `set -u`, and `${x@Q}` where an effect is present |
+| vendored (`joining.bash`) | 4.1 | `coproc`, `exec {fd}>&-` |
+
+So a client on bash 4.4 runs its own scripts with the words in place and the
+empty hooks behind them; putting a tool behind those hooks needs bash 5. Nothing
+checks either at run time — a shell that is too old says so at the first line
+that needs the feature, which is what a version guard would have said anyway.
+
 ## Where the files are
 
 Under `assets/`, because they are shipped to a client. Every one is
