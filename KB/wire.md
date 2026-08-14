@@ -173,29 +173,39 @@ run and depends on no layer above it.
 
 ```bash
 __bc_join() {
+    local IFS=' '
     __BC__parent=${__BC__owner:-$PPID}
 
     exec {__BC__up}>"$__BC__UP"
     __BC__owner=$BASHPID
     __BC__seq=0
 
-    __bc_send JOIN versinfo … bash … zero … flags … command … subshell …
+    __bc_send JOIN parent … shlvl … subshell … versinfo … bash … zero … \
+                   flags … shellopts … bashopts … command …
 }
 ```
 
 **A shell opens with an account of itself**, which carries `seq 0` and is what
 says a shell has joined. Everything in it is passed as bash reports it — which
-bash, how it was given its code, what it had switched on — and what any of that
-means is decided on the other side. Adding a fact is a word here and a field
-there; nothing in between reads them.
+bash, how it was given its code, where it sits, what it had switched on — and
+what any of that means is decided on the other side. Adding a fact is a word
+here and a field there; nothing in between reads them.
 
-That is once per shell, not once per message: the version cannot change while a
-shell lives, and putting it on every message would cost ~6 µs each where the
-narrow lane exists to save 7. What does change while a shell runs — `$PWD` — is
-in the walk instead, which is where it is read.
+That is once per shell, not once per message. None of it can change while a
+shell lives: a subshell has a `$BASHPID` of its own and joins as a shell of its
+own, and `set` refuses `-i`, `-c` and `-s`. Putting any of it on every message
+would cost ~6 µs each where the narrow lane exists to save 7. What does change
+while a shell runs — `$PWD` — is in the walk instead, which is where it is read.
 
-Every later message the shell writes carries `parent` and `shlvl`. One line per
-message, always.
+Every later message carries the kind and the clock, and nothing else of the
+protocol's:
+
+```
+SAY at=1755209023.481907  <the client's arglist>
+```
+
+`IFS` is taken for the joining frame alone: the version is joined with `[*]`,
+which uses the subject's — see [scoping.md](scoping.md).
 
 Every shell opens the pipe itself, by name, from a path baked into the
 prelude. **Nothing is inherited**, so no descriptor has to survive a fork and
@@ -236,8 +246,20 @@ there is a message to parse. `+` means more chunks follow, `.` means this is
 the last, and that is the header's entire semantic content.
 
 Whether the sender is waiting is in the *message*, as its leading `SAY`, `ASK`
-or `JOIN`, which `Kind::read` shifts off — so the frame header stays the smallest
-thing reassembly can work from.
+or `JOIN`, which `Arrived::read` shifts off — so the frame header stays the
+smallest thing reassembly can work from. What comes out is one of two things
+and they do not mix:
+
+```rust
+pub(crate) enum Arrived {
+    Joined { pid: Pid, sent: Sent, account: Vec<String> },
+    Spoke  { pid: Pid, line: Line },
+}
+```
+
+An account is not a `Line`: it is what makes a shell, and a `Line` presupposes
+one. `pid` is routing and stops at the serving — what a reaction sees of the
+sending shell is the shell it was built with.
 
 An answer carries **no header**: the shell that asked is its only reader, so
 `pipes` writes the message and a delimiter and nothing else.
@@ -270,13 +292,21 @@ joins chunks as bytes and decodes the message once, at its last chunk.
 
 ```rust
 #[derive(Default)]
-pub struct Reassembly { bytes: Vec<u8>, partial: HashMap<(Pid, u32), Vec<u8>> }
+pub struct Reassembly {
+    bytes: Vec<u8>,
+    partial: HashMap<(Pid, u32), Vec<u8>>,
+    read: u64,
+}
 
 impl Reassembly {
-    pub fn feed(&mut self, bytes: &[u8], heard_at: Micros) -> Result<Vec<Line>, Failure>;
+    pub fn feed(&mut self, bytes: &[u8], heard_at: Micros) -> Result<Vec<Arrived>, Failure>;
     pub fn finish(self) -> Result<(), Failure>;
 }
 ```
+
+`read` counts the messages the run has completed, and that count is what a
+message carries as `Sent::nth`. The run folds per shell, so each fold keeps its
+own order and nothing else; this is what puts them back together.
 
 The buffer is **bytes**, not text: a read boundary falls anywhere, including
 inside a multi-byte character, so a frame is decoded only once the delimiter
@@ -299,23 +329,32 @@ One bash array literal — `declare -a x="$msg"` on the bash side,
 `parse_array` on the Rust side, the same shape both ways.
 
 ```rust
-/// What one shell said, once, with the provenance the wire gives it.
+/// What one shell's client said, once.
 pub struct Line {
-    pub kind: Kind,        // Say, Ask or Join
+    pub kind: Kind,        // Say or Ask
+    pub sent: Sent,
+    pub words: Vec<String>,
+}
+
+/// When one message was written and when it arrived.
+pub struct Sent {
+    pub nth: u64,          // counted over the whole run, in arrival order
+    pub seq: u32,          // counted per shell, from its account at 0
     pub sent_at: Micros,   // the sending shell's $EPOCHREALTIME
     pub heard_at: Micros,  // the run's clock when the last frame arrived
-    pub pid: Pid,
-    pub parent: Pid,       // the shell that emitted before this one forked
-    pub shlvl: u32,
-    pub seq: u32,          // counted per shell, from its first message
-    pub words: Vec<String>,
 }
 
 impl Line {
     /// The words after `lead`, if this message begins with it.
     pub fn behind(&self, lead: &str) -> Option<&[String]>;
 }
+```
 
+**Nothing about the shell is here.** Its pid, its parent and its `$SHLVL` do
+not change while it lives, so they are what it said once on joining and are
+reached through the shell a reaction was handed — see [tree.md](tree.md).
+
+```rust
 /// Value of the first `key value` pair with this key.
 pub fn field<'a>(words: &'a [String], key: &str) -> Option<&'a str>;
 ```
@@ -331,8 +370,8 @@ carries structure without sentinel words.
 
 Both clocks are kept because they answer different questions: `sent_at` orders
 messages across the process tree as the shells saw it, `heard_at` says when
-the run learned of one. Nothing sorts by either — the order a session sees is
-the order the pipe delivered.
+the run learned of one. Neither orders a run: everything one read carried
+shares a `heard_at`, so `nth` is what arrival order is spelled as.
 
 ### Typed decoding
 
@@ -366,9 +405,6 @@ __bc_ask() {
     local -a __bc_answer="$__bc_line"
     "${__bc_answer[@]}"
 }
-```
-
-```bash
 ```
 
 `local -a` is bash's own parser unpacking the array literal; the shell then

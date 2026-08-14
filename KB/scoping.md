@@ -77,6 +77,28 @@ address, so the top level of `prelude.bash` and of the rig's own bash runs under
 it too. Every `__BC__*` name is assigned there before anything reads it, which
 is what makes the second case hold.
 
+## `IFS` is the subject's, and `[*]` reads it
+
+`"${arr[*]}"` joins with the first character of `$IFS`, and `$IFS` is the
+subject's. A shipped file that joins an array has to take one of its own for
+exactly that frame:
+
+```bash
+__bc_capture() { local IFS=' '; … }     # every join below is [*]@Q
+__bc_join()    { local IFS=' '; … }     # the version is "(${BASH_VERSINFO[*]@Q})"
+```
+
+`local IFS=' '` is released on return, **including where the subject had `IFS`
+unset** — the binding is dropped, not restored to a value, so the subject's own
+state comes back whichever it was. A subject running under `IFS=,` is what
+finds this: the array arrives comma-joined and reads back as one element.
+
+`[@]` does not join and needs nothing. Neither does `printf -v x '%s ' "${@@Q}"`,
+which writes its own separator.
+
+Proved by `proofs/transparency.rs::a_clients_own_trap_and_ifs_are_untouched`,
+which sets `IFS=,` and then reads the version back off the shell.
+
 ## The slot pattern
 
 A helper that computes a value and then calls a continuation cannot hold that

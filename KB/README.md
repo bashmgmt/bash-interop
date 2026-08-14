@@ -19,8 +19,8 @@ walk can say on its own which word that is. A tool composes them.
 KB/mb_resolver/bash/                              src/bash/
   values.md         quoted forms, BashVal, codecs   value/
   wire.md           the bash, the pipe, the frame   rig/wire/
-  rig.md            Rig, Master, Slave, Serving     rig/{mod,master,slave,serving}.rs
-  tree.md           the shells, and the tree        rig/tree.rs, shell.rs
+  rig.md            Rig, Reacting, Master, Slave    rig/{mod,master,slave,serving}.rs
+  tree.md           what a shell is, and who forked it  shell.rs, rig/tree.rs
   stack.md          the call stack, both halves     stack/
   measurements.md   numbers, limits, proofs
   scoping.md        where a name binds              every *.bash we ship
@@ -30,15 +30,15 @@ KB/mb_resolver/bash/                              src/bash/
 ```
 
 Every module under `src/bash/rig/` is private; `mod.rs` carries `Rig`,
-`Workspace` and one re-export list that is the API:
+`Reacting`, `Workspace`, `Laid`, `Attended`, `Said`, `heard` and one re-export
+list that is the rest of the API:
 
 ```rust
-pub use master::{Master, Run};
+pub use master::{ExitStatus, Master, Run, Whole};
 pub use slave::{Served, Slave};
-pub use status::ExitStatus;
-pub use tree::{forest, shells, At, Joined, Shell, ShellNode, Shells};
+pub use tree::{forest, ShellNode};
 pub use wire::{field, Answer, Kind, Line, Micros, Pid, Sent};
-pub use crate::bash::shell::{Bash, Flags, Started, State, Version};
+pub use crate::bash::shell::Shell;
 pub use crate::failure::{Doing, Failure};
 ```
 
@@ -49,9 +49,13 @@ handle. Both are traits extending `Rig` with one provided method, so a rig
 declares which orchestrations it supports by implementing them. A session lasts
 as long as anyone who could still speak, and nothing inside a rig ends one.
 
-**The library ships no accumulator and no rig implementation.** What a run
-produces is the client's, expressed as its `Session` — see
-[rig.md](rig.md#what-a-session-is-for).
+**A rig is a description; the reaction is per shell.** `Rig::joined` builds one
+the moment a shell announces itself, so which bash it is, how it was started
+and what it had switched on are members from construction rather than something
+looked up per message. The library ships two reactions — `Vec<Line>` keeps
+every message, `()` keeps nothing — and no rig implementation. What a run
+produces beyond that is the client's; see
+[rig.md](rig.md#what-a-reaction-is-for).
 
 Every instrument that reports a walk is composed by `stack::with(&[…])`, which
 puts `stack.bash` first: `__bc_stack` has to be defined before anything calls
@@ -72,7 +76,7 @@ The contract towards the subject's shell: no trap installed, no builtin
 shadowed, no variable exported, no name set outside `__BC_*`, no `set -o`
 change, and no `eval`. A client's own traps, `IFS` and options are therefore
 its own. The one option the protocol does turn on is `expand_aliases`, which
-the guards require — see [wire.md](wire.md#error-flow-is-ours-not-set--es).
+the guards require — see [wire.md](wire.md#error-flow).
 
 The one name outside `__BC_*` the protocol touches is `LC_ALL`, taken `local`
 for the length of one wide frame so that framing counts the bytes `PIPE_BUF`
@@ -97,9 +101,11 @@ let words = line.behind("TIMEIT")?;   // None: some other tool's message
 ```
 
 The protocol reserves no word in the payload. Its own — the `SAY`/`ASK` kind
-and the `at=`/`parent=`/`shlvl=` context — sit in front of the client's
-arglist and are shifted off before a rig sees one, the way bash `shift`s past
-its own arguments. `Line::words` is the client's alone.
+and the `at=` clock — sit in front of the client's arglist and are shifted off
+before a rig sees one, the way bash `shift`s past its own arguments.
+`Line::words` is the client's alone. What a shell *is* is not on a message at
+all: it is said once, on joining, and reached through the shell a reaction was
+built with.
 
 An **answer** is an arglist too, and it is a command the shell runs:
 `["return", "1"]`, `["source", path]`, `["declare", "-g", "x=1"]`,
@@ -111,8 +117,10 @@ Provenance, ordering, the process forest,
 subshell capture, concurrent-writer integrity and the control channel come
 with the transport.
 
-Declare a session type and implement `Rig::open`; add `bash` if the subject
-needs a word of your own; then implement `Master`, `Slave`, or both.
+Implement `Rig::joined` — and a `Reacting` for it, unless `Vec<Line>` or `()`
+is what you want; add `bash` if the subject needs a word of your own; then
+implement `Master`, `Slave`, or both. What several shells share is yours, held
+by the rig and handed to each reaction it builds.
 
 `tests/examples/` is worked rigs against the public API alone, meant to be read
 top to bottom, and `tests/joined/` is the same from bash's side: a fixture

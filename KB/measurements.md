@@ -60,8 +60,12 @@ version also cannot change while a shell lives, so a per-message copy would be
 pure repetition. What *does* change while a shell runs — `$PWD` — rides with
 the walk instead, which is where it is read.
 
-`$SHLVL` and `parent` still ride on every message, as two more `printf`
-arguments.
+**Nothing about the shell rides on a message.** `parent`, `$SHLVL` and
+`$BASH_SUBSHELL` moved into the account for the same reason as the version:
+none of them can change while a shell lives, a subshell having a `$BASHPID` of
+its own and so joining as a shell of its own. What is left in front of a
+client's arglist is the kind and one `at=` clock — about 25 bytes and two
+`printf` arguments less per message than carrying them.
 
 ### The one-frame lane
 
