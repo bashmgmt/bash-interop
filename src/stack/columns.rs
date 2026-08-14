@@ -14,13 +14,21 @@
 //! ```
 //!
 //! - **`skip`** — the leading frames belong to the instrument, not the
-//!   subject. It is at least 1, the emitter's own, and never the whole walk.
+//!   subject. It is at least 1, the emitter's own.
 //! - **the line shift** — `BASH_LINENO[i]` is where frame `i` *was called
 //!   from*, so where frame `i` is *executing* is `BASH_LINENO[i - 1]`. Since
 //!   `skip >= 1`, that index is in range for every reported frame.
 //! - **the argument stack** — `BASH_ARGC[i]` is the width of group `i`, whose
 //!   offset is the sum of the widths before it, and whose contents are
 //!   reversed within the group.
+//!
+//! The shift leaves `BASH_LINENO[n - 1]` over, and that cell is the whole of
+//! the last thing to undo. It is where the walk itself was entered. Bash
+//! pushes a frame for the top level of a script file and for nothing else, so
+//! for a script it is `0` — `main` was called from nowhere — and for a shell
+//! given a `-c` command line or fed on standard input it is a real line, the
+//! one frame `FUNCNAME` never names. A subject function called `main` does not
+//! change it either way.
 
 use std::path::Path;
 
@@ -46,6 +54,10 @@ pub struct Columns<'a> {
     /// to as far as anything can know.
     pub pwd: &'a str,
 
+    /// The sending shell's `$0`, which is the word bash writes in
+    /// `BASH_SOURCE` for code it was given rather than read from a file.
+    pub zero: &'a str,
+
     pub funcs: &'a str,
     pub sources: &'a str,
     pub lines: &'a str,
@@ -65,6 +77,7 @@ impl<'a> Columns<'a> {
         Ok(Self {
             skip: skip.parse().map_err(|_| broken(format!("skip {skip:?} is not a count")))?,
             pwd: at("pwd")?,
+            zero: at("zero")?,
             funcs: at("funcs")?,
             sources: at("sources")?,
             lines: at("lines")?,
@@ -96,11 +109,18 @@ impl<'a> Columns<'a> {
             )));
         }
 
-        // At least the emitter's own frame, and never the whole walk: what is
-        // left is where the subject is.
-        if self.skip < 1 || self.skip >= funcs.len() {
+        // At least the emitter's own frame, and never past the end. Equal to
+        // the end is every reported frame being the instrument's, which happens
+        // where bash pushed none of its own — the entry line is what is left.
+        if self.skip < 1 || self.skip > funcs.len() {
             return Err(broken(format!("skip {} of {} frames", self.skip, funcs.len())));
         }
+
+        let numbered = |what: &str, text: &str| {
+            text.parse::<u32>().map_err(|_| broken(format!("{what} {text:?}")))
+        };
+        let entered_at = numbered("entry line", &lines[funcs.len() - 1])?;
+        let shell = (entered_at != 0).then_some(self.zero);
 
         let arguments = match &self.args {
             Some(args) => arguments(args, funcs.len())?,
@@ -108,20 +128,29 @@ impl<'a> Columns<'a> {
         };
 
         let pwd = Path::new(self.pwd);
-        let frames: Vec<Frame> = (self.skip..funcs.len())
+        let mut frames: Vec<Frame> = (self.skip..funcs.len())
             .map(|at| {
                 Ok(Frame {
                     site: Site::of(&funcs[at]),
-                    source: Source::of(&sources[at], pwd),
+                    source: Source::of(&sources[at], pwd, shell),
                     // Where this frame is executing: the call site of the one
                     // below it.
-                    lineno: lines[at - 1]
-                        .parse()
-                        .map_err(|_| broken(format!("line number {:?}", lines[at - 1])))?,
+                    lineno: numbered("line number", &lines[at - 1])?,
                     args: arguments.as_ref().map(|groups| groups[at].clone()),
                 })
             })
             .collect::<Result<_, Failure>>()?;
+
+        // The frame bash did not push, outermost and last. `BASH_ARGC` has no
+        // group for it, so its arguments are absent in the field's own sense.
+        if shell.is_some() {
+            frames.push(Frame {
+                site: Site::Shell,
+                source: Source::Shell,
+                lineno: entered_at,
+                args: None,
+            });
+        }
 
         Stack::of(frames).ok_or_else(|| broken("a walk with no frames"))
     }

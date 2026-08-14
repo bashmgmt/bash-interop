@@ -21,6 +21,12 @@ pub enum Site {
 
     /// `source`: the top level of a file the subject sourced.
     Sourced,
+
+    /// The top level of a shell bash was given no script file for — `bash -c`,
+    /// or a shell fed on standard input. `FUNCNAME` has no entry for it, so it
+    /// is not a word of bash's; where it sits is read off the line the walk was
+    /// entered from.
+    Shell,
 }
 
 impl Site {
@@ -39,6 +45,7 @@ impl fmt::Display for Site {
             Self::Function(name) => f.write_str(name),
             Self::Script => f.write_str("main"),
             Self::Sourced => f.write_str("source"),
+            Self::Shell => f.write_str("shell"),
         }
     }
 }
@@ -61,13 +68,22 @@ pub enum Source {
 
     /// `main`: the function was defined at an interactive prompt.
     Prompt,
+
+    /// The code bash was given rather than read: a `-c` command line, or
+    /// standard input. Bash writes `$0` here, which is a word and not a path.
+    Shell,
 }
 
 impl Source {
-    pub(super) fn of(source: &str, pwd: &Path) -> Self {
+    /// `shell` is the shell's own `$0`, and only where bash was given no script
+    /// file. There it stands in `BASH_SOURCE` for code that came from the
+    /// command line or from standard input; where bash was given a file, `$0`
+    /// is that file and reads as one.
+    pub(super) fn of(source: &str, pwd: &Path, shell: Option<&str>) -> Self {
         match source {
             "environment" => Self::Environment,
             "main" => Self::Prompt,
+            word if shell == Some(word) => Self::Shell,
             // An absolute path replaces the base; a relative one joins it.
             path => Self::File(pwd.join(path)),
         }
@@ -99,6 +115,7 @@ impl fmt::Display for Source {
             }
             Self::Environment => f.write_str("environment"),
             Self::Prompt => f.write_str("main"),
+            Self::Shell => f.write_str("-"),
         }
     }
 }

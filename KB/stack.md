@@ -28,6 +28,8 @@ __bc_stack() {
 
     __bc_stack_out+=(
         skip    "$2"
+        pwd     "$PWD"
+        zero    "$0"
         funcs   "(${FUNCNAME[*]@Q})"
         sources "(${BASH_SOURCE[*]@Q})"
         lines   "(${BASH_LINENO[*]@Q})"
@@ -37,7 +39,13 @@ __bc_stack() {
 }
 ```
 
-Six expansions. Nothing sliced, summed, reversed or looped over.
+Eight expansions. Nothing sliced, summed, reversed or looped over. Everything
+that decides what a walk means happens on the Rust side, where it can be
+checked without running a shell.
+
+`$PWD` and `$0` are there because two of the five arrays cannot be read without
+them: a relative `BASH_SOURCE` is relative to something, and one of the words
+bash writes into `BASH_SOURCE` is `$0` itself.
 
 `$1` names the caller's own array, so nesting works and no global is involved —
 see [scoping.md](scoping.md). The nameref is `__bc_stack_out`, a name no caller
@@ -61,11 +69,12 @@ pub struct Frame {
     pub args: Option<Vec<String>>,
 }
 
-/// What a frame is. `main` and `source` are bash's own words, not names.
-pub enum Site { Function(String), Script, Sourced }
+/// What a frame is. `main` and `source` are bash's own words, not names;
+/// `Shell` is a frame bash records no word for at all.
+pub enum Site { Function(String), Script, Sourced, Shell }
 
-/// Where its code came from. `environment` and `main` are not paths.
-pub enum Source { File(PathBuf), Environment, Prompt }
+/// Where its code came from. Only `File` is a path.
+pub enum Source { File(PathBuf), Environment, Prompt, Shell }
 
 impl Source {
     pub fn found(&self) -> Option<&Path>;     // a file, and it is there
@@ -83,7 +92,8 @@ impl Stack {
 }
 
 pub struct Args<'a>    { pub argc: &'a str, pub argv: &'a str }
-pub struct Columns<'a> { pub skip: usize, pub funcs: &'a str, pub sources: &'a str,
+pub struct Columns<'a> { pub skip: usize, pub pwd: &'a str, pub zero: &'a str,
+                         pub funcs: &'a str, pub sources: &'a str,
                          pub lines: &'a str, pub args: Option<Args<'a>> }
 
 impl<'a> Columns<'a> {
@@ -99,8 +109,43 @@ read. Nothing downstream carries the question.
 
 Three indices are undone, and all three are arithmetic:
 
-**`skip`** drops the instrument's own frames. It is at least 1 and never the
-whole walk — what is left is where the subject is.
+**`skip`** drops the instrument's own frames. It is at least 1 and never past
+the end of the walk.
+
+## The line each frame is executing
+
+`BASH_LINENO[i]` is where frame `i` was **called from**, so where frame `i` is
+**executing** is `BASH_LINENO[i - 1]`. `LINENO` holds the missing cell at the
+innermost end, and the two together are the whole vector:
+
+```
+frame:            report  inner  outer  main
+executing at:        3      9     12     14      = [LINENO] ++ BASH_LINENO[..n-1]
+BASH_LINENO   = (   9  ,  12  ,  14  ,  0  )
+LINENO        =     3
+```
+
+`LINENO` is not shipped: it would be the emitter's own line, and `skip >= 1`
+drops that frame by construction.
+
+**The last `BASH_LINENO` cell is left over, and it is where the walk itself was
+entered.** Bash pushes a frame for the top level of a script file and for
+nothing else, so that cell tells the two apart — measured on 5.3.9:
+
+| how bash was started | last cell |
+|---|---|
+| a script file | `0` |
+| a script file defining a function called `main` | `0` |
+| a file sourced from a script file | `0` |
+| `bash -c '…'` | the line the walk was entered from |
+| a shell fed on standard input | the same |
+| a file sourced from either of those | the same |
+
+Where it is not `0` there is exactly one frame above the outermost that
+`FUNCNAME` never names, and the cell is its line. That is `Site::Shell`, built
+from what bash did report rather than refused for what it did not — a `make`
+recipe is the everyday form of it, since `make` runs each one through
+`$(SHELL) -c`.
 
 ## Bash's own words
 
@@ -116,12 +161,15 @@ no frame at all.
 |---|---|
 | `environment` | the function came in through the environment (`export -f`) |
 | `main` | the function was defined at an interactive prompt |
-| `$0` | the function was defined inline in `bash -c` or on stdin |
+| `$0` | the code came from a `-c` command line or from standard input |
 
-The last is not a word but whatever `$0` is — `/bin/bash`, or any name a
-caller passed — so it is read as the path it looks like. A script that defines
-a function called `main` or `source` is likewise indistinguishable from bash's
-own use of those words: bash reports the same string either way.
+The last is not a word but whatever `$0` is — `bash`, or any name a caller
+passed — which is why `zero` is shipped: without it the word cannot be told
+from a file of the same name. It is read as `Source::Shell` only in a shell
+bash was given no script file for; where it was, `$0` **is** that script and
+reads as the path it is. A script that defines a function called `main` or
+`source` is indistinguishable from bash's own use of those words: bash reports
+the same string either way.
 
 ## Where a source path lands
 

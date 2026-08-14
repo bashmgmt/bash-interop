@@ -43,13 +43,20 @@ impl Rig for Walking {
 
 impl Master for Walking {}
 
-/// Every walk the run heard — and the scripts, which stay alive: a source path
+/// Every walk a command line produced.
+fn walks_in<A: AsRef<std::ffi::OsStr>>(argv: &[A]) -> Vec<Stack> {
+    let ran = Walking.run(argv).unwrap_or_else(|e| panic!("{e}"));
+
+    ran.whole().unwrap().0
+}
+
+/// The same over a script — and the scripts, which stay alive: a source path
 /// is only as readable as the file it names.
 fn walks(files: &[(&str, &str)]) -> (Scripts, Vec<Stack>) {
     let scripts = Scripts::of(files);
-    let ran = Walking.run(&bash(scripts.at("main.bash"))).unwrap_or_else(|e| panic!("{e}"));
+    let seen = walks_in(&bash(scripts.at("main.bash")));
 
-    (scripts, ran.whole().unwrap().0)
+    (scripts, seen)
 }
 
 /// `main` is the top level of the script bash was given and `source` the top
@@ -69,6 +76,42 @@ fn bashs_own_words_for_a_frame_come_back_as_what_they_are() {
     assert_eq!(seen.len(), 2);
     assert_eq!(sites(0), [Site::Sourced, Site::Script], "the sourced file, then the script");
     assert_eq!(sites(1), [Site::Script], "the script's own body alone");
+}
+
+/// Bash pushes a frame for the top level of a script file and for nothing
+/// else. Where it pushed none, the walk still ends where it was entered: the
+/// line is the cell the shift leaves over, and `$0` — which bash writes into
+/// `BASH_SOURCE` for code it was given rather than read — is not a path.
+#[test]
+fn a_shell_given_no_script_file_ends_at_the_frame_bash_never_pushed() {
+    let inline = "outer() { WALK; }; outer";
+    let on_stdin = format!("bash -s <<< {inline:?}");
+
+    for (form, code) in [("a command line", inline), ("standard input", on_stdin.as_str())] {
+        let seen = walks_in(&["bash", "-c", code]);
+        assert_eq!(seen.len(), 1, "{form}");
+
+        let sites: Vec<Site> = seen[0].frames().map(|frame| frame.site.clone()).collect();
+        assert_eq!(sites, [Site::Function("outer".into()), Site::Shell], "{form}");
+
+        let entered = &seen[0].outer()[0];
+        assert_eq!(entered.source, Source::Shell, "{form}");
+        assert!(entered.lineno > 0, "the line the walk was entered from: {form}");
+        assert!(entered.args.is_none(), "bash keeps no argument group for it: {form}");
+    }
+}
+
+/// The same shape with nothing of the subject's left: every frame bash reported
+/// belongs to the instrument, and the walk is the shell it was entered from.
+/// This is the form a `make` recipe takes, and the one that used to be refused.
+#[test]
+fn a_word_said_at_that_top_level_walks_to_the_shell_alone() {
+    let seen = walks_in(&["bash", "-c", "WALK"]);
+
+    assert_eq!(seen.len(), 1);
+    assert_eq!(seen[0].frames().count(), 1);
+    assert_eq!(seen[0].at().site, Site::Shell);
+    assert_eq!(seen[0].at().source, Source::Shell);
 }
 
 /// A source path comes back absolute however the subject wrote it, by joining
