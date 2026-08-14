@@ -25,6 +25,58 @@ global when there is none.** This is the whole mechanism:
 | a caller declared `X` | that caller's frame |
 | no frame declared `X` | the global scope, outliving every frame |
 
+## When the walk finds nothing: `set -u`
+
+Under `set -u` an expansion whose name binds nowhere is an **expansion error**,
+not a command failure. It happens while the command is being built, so there is
+no command to fail and no status to test:
+
+```bash
+echo "$nope" || echo caught        # 'caught' is never printed
+```
+
+The shell exits, whatever frame it was in and whether it was running a script
+or sourcing one. The `|| __BC_BAIL` / `|| __BC_THROW` discipline is one layer
+above this and structurally cannot see it — see [wire.md](wire.md). The only
+place it is answerable is the expansion itself.
+
+**A name the instrument did not set carries its default at every expansion of
+it; a name it set one line earlier carries none.** Where the tool set the name,
+an unbound one is a defect and killing the shell is the right outcome. The
+first list is short and closed:
+
+| | unbound means |
+|---|---|
+| `${__BP_made:-0}` | nothing has been measured in this shell yet |
+| `${__BP_inside-}` | the outermost call, with nothing around it |
+| `${__BASHPROF_STACK_SHIFT:-0}` | the caller wrapped nothing |
+| `${1-}`, `${__BC__at:-?}`, `${BASH_SOURCE[1]:-?}` | a client called a word wrong |
+
+`${x-}` rather than `${x:-}` wherever empty and unset are different facts.
+
+Which forms are safe is not guessable, and these were measured on 5.3.9:
+
+| | |
+|---|---|
+| `"$@"`, `"$*"` with no positional parameters | fine — exempt since 4.4 |
+| `"${arr[@]}"`, `"${arr[*]@Q}"` on an unset array | fine |
+| `"${arr[0]}"`, `"${#arr[@]}"` on an unset array | **fatal** |
+| `"$1"` with no argument | **fatal** |
+| `${!PREFIX@}` with no matches, `"${BASH_REMATCH[@]}"` unset | fine |
+
+`local x` leaves `x` unset; `local x=` sets it empty. `BASHPROF_TIME_CPS`
+depends on the second: after an empty hook has run, `$__BP_id` has to be empty
+rather than unbound.
+
+### The two roles differ in what is exposed
+
+Under a driven run bash reads `BASH_ENV` while the shell is still starting,
+**before** the subject's own `set -u` line. Only function bodies run under it.
+A client that joins a session of its own has `set -u` on before it sources the
+address, so the top level of `prelude.bash` and of the rig's own bash runs under
+it too. Every `__BC__*` name is assigned there before anything reads it, which
+is what makes the second case hold.
+
 ## The slot pattern
 
 A helper that computes a value and then calls a continuation cannot hold that

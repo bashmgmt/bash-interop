@@ -22,6 +22,13 @@ assets/bashprof.bash      BASHPROF_TIME_CPS                       → __bp_begin
 src/bashprof/effect.bash  __bp_begin, __bp_end
 ```
 
+`assets/joining.bash` is the one file with no second delivery: `BC_JOIN` and
+`BC_LEAVE` run before there is a session to inject anything into, so a client
+vendors them and nothing injects them. It has no guard either — a script that
+calls `BC_JOIN` wants a session, and the tool being absent is a missing command
+rather than a call site to neutralise. See
+[rig.md](rig.md#the-coprocess-convention).
+
 The client sources the words unconditionally and guards the hook:
 
 ```bash
@@ -87,7 +94,10 @@ their combined length is how far to shift.
 Both directions are covered where they can fail. `src/bashcap/tests/vendoring.rs`
 and `src/bashprof/tests/vendoring.rs` run a vendored script with no tool at
 all, and the same script under the tool where the guard has to leave the real
-hooks standing. Each test writes the file the tool injects, byte for byte.
+hooks standing. Each test writes the file the tool injects, byte for byte, and
+each writes `set -euo pipefail` at the top of it — the shape a shipped script
+has, and the option that reaches furthest into a tool. What that costs the
+instrument is in [scoping.md](scoping.md#when-the-walk-finds-nothing-set--u).
 
 ## Where the files are
 
