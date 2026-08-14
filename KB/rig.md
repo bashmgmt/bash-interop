@@ -128,6 +128,8 @@ which leaves the group.
 pub trait Slave: Rig {
     fn serve<A>(&self, held: OwnedFd, announce: A) -> Result<Served<Self::Session>, Failure>
     where A: FnOnce(&Answer) -> Result<(), Failure>;
+
+    fn serve_coprocess(&self) -> Result<Served<Self::Session>, Failure>;
 }
 
 pub struct Served<S> {
@@ -172,10 +174,34 @@ A client that keeps talking after the session ended writes into a fifo whose
 reader is gone and takes `SIGPIPE`. Releasing last — from a `trap … EXIT` — is
 what a client does about it.
 
-`__fixtures/joining/session.bash` is the whole recipe, and `tests/joining.rs`
-runs it: a `coproc`, one `read` for the address, `declare -a` to run it, and a
-release-and-`wait` at the end. That test is a program rather than a harness,
-because a script that starts its own server has to have something to start.
+### The coprocess convention
+
+Both halves of the usual arrangement are shipped, so a client writes neither.
+It is one sentence: **the client holds the server's standard input, and the
+server writes the address on its standard output.**
+
+```bash
+source lib/joining.bash
+
+BC_JOIN bashprof serve --into build.times   # start it, take the address, run it
+BC_INSTR say STEP compile
+BC_LEAVE                                    # release, wait, return its status
+```
+
+`assets/joining.bash` is the bash half; `Slave::serve_coprocess` is the Rust
+half, and a server that wants a channel of its own calls `serve` directly.
+Unlike a tool's words, `joining.bash` is only ever vendored — it runs before
+there is anything to inject, and it is what brings the protocol into a shell.
+
+`coproc` takes a literal NAME, so the session's fds live in `BC_SESSION` and
+there is one per shell — the count the protocol already keeps in `__BC__owner`.
+`BC_LEAVE` returns the server's status, so a client under `set -e` stops on a
+server that failed, and by the time it returns whatever the server writes is
+written.
+
+`__fixtures/joined/` holds two scripts that use it, and `tests/joined/` the
+programs they start. Those are programs rather than harnesses, because a script
+that starts its own server has to have something to start.
 
 ## One exit
 

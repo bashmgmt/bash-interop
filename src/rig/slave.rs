@@ -5,11 +5,12 @@
 //! client cleans up, which is why the only thing this side watches is the
 //! handle.
 
-use std::os::fd::OwnedFd;
+use std::io;
+use std::os::fd::{AsFd, OwnedFd};
 
 use super::serving::{Serving, Until};
 use super::{Answer, Rig};
-use crate::failure::Failure;
+use crate::failure::{Doing, Failure};
 
 /// What a served session produced.
 ///
@@ -59,5 +60,31 @@ pub trait Slave: Rig {
         let (session, failed) = serving.finish();
 
         Ok(Served { session, failed })
+    }
+
+    /// Serve the client that started this process as a coprocess: it holds
+    /// this process's standard input, and reads the address from its standard
+    /// output.
+    ///
+    /// That convention has a second half, and `BC_JOIN` in `assets/joining.bash`
+    /// is it — one word doing the `coproc`, the one `read` and the `declare -a`.
+    /// A server that wants a channel of its own calls [`serve`](Slave::serve)
+    /// instead.
+    fn serve_coprocess(&self) -> Result<Served<Self::Session>, Failure>
+    where
+        Self: Sized,
+    {
+        let held = io::stdin()
+            .as_fd()
+            .try_clone_to_owned()
+            .doing(|| "taking hold of the handle the client kept".into())?;
+
+        // `println!` writes through a line buffer, so the newline that ends the
+        // address is also what puts it on the pipe the client is blocked on.
+        self.serve(held, |address| {
+            println!("{address}");
+
+            Ok(())
+        })
     }
 }
