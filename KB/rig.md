@@ -26,7 +26,8 @@ pub trait Rig {
 
     fn open(&self) -> Result<Self::Session, Failure>;
 
-    /// A message nobody is waiting on.
+    /// A message nobody is waiting on: a `say`, or the `join` a shell opens
+    /// with.
     fn hear(&self, session: &mut Self::Session, said: Line) -> Result<(), Failure>;
 
     /// A message a shell is blocked on; the session frames what comes back and
@@ -156,6 +157,13 @@ its functions, its subshells and what it sources; exporting `BASH_ENV` to the
 same path as well instruments the processes it starts — see
 [scoping.md](scoping.md).
 
+**Joining is one mechanism, not a property of either role.** How a shell learns
+the address differs — a driven run puts it in `BASH_ENV`, a client that started
+the server sources what it was handed — but a shell that wants in for its own
+reasons sources either, and an interactive one has no other way, bash reading
+`BASH_ENV` for non-interactive shells alone. Whatever brought it there, the
+first thing it says is its `JOIN`; see [tree.md](tree.md).
+
 `held` is a descriptor the initiator keeps open for as long as it wants the
 session. Serving ends when the last holder has let go, and a client releases it
 either deliberately or by dying:
@@ -274,8 +282,8 @@ accumulator, no collection type, and no rig implementation.
 
 | | its `Session` | what it overrides |
 |---|---|---|
-| bashcap | `Capturing { written, sink }` | `bash`; `hear` decodes and writes; `end` flushes |
-| `examples/snapshotting.rs` | `Vec<Capture>` | `bash`; `hear` decodes and keeps |
+| bashcap | `Capturing { written, shells, sink }` | `bash`; `hear` registers the shell, decodes and writes; `end` flushes |
+| `examples/snapshotting.rs` | `Seen { shells, captures }` | `bash`; `hear` registers, decodes and keeps |
 | `examples/answering.rs` | what it has heard | `bash`; `answer` decides from it |
 | `bashprof` | `Vec<Line>` | `bash`; `hear` keeps. Every message carries its own provenance *and* the name of the call it was made inside of, so reading is one pass with a map, then two hylic folds — one to nest, one to read the tree as timings |
 | `proofs/answering.rs` | `Soak { heard, answered }` | `bash`, `hear`, `answer` |

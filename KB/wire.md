@@ -173,17 +173,29 @@ run and depends on no layer above it.
 
 ```bash
 __bc_join() {
-    local __bc_parent=${__BC__owner:-$PPID}
+    __BC__parent=${__BC__owner:-$PPID}
 
     exec {__BC__up}>"$__BC__UP"
     __BC__owner=$BASHPID
     __BC__seq=0
+
+    __bc_send JOIN versinfo … bash … zero … flags … command … subshell …
 }
 ```
 
-A shell announces nothing. Its first message carries `seq 0`, which is what
-says a shell has joined, and every message it writes carries `parent` and
-`shlvl`. One line per message, always.
+**A shell opens with an account of itself**, which carries `seq 0` and is what
+says a shell has joined. Everything in it is passed as bash reports it — which
+bash, how it was given its code, what it had switched on — and what any of that
+means is decided on the other side. Adding a fact is a word here and a field
+there; nothing in between reads them.
+
+That is once per shell, not once per message: the version cannot change while a
+shell lives, and putting it on every message would cost ~6 µs each where the
+narrow lane exists to save 7. What does change while a shell runs — `$PWD` — is
+in the walk instead, which is where it is read.
+
+Every later message the shell writes carries `parent` and `shlvl`. One line per
+message, always.
 
 Every shell opens the pipe itself, by name, from a path baked into the
 prelude. **Nothing is inherited**, so no descriptor has to survive a fork and
@@ -223,8 +235,8 @@ header sits outside the message because a continuation must be routed before
 there is a message to parse. `+` means more chunks follow, `.` means this is
 the last, and that is the header's entire semantic content.
 
-Whether the sender is waiting is in the *message*, as its leading `SAY` or
-`ASK`, which `Kind::read` shifts off — so the frame header stays the smallest
+Whether the sender is waiting is in the *message*, as its leading `SAY`, `ASK`
+or `JOIN`, which `Kind::read` shifts off — so the frame header stays the smallest
 thing reassembly can work from.
 
 An answer carries **no header**: the shell that asked is its only reader, so
@@ -289,7 +301,7 @@ One bash array literal — `declare -a x="$msg"` on the bash side,
 ```rust
 /// What one shell said, once, with the provenance the wire gives it.
 pub struct Line {
-    pub kind: Kind,        // Say or Ask
+    pub kind: Kind,        // Say, Ask or Join
     pub sent_at: Micros,   // the sending shell's $EPOCHREALTIME
     pub heard_at: Micros,  // the run's clock when the last frame arrived
     pub pid: Pid,

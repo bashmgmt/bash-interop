@@ -64,6 +64,10 @@ impl<'r, R: Rig> Serving<'r, R> {
     /// Every message the pipe holds, handed to the rig one at a time. A shell
     /// that asked is blocked until its answer is written, so writing it is
     /// part of delivering rather than something a caller does afterwards.
+    ///
+    /// A shell's account of itself is delivered like anything nobody waits on:
+    /// it belongs to the session, where a decoder that has to read a walk
+    /// against the shell it was taken in will look for it.
     fn deliver(&mut self) -> Result<(), Failure> {
         for line in self.wire.drain()? {
             // The rig consumes the message, and the reply pipe is named after
@@ -71,7 +75,7 @@ impl<'r, R: Rig> Serving<'r, R> {
             let asking = line.sent.pid;
 
             match line.kind {
-                Kind::Say => self.rig.hear(&mut self.session, line)?,
+                Kind::Say | Kind::Join => self.rig.hear(&mut self.session, line)?,
                 Kind::Ask => {
                     let answer = self.rig.answer(&mut self.session, line)?;
 

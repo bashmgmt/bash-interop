@@ -29,7 +29,6 @@ __bc_stack() {
     __bc_stack_out+=(
         skip    "$2"
         pwd     "$PWD"
-        zero    "$0"
         funcs   "(${FUNCNAME[*]@Q})"
         sources "(${BASH_SOURCE[*]@Q})"
         lines   "(${BASH_LINENO[*]@Q})"
@@ -39,13 +38,13 @@ __bc_stack() {
 }
 ```
 
-Eight expansions. Nothing sliced, summed, reversed or looped over. Everything
+Seven expansions. Nothing sliced, summed, reversed or looped over. Everything
 that decides what a walk means happens on the Rust side, where it can be
 checked without running a shell.
 
-`$PWD` and `$0` are there because two of the five arrays cannot be read without
-them: a relative `BASH_SOURCE` is relative to something, and one of the words
-bash writes into `BASH_SOURCE` is `$0` itself.
+`$PWD` is there because a relative `BASH_SOURCE` is relative to something and
+nothing else records what. It changes under the subject's feet, which is why it
+rides with every walk rather than with what the shell said of itself once.
 
 `$1` names the caller's own array, so nesting works and no global is involved —
 see [scoping.md](scoping.md). The nameref is `__bc_stack_out`, a name no caller
@@ -92,13 +91,15 @@ impl Stack {
 }
 
 pub struct Args<'a>    { pub argc: &'a str, pub argv: &'a str }
-pub struct Columns<'a> { pub skip: usize, pub pwd: &'a str, pub zero: &'a str,
-                         pub funcs: &'a str, pub sources: &'a str,
-                         pub lines: &'a str, pub args: Option<Args<'a>> }
+pub struct Columns<'a> { pub skip: usize, pub pwd: &'a str, pub funcs: &'a str,
+                         pub sources: &'a str, pub lines: &'a str,
+                         pub args: Option<Args<'a>> }
 
 impl<'a> Columns<'a> {
     pub fn of(words: &'a [String]) -> Result<Self, Failure>;
-    pub fn frames(&self) -> Result<Stack, Failure>;
+
+    /// Against the shell the walk was taken in — see `tree.md`.
+    pub fn frames(&self, shell: &Bash) -> Result<Stack, Failure>;
 }
 ```
 
@@ -164,10 +165,11 @@ no frame at all.
 | `$0` | the code came from a `-c` command line or from standard input |
 
 The last is not a word but whatever `$0` is — `bash`, or any name a caller
-passed — which is why `zero` is shipped: without it the word cannot be told
-from a file of the same name. It is read as `Source::Shell` only in a shell
-bash was given no script file for; where it was, `$0` **is** that script and
-reads as the path it is. A script that defines a function called `main` or
+passed — so a walk alone cannot tell it from a file of the same name. `$0` and
+how bash was started are in what the shell said when it joined, and
+`Columns::frames` is handed that: the word reads as `Source::Shell` only in a
+shell bash was given no script file for, and where it was, `$0` **is** that
+script and reads as the path it is. A script that defines a function called `main` or
 `source` is indistinguishable from bash's own use of those words: bash reports
 the same string either way.
 

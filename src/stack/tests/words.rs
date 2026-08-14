@@ -4,7 +4,7 @@
 //! `BASH_SOURCE`, and it keeps a source path exactly as it was written. None
 //! of that is visible in generated source, so it is read off a shell.
 
-use crate::bash::rig::{Failure, Line, Master, Rig};
+use crate::bash::rig::{Failure, Line, Master, Rig, Shells};
 use crate::bash::stack::{self, Columns, Site, Source, Stack};
 use crate::tests::scripts::{bash, Scripts};
 
@@ -21,21 +21,32 @@ WALK() {
 
 struct Walking;
 
+/// The shells that joined, and the walks they reported. A walk is read against
+/// the shell it was taken in, so the register comes first and every message
+/// goes through it.
+#[derive(Default)]
+struct Walks {
+    shells: Shells,
+    seen: Vec<Stack>,
+}
+
 impl Rig for Walking {
-    type Session = Vec<Stack>;
+    type Session = Walks;
 
     fn bash(&self) -> String {
         stack::with(&[BASH])
     }
 
     fn open(&self) -> Result<Self::Session, Failure> {
-        Ok(Vec::new())
+        Ok(Walks::default())
     }
 
-    fn hear(&self, seen: &mut Self::Session, said: Line) -> Result<(), Failure> {
+    fn hear(&self, walks: &mut Self::Session, said: Line) -> Result<(), Failure> {
+        let shell = walks.shells.hear(&said)?;
         let Some(words) = said.behind("WALK") else { return Ok(()) };
 
-        seen.push(Columns::of(words)?.frames()?);
+        let walk = Columns::of(words)?.frames(&walks.shells.at(shell).bash)?;
+        walks.seen.push(walk);
 
         Ok(())
     }
@@ -47,7 +58,7 @@ impl Master for Walking {}
 fn walks_in<A: AsRef<std::ffi::OsStr>>(argv: &[A]) -> Vec<Stack> {
     let ran = Walking.run(argv).unwrap_or_else(|e| panic!("{e}"));
 
-    ran.whole().unwrap().0
+    ran.whole().unwrap().0.seen
 }
 
 /// The same over a script — and the scripts, which stay alive: a source path

@@ -35,7 +35,8 @@ fn every_descendant_shell_reaches_the_wire() {
         report(&seen)
     );
 
-    let forest = forest(&shells(&seen));
+    let shells = shells(&seen).expect("every shell said what it was");
+    let forest = forest(&shells);
     assert_eq!(forest.len(), 1, "one root: nothing is orphaned{}", report(&seen));
 
     let tree = descend(&forest, None);
@@ -62,7 +63,7 @@ fn descend(
     nodes
         .iter()
         .flat_map(|node| {
-            let shlvl = node.shell.opened.shlvl;
+            let shlvl = node.shell.joined.opened.shlvl;
             let shell = Descendant { depth: above.map_or(1, |up| up.depth + 1), shlvl };
 
             std::iter::once((shell, above)).chain(descend(&node.children, Some(shell)))
@@ -163,5 +164,5 @@ fn a_newline_inside_a_value_is_escaped_not_framed() {
         "{}",
         report(&seen)
     );
-    assert_eq!(seen.len(), 1, "one message, not two frames of nonsense");
+    assert_eq!(behind(&seen, "REC").len(), 1, "one message, not two frames of nonsense");
 }

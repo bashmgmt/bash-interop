@@ -47,9 +47,21 @@ far more: a full `bashcap` snapshot is ~480 µs, so the 7 µs difference between
 an inlined send and a function call is under two percent of what an
 instrumented call site actually costs.
 
-Joining — the first `say` in a new shell, which opens the pipe — costs 10 µs
-and sends nothing of its own. Provenance rides on the messages the shell goes
-on to write, as two more `printf` arguments.
+Joining — the first `say` in a new shell — opens the pipe and sends one
+message, the shell's account of itself: ~300 bytes, one message per shell and
+never again. A fork costs ~1 ms, so a shell that joins pays under three percent
+of what it cost to exist.
+
+Once per shell rather than once per message, and measured against the
+alternative. Two more header words on every message cost **+5.9 µs** each with
+the version computed at source time and **+9.4 µs** without — where the wide
+lane's locale switch costs ~7 µs and the narrow lane exists to avoid it. The
+version also cannot change while a shell lives, so a per-message copy would be
+pure repetition. What *does* change while a shell runs — `$PWD` — rides with
+the walk instead, which is where it is read.
+
+`$SHLVL` and `parent` still ride on every message, as two more `printf`
+arguments.
 
 ### The one-frame lane
 

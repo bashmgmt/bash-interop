@@ -29,10 +29,17 @@
 //! given a `-c` command line or fed on standard input it is a real line, the
 //! one frame `FUNCNAME` never names. A subject function called `main` does not
 //! change it either way.
+//!
+//! The columns say nothing about the shell they were taken in, and one of
+//! bash's own words needs it: `$0` stands in `BASH_SOURCE` for code bash was
+//! given rather than read from a file. So [`Columns::frames`] is handed the
+//! account that shell gave of itself when it joined, rather than shipping a
+//! fact that cannot change with every walk that can.
 
 use std::path::Path;
 
 use crate::bash::rig::field;
+use crate::bash::shell::Bash;
 use crate::bash::value::parse_array;
 use crate::failure::{Doing, Failure};
 
@@ -54,10 +61,6 @@ pub struct Columns<'a> {
     /// to as far as anything can know.
     pub pwd: &'a str,
 
-    /// The sending shell's `$0`, which is the word bash writes in
-    /// `BASH_SOURCE` for code it was given rather than read from a file.
-    pub zero: &'a str,
-
     pub funcs: &'a str,
     pub sources: &'a str,
     pub lines: &'a str,
@@ -77,7 +80,6 @@ impl<'a> Columns<'a> {
         Ok(Self {
             skip: skip.parse().map_err(|_| broken(format!("skip {skip:?} is not a count")))?,
             pwd: at("pwd")?,
-            zero: at("zero")?,
             funcs: at("funcs")?,
             sources: at("sources")?,
             lines: at("lines")?,
@@ -89,8 +91,12 @@ impl<'a> Columns<'a> {
         })
     }
 
-    /// The subject's walk.
-    pub fn frames(&self) -> Result<Stack, Failure> {
+    /// The subject's walk, read against the shell it was taken in.
+    ///
+    /// `shell` is what that shell said of itself when it joined, and it is
+    /// needed because `BASH_SOURCE` alone cannot say what its own words mean:
+    /// `$0` is a path in one shell and a stand-in for code in another.
+    pub fn frames(&self, shell: &Bash) -> Result<Stack, Failure> {
         let column = |name: &str, text: &str| {
             parse_array(text).doing(|| format!("reading the {name:?} column"))
         };
@@ -120,7 +126,6 @@ impl<'a> Columns<'a> {
             text.parse::<u32>().map_err(|_| broken(format!("{what} {text:?}")))
         };
         let entered_at = numbered("entry line", &lines[funcs.len() - 1])?;
-        let shell = (entered_at != 0).then_some(self.zero);
 
         let arguments = match &self.args {
             Some(args) => arguments(args, funcs.len())?,
@@ -143,7 +148,7 @@ impl<'a> Columns<'a> {
 
         // The frame bash did not push, outermost and last. `BASH_ARGC` has no
         // group for it, so its arguments are absent in the field's own sense.
-        if shell.is_some() {
+        if entered_at != 0 {
             frames.push(Frame {
                 site: Site::Shell,
                 source: Source::Shell,

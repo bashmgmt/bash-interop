@@ -1,19 +1,104 @@
-//! The process tree a run reveals: which shell said what, and who started
-//! whom. Both views take a slice, so they work over whatever a session kept.
+//! Which shells a run reveals, what each said of itself, and who started whom.
 //!
-//! Nothing is decoded here. Every line already carries its own provenance, so
-//! these are arrangements of it and cannot fail.
+//! Two questions, and two answers that stand apart. [`Shells`] is the register:
+//! which shells there are and what they are, and nothing about what they went
+//! on to say. [`shells`] is the arrangement: the same shells with their
+//! messages grouped under them. The register is built by one rule, in one
+//! place, and the arrangement is built on it — a decoder reading a run as it
+//! arrives and one reading it afterwards get the same answer because they ask
+//! the same code.
+//!
+//! Nothing is decoded twice and nothing is guessed. Every shell says what it is
+//! when it joins; a message from a pid that never did is a fault.
 
 use std::collections::HashMap;
 
-use crate::bash::rig::wire::{Line, Pid, Sent};
+use crate::bash::rig::wire::{Kind, Line, Pid, Sent};
+use crate::bash::shell::{Bash, State};
+use crate::failure::Failure;
 
+/// Which shell, among those that have joined. A pid reused across a long run
+/// opens a new one rather than reopening the first, so this is a generation
+/// and not a pid.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub struct At(usize);
+
+/// What one shell said of itself when it joined, under the provenance the
+/// protocol put in front of it.
+///
+/// The two halves are not the same kind of fact and are not mixed: [`Bash`] is
+/// what the shell *is*, fixed for as long as it lives, and [`State`] is what it
+/// had switched on at that moment, which a subject may change afterwards.
+#[derive(Clone, Debug)]
+pub struct Joined {
+    pub opened: Sent,
+    pub bash: Bash,
+    pub at_join: State,
+}
+
+/// Every shell that has joined, in the order they did.
+#[derive(Default, Debug)]
+pub struct Shells {
+    joined: Vec<Joined>,
+
+    /// The newest generation carrying each pid, which is what a later message
+    /// from that pid belongs to.
+    newest: HashMap<Pid, usize>,
+}
+
+impl Shells {
+    /// The register a whole run reveals.
+    pub fn of(lines: &[Line]) -> Result<Self, Failure> {
+        let mut known = Self::default();
+
+        for line in lines {
+            known.hear(line)?;
+        }
+
+        Ok(known)
+    }
+
+    /// One message, and which shell it came from — opening a shell where the
+    /// message is its own account of itself.
+    ///
+    /// This is the only rule, so a decoder reading a run as it arrives keeps
+    /// the same register as one reading it afterwards.
+    pub fn hear(&mut self, line: &Line) -> Result<At, Failure> {
+        if line.kind == Kind::Join {
+            let joined = Joined {
+                opened: line.sent.clone(),
+                bash: Bash::of(&line.words)?,
+                at_join: State::of(&line.words)?,
+            };
+
+            self.newest.insert(line.sent.pid, self.joined.len());
+            self.joined.push(joined);
+
+            return Ok(At(self.joined.len() - 1));
+        }
+
+        self.newest.get(&line.sent.pid).copied().map(At).ok_or_else(|| {
+            Failure::new(
+                "placing a message",
+                format!("pid {} spoke without ever joining", line.sent.pid),
+            )
+        })
+    }
+
+    pub fn at(&self, At(index): At) -> &Joined {
+        &self.joined[index]
+    }
+
+    /// Every shell, in the order they joined.
+    pub fn all(&self) -> &[Joined] {
+        &self.joined
+    }
+}
+
+/// One shell, what it said of itself, and everything it went on to say.
 #[derive(Clone, Debug)]
 pub struct Shell<'a> {
-    /// The provenance of the line this shell joined with, which is every fact
-    /// the wire has about the shell itself.
-    pub opened: Sent,
-
+    pub joined: Joined,
     pub lines: Vec<&'a Line>,
 }
 
@@ -23,23 +108,24 @@ pub struct ShellNode<'a> {
     pub children: Vec<ShellNode<'a>>,
 }
 
-/// One shell per `seq == 0`, which is what a shell writes on joining. Every
-/// later line joins the newest shell carrying its pid, so a pid reused across
-/// a long run opens a new shell rather than reopening the first.
-pub fn shells(lines: &[Line]) -> Vec<Shell<'_>> {
-    let mut shells: Vec<Shell<'_>> = Vec::new();
-    let mut newest: HashMap<Pid, usize> = HashMap::new();
+/// The shells a run's messages reveal, each carrying its own.
+///
+/// The grouping walks [`Shells::hear`] rather than deciding anything of its
+/// own, which is what keeps the two readings of one run in step.
+pub fn shells(lines: &[Line]) -> Result<Vec<Shell<'_>>, Failure> {
+    let mut known = Shells::default();
+    let mut said: Vec<Vec<&Line>> = Vec::new();
 
     for line in lines {
-        match newest.get(&line.sent.pid) {
-            Some(&index) if line.sent.seq > 0 => shells[index].lines.push(line),
-            _ => {
-                newest.insert(line.sent.pid, shells.len());
-                shells.push(Shell { opened: line.sent.clone(), lines: vec![line] });
-            }
+        let At(index) = known.hear(line)?;
+
+        if index == said.len() {
+            said.push(Vec::new());
         }
+        said[index].push(line);
     }
-    shells
+
+    Ok(known.joined.into_iter().zip(said).map(|(joined, lines)| Shell { joined, lines }).collect())
 }
 
 /// For each shell, the shell it was forked from: the newest generation of its
@@ -76,7 +162,7 @@ fn generations(shells: &[Shell<'_>]) -> HashMap<Pid, Vec<usize>> {
     let mut generations: HashMap<Pid, Vec<usize>> = HashMap::new();
 
     for (index, shell) in shells.iter().enumerate() {
-        generations.entry(shell.opened.pid).or_default().push(index);
+        generations.entry(shell.joined.opened.pid).or_default().push(index);
     }
     generations
 }
@@ -93,9 +179,10 @@ fn parent_of(
     generations: &HashMap<Pid, Vec<usize>>,
     index: usize,
 ) -> Option<usize> {
-    let shell = &shells[index];
-    let candidates = generations.get(&shell.opened.parent)?;
-    let upto = candidates.partition_point(|&at| shells[at].opened.sent_at <= shell.opened.sent_at);
+    let opened = &shells[index].joined.opened;
+    let candidates = generations.get(&opened.parent)?;
+    let upto =
+        candidates.partition_point(|&at| shells[at].joined.opened.sent_at <= opened.sent_at);
 
     candidates[..upto].iter().rev().find(|&&at| at < index).copied()
 }
@@ -117,95 +204,4 @@ fn node<'a>(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::bash::rig::wire::{Kind, Micros};
-
-    fn line(at: u64, pid: u32, parent: u32, seq: u32) -> Line {
-        Line {
-            kind: Kind::Say,
-            sent: Sent {
-                pid: Pid(pid),
-                parent: Pid(parent),
-                shlvl: 5,
-                seq,
-                sent_at: Micros(at),
-                heard_at: Micros(at + 1),
-            },
-            words: Vec::new(),
-        }
-    }
-
-    #[test]
-    fn shells_and_the_forest_over_one_arrival_order() {
-        let heard = vec![
-            line(100, 7, 1, 0),  // the outermost shell; the run is its parent
-            line(110, 7, 1, 1),
-            line(130, 8, 7, 0),  // a child of it
-            line(140, 8, 7, 1),
-            line(150, 9, 8, 0),  // a child of that
-            line(200, 7, 1, 0),  // pid 7 again, freshly joined
-        ];
-
-        let shells = shells(&heard);
-        assert_eq!(shells.len(), 4, "the reused pid opens a fourth shell");
-        assert_eq!(shells[0].lines.len(), 2);
-        assert_eq!(shells[1].lines.len(), 2);
-        assert_eq!(shells[3].opened.pid, Pid(7));
-
-        let forest = forest(&shells);
-        assert_eq!(forest.len(), 2, "the outermost shell, and the pid-reusing one");
-        assert_eq!(forest[0].shell.opened.pid, Pid(7));
-        assert_eq!(forest[0].children[0].shell.opened.pid, Pid(8));
-        assert_eq!(forest[0].children[0].children[0].shell.opened.pid, Pid(9));
-    }
-
-    /// A child names a pid, not a generation of one. Two shells carried pid 7,
-    /// so each child attaches to the one that was alive when it opened —
-    /// never to a later generation that had not started yet.
-    #[test]
-    fn a_child_attaches_to_the_generation_that_was_alive() {
-        let heard = vec![
-            line(100, 7, 1, 0), // pid 7, first generation
-            line(150, 8, 7, 0), // opened while that one was alive
-            line(200, 7, 1, 0), // pid 7 again, a second generation
-            line(250, 9, 7, 0), // opened after the reuse
-        ];
-
-        let shells = shells(&heard);
-        let forest = forest(&shells);
-
-        assert_eq!(forest.len(), 2, "two generations of pid 7, both roots");
-        assert_eq!(forest[0].shell.opened.sent_at, Micros(100));
-        assert_eq!(forest[0].children.len(), 1, "only the earlier child");
-        assert_eq!(forest[0].children[0].shell.opened.pid, Pid(8));
-
-        assert_eq!(forest[1].shell.opened.sent_at, Micros(200));
-        assert_eq!(forest[1].children.len(), 1);
-        assert_eq!(forest[1].children[0].shell.opened.pid, Pid(9), "the later child");
-    }
-
-    /// A shell can only have been forked from one that had already spoken, so
-    /// the relation points strictly backwards and a walk up it ends. Two
-    /// shells naming each other's pid in one instant is the input that would
-    /// otherwise close a loop.
-    #[test]
-    fn the_fork_relation_points_strictly_backwards() {
-        let heard = [line(100, 7, 8, 0), line(100, 8, 7, 0)];
-        let shells = shells(&heard);
-
-        assert_eq!(forked_from(&shells), [None, Some(0)]);
-    }
-
-    /// A shell whose parent pid never emitted is a root: nothing is invented
-    /// for it, and it is not silently attached to whatever else was running.
-    #[test]
-    fn a_shell_whose_parent_never_spoke_is_a_root() {
-        let heard = [line(100, 7, 1, 0), line(150, 8, 99, 0)];
-        let shells = shells(&heard);
-        let forest = forest(&shells);
-
-        assert_eq!(forest.len(), 2, "neither is anyone's child");
-        assert!(forest.iter().all(|node| node.children.is_empty()));
-    }
-}
+mod tests;

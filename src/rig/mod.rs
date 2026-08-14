@@ -18,6 +18,13 @@
 //! One sentence covers both: **a session lasts as long as anyone who could
 //! still speak.** Nothing inside a rig ends one.
 //!
+//! How a shell learns the address is its own business and neither role's: a
+//! driven run puts it in `BASH_ENV`, a client that started the server sources
+//! what it was handed, and a shell that wants in for its own reasons — an
+//! interactive child, say — sources either. However it got there, the first
+//! thing it says is [`Kind::Join`], its own account of itself, and [`Shells`]
+//! is where that is read.
+//!
 //! ```no_run
 //! use mb_resolver::bash::rig::{Answer, Failure, Line, Master, Rig};
 //!
@@ -95,8 +102,10 @@ pub use master::{Master, Run};
 pub use slave::{Served, Slave};
 pub use status::ExitStatus;
 
-pub use tree::{forest, shells, Shell, ShellNode};
+pub use tree::{forest, shells, At, Joined, Shell, ShellNode, Shells};
 pub use wire::{field, Answer, Kind, Line, Micros, Pid, Sent};
+
+pub use crate::bash::shell::{Bash, Flags, Started, State, Version};
 
 pub use crate::failure::{Doing, Failure};
 
@@ -125,7 +134,10 @@ pub trait Rig {
 
     fn open(&self) -> Result<Self::Session, Failure>;
 
-    /// A message nobody is waiting on.
+    /// A message nobody is waiting on, which is a [`Say`](Kind::Say) or the
+    /// [`Join`](Kind::Join) a shell opens with. A rig that reads walks keeps
+    /// the joins, since a walk is read against the shell it was taken in; one
+    /// that claims its messages by tag ignores them without trying.
     ///
     /// A `Failure` from either this or [`answer`](Rig::answer) ends the
     /// conversation: under `Master` the subject is killed and the run yields

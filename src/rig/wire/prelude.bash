@@ -105,14 +105,40 @@ __bc_send() {
     LC_ALL=C __bc_frame "$__bc_seq" "$__bc_msg" || __BC_BAIL
 }
 
-# A shell announces nothing: its first message carries seq 0, which is what
-# says a shell has joined.
+# A shell's first message is its account of itself, and it carries seq 0.
+#
+# Everything below is passed as bash reports it, and nothing here decides what
+# any of it means: `$-` mixes the invocation letters with the options a subject
+# can change, `$0` is a path only where bash was handed a file, and which bash
+# behaves how is a question about $BASH_VERSINFO. All of that is read on the
+# other side, where it can be checked without running a shell.
+#
+# $BASH_EXECUTION_STRING exists only under `-c`, so it is read through `-` for
+# the same reason every other name here is not: an unset one is an error under
+# `set -u`, and a client that joins a session of its own has that on before any
+# of this is sourced.
+#
+# This is the first moment a shell can speak. Under a driven run the address
+# came in through BASH_ENV before the shell's first line; a shell that joined of
+# its own accord sourced it by hand. Neither is knowable from here, and neither
+# needs to be.
 __bc_join() {
     __BC__parent=${__BC__owner:-$PPID}
 
     exec {__BC__up}>"$__BC__UP" || __BC_THROW
     __BC__owner=$BASHPID
     __BC__seq=0
+
+    __bc_send JOIN \
+        versinfo  "(${BASH_VERSINFO[*]@Q})" \
+        bash      "$BASH" \
+        zero      "$0" \
+        flags     "$-" \
+        shellopts "$SHELLOPTS" \
+        bashopts  "$BASHOPTS" \
+        command   "${BASH_EXECUTION_STRING-}" \
+        subshell  "$BASH_SUBSHELL" \
+        || __BC_BAIL
 }
 
 # $1 the sequence number, $2 a message the narrow lane would not take. Every

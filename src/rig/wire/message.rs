@@ -56,6 +56,11 @@ impl fmt::Display for Pid {
 pub enum Kind {
     Say,
     Ask,
+
+    /// A shell's account of itself, sent once as the first thing it says.
+    /// Nobody waits on it, so it is delivered like a [`Say`](Kind::Say) — what
+    /// it carries is read by [`Shells`](crate::bash::rig::Shells).
+    Join,
 }
 
 impl Kind {
@@ -63,6 +68,7 @@ impl Kind {
         match word {
             "SAY" => Ok(Self::Say),
             "ASK" => Ok(Self::Ask),
+            "JOIN" => Ok(Self::Join),
             _ => Err("unknown kind"),
         }
     }
@@ -83,8 +89,8 @@ pub struct Sent {
 
     pub shlvl: u32,
 
-    /// Counted per shell from its first message, so `0` is a shell that has
-    /// just joined.
+    /// Counted per shell from its first message, which is its
+    /// [`Join`](Kind::Join) — so `0` is the account a shell gives of itself.
     pub seq: u32,
 
     /// The sending shell's `$EPOCHREALTIME`.

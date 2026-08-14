@@ -1,20 +1,26 @@
 # Bash interop
 
-Three layers. **Values** (`src/bash/value/`) read and write bash's own quoted
-forms — `@Q`, `@A`, `declare -p`. **The stack** (`src/bash/stack/`) is the
-frame walk every instrument shares, both halves: the bash that ships bash's
-five arrays, and the Rust that puts them back together. **The rig**
-(`src/bash/rig/`) is a session with instrumentation in it: it receives messages
-from every shell that joined and answers the questions those shells ask.
+Four layers. **Values** (`src/bash/value/`) read and write bash's own quoted
+forms — `@Q`, `@A`, `declare -p`. **The shell** (`src/bash/shell.rs`) is which
+bash a shell is, how it was given its code and what it has switched on — a
+shell's own account of itself, which it gives once when it joins. **The stack**
+(`src/bash/stack/`) is the frame walk every instrument shares, both halves: the
+bash that ships bash's five arrays, and the Rust that puts them back together.
+**The rig** (`src/bash/rig/`) is a session with instrumentation in it: it
+receives messages from every shell that joined and answers the questions those
+shells ask.
 
-`stack` and `rig` are siblings; neither knows the other. A tool composes them.
+`stack` and `rig` are siblings; neither knows the other. Both stand on `shell`,
+because a walk cannot be read without knowing the shell it was taken in: bash
+writes `$0` into `BASH_SOURCE` for code it was given rather than read, and no
+walk can say on its own which word that is. A tool composes them.
 
 ```
 KB/mb_resolver/bash/                              src/bash/
   values.md         quoted forms, BashVal, codecs   value/
   wire.md           the bash, the pipe, the frame   rig/wire/
   rig.md            Rig, Master, Slave, Serving     rig/{mod,master,slave,serving}.rs
-  tree.md           shells and the process forest   rig/tree.rs
+  tree.md           the shells, and the tree        rig/tree.rs, shell.rs
   stack.md          the call stack, both halves     stack/
   measurements.md   numbers, limits, proofs
   scoping.md        where a name binds              every *.bash we ship
@@ -30,8 +36,9 @@ Every module under `src/bash/rig/` is private; `mod.rs` carries `Rig`,
 pub use master::{Master, Run};
 pub use slave::{Served, Slave};
 pub use status::ExitStatus;
-pub use tree::{forest, shells, Shell, ShellNode};
+pub use tree::{forest, shells, At, Joined, Shell, ShellNode, Shells};
 pub use wire::{field, Answer, Kind, Line, Micros, Pid, Sent};
+pub use crate::bash::shell::{Bash, Flags, Started, State, Version};
 pub use crate::failure::{Doing, Failure};
 ```
 

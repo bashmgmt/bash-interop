@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::bash::shell::Bash;
 use crate::bash::value::emit_q_words;
 
 /// What a frame is, as `FUNCNAME` names it. Two of bash's words are not
@@ -75,15 +76,15 @@ pub enum Source {
 }
 
 impl Source {
-    /// `shell` is the shell's own `$0`, and only where bash was given no script
-    /// file. There it stands in `BASH_SOURCE` for code that came from the
-    /// command line or from standard input; where bash was given a file, `$0`
-    /// is that file and reads as one.
-    pub(super) fn of(source: &str, pwd: &Path, shell: Option<&str>) -> Self {
+    /// Read against the shell the walk was taken in, which is the only thing
+    /// that can say what `$0` means here: where bash was handed a file, `$0`
+    /// is that file and reads as the path it is; where bash was given its code
+    /// directly, the same word stands in `BASH_SOURCE` for that code.
+    pub(super) fn of(source: &str, pwd: &Path, shell: &Bash) -> Self {
         match source {
             "environment" => Self::Environment,
             "main" => Self::Prompt,
-            word if shell == Some(word) => Self::Shell,
+            word if word == shell.zero && !shell.started.from_a_file() => Self::Shell,
             // An absolute path replaces the base; a relative one joins it.
             path => Self::File(pwd.join(path)),
         }

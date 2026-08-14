@@ -9,9 +9,9 @@
 # on the side that can be checked without running anything.
 #
 # `$PWD` goes with them because `BASH_SOURCE` holds the path as it was written,
-# relative or not, and nothing else records what it was relative to. `$0` goes
-# with them because bash writes it into `BASH_SOURCE` for code it was given
-# rather than read from a file, and nothing else says which word that is.
+# relative or not, and nothing else records what it was relative to. It changes
+# under the subject's feet, which is why it is here and not in what the shell
+# said of itself when it joined.
 #
 # `BASH_ARGC` and `BASH_ARGV` are empty unless the shell is under `extdebug`.
 # Expanding an unset array is not an error, including under `set -u`, and the
@@ -22,7 +22,6 @@ __bc_stack() {
     __bc_stack_out+=(
         skip    "$2"
         pwd     "$PWD"
-        zero    "$0"
         funcs   "(${FUNCNAME[*]@Q})"
         sources "(${BASH_SOURCE[*]@Q})"
         lines   "(${BASH_LINENO[*]@Q})"

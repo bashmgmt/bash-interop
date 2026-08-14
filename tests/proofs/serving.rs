@@ -5,12 +5,12 @@
 //! applies to its process group — with the difference that this side owns
 //! nothing it could kill.
 
-use std::io::pipe;
+use std::io::{pipe, Write};
 use std::os::fd::OwnedFd;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 
-use mb_resolver::bash::rig::{Answer, Failure, Line, Rig, Slave};
+use mb_resolver::bash::rig::{shells, Answer, Failure, Line, Rig, Slave};
 
 use crate::support::Scripts;
 use crate::{behind, report, ENTRY};
@@ -133,4 +133,65 @@ fn a_joined_shell_may_publish_the_address_to_its_children() {
         said[0][1], said[1][1],
         "a process of its own, reached because the client published the address"
     );
+}
+
+/// A shell nothing started, joining because it wants to.
+///
+/// Interactive is the case that can only happen this way: bash reads
+/// `BASH_ENV` for non-interactive shells alone, so an interactive one can join
+/// a session only by sourcing the address itself. Its code arrives on standard
+/// input, and standard output is the handle it holds.
+fn interactively(address: &Answer, handle: OwnedFd) -> Child {
+    let mut shell = Command::new("bash")
+        .args(["--norc", "--noprofile", "-i"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::from(handle))
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("an interactive shell");
+
+    let typed = format!("declare -a __join={address}; \"${{__join[@]}}\"\nTELL at-the-prompt\n");
+    shell.stdin.take().expect("its input").write_all(typed.as_bytes()).expect("typing at it");
+
+    shell
+}
+
+/// What a shell is is what it said, and nothing is read off the shape of what
+/// it went on to say.
+///
+/// An interactive shell writes `main` into `BASH_SOURCE` for whatever is
+/// defined at its prompt and pushes no frame for the prompt itself — both of
+/// which a script can also produce, and neither of which says *interactive*.
+/// The shell says so itself, once, when it joins.
+#[test]
+fn a_shell_says_what_it_is_rather_than_being_guessed_at() {
+    let (held, handle) = pipe().expect("a handle");
+
+    let mut child = None;
+    let served = Attaching
+        .serve(held.into(), |address| {
+            child = Some(interactively(address, handle.into()));
+            Ok(())
+        })
+        .expect("the session");
+
+    child.expect("the shell").wait().expect("reaping the shell");
+    assert!(served.failed.is_none(), "the session closed up cleanly");
+
+    let heard = served.session;
+    assert_eq!(behind(&heard, "TELL"), [["at-the-prompt"]], "{}", report(&heard));
+
+    let shells = shells(&heard).expect("every shell said what it was");
+    assert_eq!(shells.len(), 1);
+
+    let bash = &shells[0].joined.bash;
+    assert!(bash.started.interactive, "it said so: {:?}", bash.started);
+    assert!(bash.started.standard_input, "and where its code came from");
+    assert!(bash.started.command.is_none(), "which was not a command line");
+    assert!(bash.version.at_least(5, 0, 0), "$EPOCHREALTIME is bash 5");
+    assert_eq!(bash.subshell, 0);
+
+    // Interactive is not something the options can be turned into: `set`
+    // refuses `-i`, so this is settled at startup and true of the whole shell.
+    assert!(shells[0].joined.at_join.flags.has('i'));
 }
