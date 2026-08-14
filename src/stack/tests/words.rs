@@ -4,7 +4,9 @@
 //! `BASH_SOURCE`, and it keeps a source path exactly as it was written. None
 //! of that is visible in generated source, so it is read off a shell.
 
-use crate::bash::rig::{Failure, Line, Master, Rig, Shells};
+use std::sync::Arc;
+
+use crate::bash::rig::{Failure, Laid, Line, Master, Reacting, Rig, Shell};
 use crate::bash::stack::{self, Columns, Site, Source, Stack};
 use crate::tests::scripts::{bash, Scripts};
 
@@ -21,44 +23,48 @@ WALK() {
 
 struct Walking;
 
-/// The shells that joined, and the walks they reported. A walk is read against
-/// the shell it was taken in, so the register comes first and every message
-/// goes through it.
-#[derive(Default)]
+/// One shell's walks. A walk is read against the shell it was taken in, and
+/// this reaction was handed that shell before its first message could arrive.
 struct Walks {
-    shells: Shells,
+    shell: Arc<Shell>,
     seen: Vec<Stack>,
 }
 
 impl Rig for Walking {
-    type Session = Walks;
+    type Attending = Walks;
 
     fn bash(&self) -> String {
         stack::with(&[BASH])
     }
 
-    fn open(&self) -> Result<Self::Session, Failure> {
-        Ok(Walks::default())
+    fn joined(&self, _at: &Laid, shell: Arc<Shell>) -> Result<Walks, Failure> {
+        Ok(Walks { shell, seen: Vec::new() })
     }
+}
 
-    fn hear(&self, walks: &mut Self::Session, said: Line) -> Result<(), Failure> {
-        let shell = walks.shells.hear(&said)?;
+impl Reacting for Walks {
+    type Kept = Vec<Stack>;
+
+    fn hear(&mut self, said: Line) -> Result<(), Failure> {
         let Some(words) = said.behind("WALK") else { return Ok(()) };
 
-        let walk = Columns::of(words)?.frames(&walks.shells.at(shell).bash)?;
-        walks.seen.push(walk);
+        self.seen.push(Columns::of(words)?.frames(&self.shell)?);
 
         Ok(())
+    }
+
+    fn finish(self) -> Result<Vec<Stack>, Failure> {
+        Ok(self.seen)
     }
 }
 
 impl Master for Walking {}
 
-/// Every walk a command line produced.
+/// Every walk a command line produced, shell by shell in the order they joined.
 fn walks_in<A: AsRef<std::ffi::OsStr>>(argv: &[A]) -> Vec<Stack> {
     let ran = Walking.run(argv).unwrap_or_else(|e| panic!("{e}"));
 
-    ran.whole().unwrap().0.seen
+    ran.whole().unwrap().shells.into_iter().flat_map(|at| at.kept).collect()
 }
 
 /// The same over a script — and the scripts, which stay alive: a source path

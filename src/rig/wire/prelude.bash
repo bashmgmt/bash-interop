@@ -85,12 +85,16 @@ __bc_ask() {
     "${__bc_answer[@]}"
 }
 
-# $1 is the kind, the rest the client's arglist. The protocol's own words go
-# in front of it, and the reader shifts exactly those back off. The sequence
-# number is spent once here, whichever of the two paths below takes it.
+# $1 is the kind, the rest what the shell is saying. The protocol's own words
+# go in front of it, and the reader shifts exactly those back off.
+#
+# Only the clock rides here. A shell's pid, its parent and its $SHLVL do not
+# change while it lives, so they are in the account it gives on joining, and
+# every message after that is two words shorter for it. The frame header
+# already carries the pid, which is what routes a message to its shell.
 __bc_send() {
     local __bc_seq=$(( __BC__seq++ ))
-    set -- "$1" "at=$EPOCHREALTIME" "parent=$__BC__parent" "shlvl=$SHLVL" "${@:2}"
+    set -- "$1" "at=$EPOCHREALTIME" "${@:2}"
 
     local __bc_msg
     printf -v __bc_msg '%s ' "${@@Q}"
@@ -123,6 +127,11 @@ __bc_send() {
 # its own accord sourced it by hand. Neither is knowable from here, and neither
 # needs to be.
 __bc_join() {
+    # `IFS` for this frame alone: the version below is joined with `[*]`, which
+    # uses the subject's, and a subject with one of its own would corrupt it.
+    # Returning gives the subject's back, including one that was unset.
+    local IFS=' '
+
     __BC__parent=${__BC__owner:-$PPID}
 
     exec {__BC__up}>"$__BC__UP" || __BC_THROW
@@ -130,6 +139,9 @@ __bc_join() {
     __BC__seq=0
 
     __bc_send JOIN \
+        parent    "$__BC__parent" \
+        shlvl     "$SHLVL" \
+        subshell  "$BASH_SUBSHELL" \
         versinfo  "(${BASH_VERSINFO[*]@Q})" \
         bash      "$BASH" \
         zero      "$0" \
@@ -137,7 +149,6 @@ __bc_join() {
         shellopts "$SHELLOPTS" \
         bashopts  "$BASHOPTS" \
         command   "${BASH_EXECUTION_STRING-}" \
-        subshell  "$BASH_SUBSHELL" \
         || __BC_BAIL
 }
 

@@ -3,9 +3,10 @@
 mod words;
 
 use std::path::Path;
+use std::sync::Arc;
 
 use super::*;
-use crate::bash::shell::Bash;
+use crate::bash::rig::Shell;
 use crate::bash::value::emit_array;
 use crate::tests::accounts;
 
@@ -44,7 +45,7 @@ fn columns(at: &[String; 5], skip: usize, traced: bool) -> Columns<'_> {
 
 /// The shell `real()` was taken in: bash was handed `/x.bash` to read, so its
 /// `$0` is that path and reads as one.
-fn reading() -> Bash {
+fn reading() -> Arc<Shell> {
     accounts::reading("/x.bash")
 }
 

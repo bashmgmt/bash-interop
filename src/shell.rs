@@ -1,22 +1,21 @@
-//! What a bash shell is: which bash, how it was given its code, and what it
-//! had switched on.
+//! What a shell is: which bash, how it was given its code, and what it had
+//! switched on when it joined.
 //!
-//! Everything here is a shell's own account of itself, read back from the words
-//! it wrote when it joined. Nothing is inferred from the shape of what it went
-//! on to say — bash reports one word for several different things, `main`
-//! standing for a script's top level in `FUNCNAME`, an interactive prompt in
-//! `BASH_SOURCE`, and any function a subject cares to name that way, so a
-//! reading that guessed from one of them would be right until it was not.
+//! A shell's own account of itself, read back from the words it wrote. Nothing
+//! is inferred from the shape of what it went on to say — bash reports one word
+//! for several different things, `main` standing for a script's top level in
+//! `FUNCNAME`, an interactive prompt in `BASH_SOURCE`, and any function a
+//! subject cares to name that way.
 //!
-//! A general utility about bash, like [`value`](super::value): nothing here
-//! knows about the wire it arrived on.
+//! [`Bash`] and what it holds are description alone. [`Shell`] pairs that with
+//! where the shell sits in the run, which is the wire's to say.
 
 use std::fmt;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use super::rig::field;
+use super::rig::wire::{field, Micros, Pid, Sent};
 use super::value::parse_array;
 use crate::failure::Failure;
 
@@ -50,9 +49,8 @@ impl Version {
         let [major, minor, patch, build, status, machine] = parts.as_slice() else {
             return Err(broken(format!("a version of {} parts", parts.len())));
         };
-        let count = |what: &str, text: &String| {
-            text.parse().map_err(|_| broken(format!("{what} {text:?}")))
-        };
+        let count =
+            |what: &str, text: &str| text.parse().map_err(|_| broken(format!("{what} {text:?}")));
 
         Ok(Self {
             major: count("a major version", major)?,
@@ -71,10 +69,9 @@ impl fmt::Display for Version {
     }
 }
 
-/// How bash was given the code it runs.
-///
-/// `set` refuses `-i`, `-c` and `-s`, so all three are settled when the shell
-/// starts and cannot have changed by the time anything reads them.
+/// How bash was given the code it runs. `set` refuses `-i`, `-c` and `-s`, so
+/// all three are settled when the shell starts and cannot have changed by the
+/// time anything reads them.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Started {
     /// `-c`, with the text bash was given. Absent for any other invocation.
@@ -99,9 +96,9 @@ impl Started {
 
 /// `$-`, as bash wrote it.
 ///
-/// The letters are of two kinds and this is the string, not the reading: how
-/// bash was started is [`Started`], asked once, and what follows here is only
-/// the options a subject can turn on and off while it runs.
+/// The string, not the reading: how bash was started is [`Started`], asked
+/// once, and what is left here are the options a subject turns on and off while
+/// it runs.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Flags(String);
 
@@ -121,10 +118,6 @@ impl Flags {
     pub fn xtrace(&self) -> bool {
         self.has('x')
     }
-
-    pub fn letters(&self) -> &str {
-        &self.0
-    }
 }
 
 impl fmt::Display for Flags {
@@ -133,10 +126,8 @@ impl fmt::Display for Flags {
     }
 }
 
-/// What a shell had switched on, at the moment it said so.
-///
-/// A snapshot and not an identity: a subject may `set -e` at any point, so this
-/// is true of when it was taken and of nothing else.
+/// What a shell had switched on at the moment it said so. A snapshot: a subject
+/// may `set -e` at any point.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct State {
     pub flags: Flags,
@@ -146,21 +137,6 @@ pub struct State {
 
     /// `$BASHOPTS`, split — the `shopt` options that were on.
     pub bashopts: Vec<String>,
-}
-
-impl State {
-    /// Read off the words a shell wrote about itself.
-    pub fn of(words: &[String]) -> Result<Self, Failure> {
-        let split = |key: &str| -> Result<Vec<String>, Failure> {
-            Ok(word(words, key)?.split(':').filter(|opt| !opt.is_empty()).map(String::from).collect())
-        };
-
-        Ok(Self {
-            flags: Flags(word(words, "flags")?.to_string()),
-            shellopts: split("shellopts")?,
-            bashopts: split("bashopts")?,
-        })
-    }
 }
 
 /// Which bash a shell is, and how it was started. Constant for as long as the
@@ -178,38 +154,90 @@ pub struct Bash {
     /// [`Started::from_a_file`] is which.
     pub zero: String,
 
+    pub started: Started,
+}
+
+/// A shell in a run: which bash it is, where it sits, and what it had switched
+/// on when it joined.
+///
+/// Made once, from the account a shell gives before it says anything else. A
+/// reaction is handed one at construction, so nothing about a shell is ever a
+/// parameter afterwards.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Shell {
+    /// The order it joined in, counting from zero.
+    pub nth: usize,
+
+    pub pid: Pid,
+
+    /// The shell that emitted before this one forked. Not `$PPID`, which names
+    /// the grandparent inside a subshell.
+    pub parent: Pid,
+
+    pub shlvl: u32,
+
     /// `$BASH_SUBSHELL`. A subshell has a `$BASHPID` of its own and so joins as
     /// a shell of its own, which is why this is fixed for the shell's life.
     pub subshell: u32,
 
-    pub started: Started,
+    /// When it joined, on both clocks.
+    pub joined: Sent,
+
+    pub bash: Bash,
+    pub state: State,
 }
 
-impl Bash {
+impl Shell {
     /// Read off the words a shell wrote about itself.
-    pub fn of(words: &[String]) -> Result<Self, Failure> {
-        let flags = word(words, "flags")?;
-        let command = word(words, "command")?;
-        let subshell = word(words, "subshell")?;
+    pub(crate) fn of(
+        nth: usize,
+        pid: Pid,
+        joined: Sent,
+        account: &[String],
+    ) -> Result<Self, Failure> {
+        let word = |key: &str| {
+            field(account, key).ok_or_else(|| broken(format!("no {key:?}"))).map(str::to_string)
+        };
+        let count = |key: &str| -> Result<u32, Failure> {
+            let text = word(key)?;
+            text.parse().map_err(|_| broken(format!("{key} {text:?}")))
+        };
+        let split = |key: &str| -> Result<Vec<String>, Failure> {
+            Ok(word(key)?.split(':').filter(|opt| !opt.is_empty()).map(String::from).collect())
+        };
+
+        let flags = word("flags")?;
+        let command = word("command")?;
 
         Ok(Self {
-            version: Version::of(word(words, "versinfo")?)?,
-            binary: PathBuf::from(word(words, "bash")?),
-            zero: word(words, "zero")?.to_string(),
-            subshell: subshell
-                .parse()
-                .map_err(|_| broken(format!("a subshell depth of {subshell:?}")))?,
-            started: Started {
-                command: flags.contains('c').then(|| command.to_string()),
-                standard_input: flags.contains('s'),
-                interactive: flags.contains('i'),
+            nth,
+            pid,
+            parent: Pid(count("parent")?),
+            shlvl: count("shlvl")?,
+            subshell: count("subshell")?,
+            joined,
+            bash: Bash {
+                version: Version::of(&word("versinfo")?)?,
+                binary: PathBuf::from(word("bash")?),
+                zero: word("zero")?,
+                started: Started {
+                    command: flags.contains('c').then_some(command),
+                    standard_input: flags.contains('s'),
+                    interactive: flags.contains('i'),
+                },
+            },
+            state: State {
+                shellopts: split("shellopts")?,
+                bashopts: split("bashopts")?,
+                flags: Flags(flags),
             },
         })
     }
-}
 
-fn word<'a>(words: &'a [String], key: &str) -> Result<&'a str, Failure> {
-    field(words, key).ok_or_else(|| broken(format!("no {key:?}")))
+    /// When it joined, on its own clock — what the fork relation is ordered by.
+    pub(crate) fn opened_at(&self) -> Micros {
+        self.joined.sent_at
+    }
 }
 
 fn broken(what: String) -> Failure {

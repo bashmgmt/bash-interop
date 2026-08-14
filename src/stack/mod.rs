@@ -6,11 +6,9 @@
 
 mod columns;
 mod frame;
-mod walk;
 
 pub use columns::{Args, Columns};
-pub use frame::{Frame, Site, Source};
-pub use walk::Stack;
+pub use frame::{Frame, Site, Source, Stack};
 
 /// `__bc_stack`, which ships the five arrays. Private: an instrument reaches
 /// it through [`with`], which is what puts it in the right place.

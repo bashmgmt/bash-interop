@@ -9,20 +9,21 @@ use std::io;
 use std::os::fd::{AsFd, OwnedFd};
 
 use super::serving::{Serving, Until};
-use super::{Answer, Rig};
+use super::{Answer, Attended, Kept, Rig};
 use crate::failure::{Doing, Failure};
 
 /// What a served session produced.
 ///
 /// Reaching one of these means the conversation ran and was seen out. A
 /// `Failure` instead means it never got that far: the workspace could not be
-/// laid, or the rig could not do its work.
-pub struct Served<S> {
-    /// The client's own state, whatever it made of what it heard.
-    pub session: S,
+/// laid, or a reaction could not do its work.
+pub struct Served<K> {
+    /// Every shell that joined, in the order they did, with what its reaction
+    /// left behind.
+    pub shells: Vec<Attended<K>>,
 
     /// What went wrong closing up, if anything: a message left half-read, or a
-    /// session that would not let go. Both happen after the conversation
+    /// reaction that would not let go. Both happen after the conversation
     /// reached its own end.
     pub failed: Option<Failure>,
 }
@@ -42,35 +43,35 @@ pub struct Served<S> {
 /// that shell, its functions, its subshells and what it sources; exporting
 /// `BASH_ENV` to the same path instruments the processes it starts.
 pub trait Slave: Rig {
-    fn serve<A>(&self, held: OwnedFd, announce: A) -> Result<Served<Self::Session>, Failure>
+    fn serve<A>(&self, held: OwnedFd, announce: A) -> Result<Served<Kept<Self>>, Failure>
     where
         A: FnOnce(&Answer) -> Result<(), Failure>,
         Self: Sized,
     {
         let mut serving = Serving::lay(self)?;
 
-        let prelude = serving.prelude();
-        let path = prelude.to_str().ok_or_else(|| {
-            Failure::new("announcing the session", format!("{} is not text", prelude.display()))
+        let address = serving.address();
+        let path = address.to_str().ok_or_else(|| {
+            Failure::new("announcing the session", format!("{} is not text", address.display()))
         })?;
         announce(&Answer::of("source", [path]))?;
 
         serving.drive(&Until::held(held))?;
 
-        let (session, failed) = serving.finish();
+        let (shells, failed) = serving.finish();
 
-        Ok(Served { session, failed })
+        Ok(Served { shells, failed })
     }
 
-    /// Serve the client that started this process as a coprocess: it holds
-    /// this process's standard input, and reads the address from its standard
+    /// Serve the client that started this process as a coprocess: it holds this
+    /// process's standard input, and reads the address from its standard
     /// output.
     ///
     /// That convention has a second half, and `BC_JOIN` in `assets/joining.bash`
     /// is it — one word doing the `coproc`, the one `read` and the `declare -a`.
     /// A server that wants a channel of its own calls [`serve`](Slave::serve)
     /// instead.
-    fn serve_coprocess(&self) -> Result<Served<Self::Session>, Failure>
+    fn serve_coprocess(&self) -> Result<Served<Kept<Self>>, Failure>
     where
         Self: Sized,
     {

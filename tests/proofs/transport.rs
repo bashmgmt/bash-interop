@@ -1,14 +1,14 @@
 //! Every shell reaches the wire, and what it writes arrives whole.
 
-use mb_resolver::bash::rig::{forest, shells, ExitStatus, ShellNode};
+use mb_resolver::bash::rig::{forest, ExitStatus, ShellNode};
 
-use crate::{behind, heard, report, script, ENTRY};
+use crate::{behind, report, running, script, ENTRY};
 
 /// Nothing is inherited, and the forest follows the emitting parent — which
 /// `$PPID` would get wrong inside a subshell.
 #[test]
 fn every_descendant_shell_reaches_the_wire() {
-    let (seen, _) = heard(&[
+    let ran = running(&[
         (
             ENTRY,
             r#"
@@ -29,15 +29,14 @@ fn every_descendant_shell_reaches_the_wire() {
     ]);
 
     assert_eq!(
-        behind(&seen, "REC"),
+        behind(&ran.shells, "REC"),
         [["top"], ["paren"], ["cmdsubst"], ["child"], ["grandchild"], ["after"]],
         "{}",
-        report(&seen)
+        report(&ran.shells)
     );
 
-    let shells = shells(&seen).expect("every shell said what it was");
-    let forest = forest(&shells);
-    assert_eq!(forest.len(), 1, "one root: nothing is orphaned{}", report(&seen));
+    let forest = forest(&ran.shells);
+    assert_eq!(forest.len(), 1, "one root: nothing is orphaned{}", report(&ran.shells));
 
     let tree = descend(&forest, None);
     assert_eq!(tree.len(), 5, "the shell, two subshells, the child, its subshell");
@@ -45,7 +44,7 @@ fn every_descendant_shell_reaches_the_wire() {
     assert!(
         tree.iter().all(|(shell, above)| above.is_none_or(|up| shell.shlvl >= up.shlvl)),
         "SHLVL never drops toward a descendant{}",
-        report(&seen)
+        report(&ran.shells)
     );
 }
 
@@ -57,14 +56,14 @@ struct Descendant {
 
 /// Every shell under `nodes`, with the one that started it where there is one.
 fn descend(
-    nodes: &[ShellNode<'_>],
+    nodes: &[ShellNode],
     above: Option<Descendant>,
 ) -> Vec<(Descendant, Option<Descendant>)> {
     nodes
         .iter()
         .flat_map(|node| {
-            let shlvl = node.shell.joined.opened.shlvl;
-            let shell = Descendant { depth: above.map_or(1, |up| up.depth + 1), shlvl };
+            let shell =
+                Descendant { depth: above.map_or(1, |up| up.depth + 1), shlvl: node.shell.shlvl };
 
             std::iter::once((shell, above)).chain(descend(&node.children, Some(shell)))
         })
@@ -75,7 +74,7 @@ fn descend(
 /// interleave, and anything longer is split and rejoined by `(pid, seq)`.
 #[test]
 fn concurrent_writers_never_interleave() {
-    let (seen, _) = heard(&[
+    let ran = running(&[
         (
             ENTRY,
             r#"
@@ -97,7 +96,7 @@ fn concurrent_writers_never_interleave() {
         ),
     ]);
 
-    let records = behind(&seen, "REC");
+    let records = behind(&ran.shells, "REC");
     assert_eq!(records.len(), 8 * 80);
     assert_eq!(
         records.iter().filter(|words| words[0].len() > 9000).count(),
@@ -113,7 +112,7 @@ fn concurrent_writers_never_interleave() {
 /// reader joins the chunks as bytes and decodes the message once.
 #[test]
 fn a_message_of_wide_characters_survives_being_cut() {
-    let (seen, _) = heard(&[(
+    let ran = running(&[(
         ENTRY,
         r#"
         wide="$(printf '€%.0s' {1..6000})"
@@ -122,8 +121,8 @@ fn a_message_of_wide_characters_survives_being_cut() {
         "#,
     )]);
 
-    let records = behind(&seen, "REC");
-    assert_eq!(records.len(), 4, "one per writer{}", report(&seen));
+    let records = behind(&ran.shells, "REC");
+    assert_eq!(records.len(), 4, "one per writer{}", report(&ran.shells));
 
     for words in &records {
         assert_eq!(words[1].chars().count(), 6000, "every character back, and only those");
@@ -136,14 +135,14 @@ fn a_message_of_wide_characters_survives_being_cut() {
 #[test]
 fn nothing_is_lost_at_the_end() {
     for _ in 0..10 {
-        let (seen, status) = script(
+        let ran = script(
             r#"
             for i in $(seq 1 200); do BC_INSTR say REC "r$i"; done
             exit 3
             "#,
         );
-        assert_eq!(behind(&seen, "REC").len(), 200);
-        assert_eq!(status, ExitStatus::Code(3));
+        assert_eq!(behind(&ran.shells, "REC").len(), 200);
+        assert_eq!(ran.subject, ExitStatus::Code(3));
     }
 }
 
@@ -151,7 +150,7 @@ fn nothing_is_lost_at_the_end() {
 /// carrying one arrives whole — and as one word, beside the next.
 #[test]
 fn a_newline_inside_a_value_is_escaped_not_framed() {
-    let (seen, _) = script(
+    let ran = script(
         r#"
         payload=$'first\nsecond\tthird\\fourth'
         BC_INSTR say REC "$payload" plain
@@ -159,10 +158,10 @@ fn a_newline_inside_a_value_is_escaped_not_framed() {
     );
 
     assert_eq!(
-        behind(&seen, "REC"),
+        behind(&ran.shells, "REC"),
         [["first\nsecond\tthird\\fourth", "plain"]],
         "{}",
-        report(&seen)
+        report(&ran.shells)
     );
-    assert_eq!(behind(&seen, "REC").len(), 1, "one message, not two frames of nonsense");
+    assert_eq!(behind(&ran.shells, "REC").len(), 1, "one message, not two frames of nonsense");
 }

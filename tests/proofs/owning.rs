@@ -1,12 +1,15 @@
 //! The run owns its subject: the workspace it lays down, and the process
 //! group it takes with it however it ends.
 
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use mb_resolver::bash::rig::{Answer, ExitStatus, Failure, Kind, Line, Master, Rig};
+use mb_resolver::bash::rig::{
+    Answer, ExitStatus, Failure, Kind, Laid, Line, Master, Reacting, Rig, Shell,
+};
 
 use crate::support::{bash, Scripts};
-use crate::{behind, gone, report, script, Keeping, ENTRY};
+use crate::{behind, gone, lines, report, script, Keeping, ENTRY};
 
 /// A workspace the rig named is left where it was told to, so what the session
 /// laid down is there to read afterwards.
@@ -16,10 +19,10 @@ fn a_named_workspace_is_left_behind() {
     let at = temp.path().join("under").join("here");
     let scripts = Scripts::of(&[(ENTRY, "BC_INSTR say REC one")]);
 
-    let (seen, status) = Keeping::at(&at).run(&bash(scripts.at(ENTRY))).unwrap().whole().unwrap();
+    let ran = Keeping::at(&at).run(&bash(scripts.at(ENTRY))).unwrap().whole().unwrap();
 
-    assert_eq!(status, ExitStatus::Code(0));
-    assert_eq!(behind(&seen, "REC"), [["one"]]);
+    assert_eq!(ran.subject, ExitStatus::Code(0));
+    assert_eq!(behind(&ran.shells, "REC"), [["one"]]);
 
     assert!(at.join("prelude.bash").is_file(), "the protocol's bash");
     assert!(at.join("rig.bash").is_file(), "the rig's own, beside it");
@@ -51,10 +54,14 @@ fn every_reply_pipe_goes_with_its_answer() {
         ),
     ]);
 
-    let (seen, status) = Keeping::at(&at).run(&bash(scripts.at(ENTRY))).unwrap().whole().unwrap();
+    let ran = Keeping::at(&at).run(&bash(scripts.at(ENTRY))).unwrap().whole().unwrap();
 
-    assert_eq!(status, ExitStatus::Code(0));
-    assert_eq!(seen.iter().filter(|line| line.kind == Kind::Ask).count(), 43, "two shells asked");
+    assert_eq!(ran.subject, ExitStatus::Code(0));
+    assert_eq!(
+        lines(&ran.shells).iter().filter(|line| line.kind == Kind::Ask).count(),
+        43,
+        "two shells asked"
+    );
 
     let left: Vec<String> = std::fs::read_dir(&at)
         .unwrap()
@@ -75,7 +82,7 @@ fn a_workspace_belongs_to_one_run() {
     let scripts = Scripts::of(&[(ENTRY, "BC_INSTR say REC one")]);
 
     let first = Keeping::at(&at).run(&bash(scripts.at(ENTRY))).unwrap().whole().unwrap();
-    assert_eq!(first.1, ExitStatus::Code(0));
+    assert_eq!(first.subject, ExitStatus::Code(0));
 
     let again = Keeping::at(&at).run(&bash(scripts.at(ENTRY)))
         .err()
@@ -89,7 +96,7 @@ fn a_workspace_belongs_to_one_run() {
 #[test]
 fn a_shell_left_asking_does_not_outlive_the_run() {
     let started = Instant::now();
-    let (seen, _) = script(
+    let ran = script(
         r#"
         bash -c 'BC_INSTR say REC lingering $BASHPID; sleep 30; BC_INSTR ask never' &
         sleep 0.2
@@ -98,7 +105,7 @@ fn a_shell_left_asking_does_not_outlive_the_run() {
     );
     assert!(started.elapsed() < Duration::from_secs(5), "the run must not wait for a straggler");
 
-    let lingering: i32 = behind(&seen, "REC")
+    let lingering: i32 = behind(&ran.shells, "REC")
         .iter()
         .find_map(|words| match words {
             [first, pid] if first == "lingering" => pid.parse().ok(),
@@ -106,22 +113,31 @@ fn a_shell_left_asking_does_not_outlive_the_run() {
         })
         .expect("the straggler reported itself");
 
-    assert!(gone(lingering), "{lingering} outlived the run\n{}", report(&seen));
+    assert!(gone(lingering), "{lingering} outlived the run\n{}", report(&ran.shells));
 }
 
-/// Blows up instead of answering. Its session is nothing at all, which is a
-/// session type like any other.
+/// Blows up instead of answering, and keeps nothing.
 struct Exploding;
 
-impl Rig for Exploding {
-    type Session = ();
+struct Boom;
 
-    fn open(&self) -> Result<(), Failure> {
-        Ok(())
+impl Rig for Exploding {
+    type Attending = Boom;
+
+    fn joined(&self, _at: &Laid, _shell: Arc<Shell>) -> Result<Boom, Failure> {
+        Ok(Boom)
+    }
+}
+
+impl Reacting for Boom {
+    type Kept = ();
+
+    fn answer(&mut self, _: Line) -> Result<Answer, Failure> {
+        panic!("answer blew up")
     }
 
-    fn answer(&self, _: &mut (), _: Line) -> Result<Answer, Failure> {
-        panic!("answer blew up")
+    fn finish(self) -> Result<(), Failure> {
+        Ok(())
     }
 }
 

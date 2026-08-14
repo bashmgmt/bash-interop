@@ -2,36 +2,52 @@
 //! conversation with the subject: `run` ends in the reason, and the subject is
 //! killed rather than told something and left to interpret it.
 
+use std::sync::Arc;
 use std::time::Instant;
 
-use mb_resolver::bash::rig::{Answer, ExitStatus, Failure, Kind, Line, Master, Rig};
+use mb_resolver::bash::rig::{
+    Answer, ExitStatus, Failure, Kind, Laid, Line, Master, Reacting, Rig, Shell,
+};
 
 use crate::support::{bash, Scripts};
 use crate::{behind, gone, report, script, Keeping, ENTRY};
 
-/// Fails the first time it is asked anything, and keeps whatever it heard.
+/// Fails the first time it is given a message of the kind it breaks on.
 struct Breaking {
     on: Kind,
 }
 
+struct Breaks {
+    on: Kind,
+    heard: Vec<Line>,
+}
+
 impl Rig for Breaking {
-    type Session = Vec<Line>;
+    type Attending = Breaks;
 
-    fn open(&self) -> Result<Vec<Line>, Failure> {
-        Ok(Vec::new())
+    fn joined(&self, _at: &Laid, _shell: Arc<Shell>) -> Result<Breaks, Failure> {
+        Ok(Breaks { on: self.on, heard: Vec::new() })
     }
+}
 
-    fn hear(&self, heard: &mut Vec<Line>, said: Line) -> Result<(), Failure> {
+impl Reacting for Breaks {
+    type Kept = Vec<Line>;
+
+    fn hear(&mut self, said: Line) -> Result<(), Failure> {
         if self.on == Kind::Say {
             return Err(Failure::new("keeping what was said", "the sink is on fire"));
         }
-        heard.push(said);
+        self.heard.push(said);
 
         Ok(())
     }
 
-    fn answer(&self, _: &mut Vec<Line>, _: Line) -> Result<Answer, Failure> {
+    fn answer(&mut self, _: Line) -> Result<Answer, Failure> {
         Err(Failure::new("deciding an answer", "the operator is on fire"))
+    }
+
+    fn finish(self) -> Result<Vec<Line>, Failure> {
+        Ok(self.heard)
     }
 }
 
@@ -111,10 +127,10 @@ fn a_reply_pipe_name_already_taken_is_the_subjects_to_handle() {
         "#,
     )]);
 
-    let (seen, status) = Keeping::default().run(&bash(scripts.at(ENTRY))).unwrap().whole().unwrap();
+    let ran = Keeping::default().run(&bash(scripts.at(ENTRY))).unwrap().whole().unwrap();
 
-    assert_eq!(status, ExitStatus::Code(0), "the subject carried on and ended its own way");
-    assert_eq!(behind(&seen, "REC"), [["still running"]], "{}", report(&seen));
+    assert_eq!(ran.subject, ExitStatus::Code(0), "the subject carried on and ended its own way");
+    assert_eq!(behind(&ran.shells, "REC"), [["still running"]], "{}", report(&ran.shells));
 
     let said = std::fs::read_to_string(scripts.at("err")).unwrap();
     assert!(said.contains("ask returned 125"), "the instrumentation failed: {said:?}");
@@ -127,17 +143,17 @@ fn a_reply_pipe_name_already_taken_is_the_subjects_to_handle() {
 /// on knowing nothing about it.
 #[test]
 fn an_unknown_verb_is_reported_rather_than_ignored() {
-    let (seen, status) = script(
+    let ran = script(
         r#"
         complaint="$(BC_INSTR mumble something 2>&1)"
         BC_INSTR say REC "returned $?" "$complaint"
         "#,
     );
 
-    assert_eq!(status, ExitStatus::Code(0), "the subject carries on");
+    assert_eq!(ran.subject, ExitStatus::Code(0), "the subject carries on");
 
-    let said = behind(&seen, "REC");
-    assert_eq!(said.len(), 1, "{}", report(&seen));
-    assert_eq!(said[0][0], "returned 125", "the instrumentation failed{}", report(&seen));
+    let said = behind(&ran.shells, "REC");
+    assert_eq!(said.len(), 1, "{}", report(&ran.shells));
+    assert_eq!(said[0][0], "returned 125", "the instrumentation failed{}", report(&ran.shells));
     assert!(said[0][1].contains("unknown verb mumble"), "it says which: {:?}", said[0][1]);
 }

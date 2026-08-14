@@ -1,11 +1,13 @@
 //! The account a shell gives of itself, built by hand.
 //!
-//! One builder, so a test that needs the words and a test that needs the value
-//! read the same shell. The numbers are a real 5.3.9's: what is under test
+//! One builder, so a test that needs the words and a test that needs the shell
+//! read the same one. The numbers are a real 5.3.9's: what is under test
 //! wherever this is used is the arrangement or the walk, never the reading of
 //! this payload — that is tested against a live shell.
 
-use crate::bash::shell::Bash;
+use std::sync::Arc;
+
+use crate::bash::rig::{Micros, Pid, Sent, Shell};
 use crate::bash::value::emit_array;
 
 /// The words a `JOIN` message carries. `zero` is the shell's `$0` and `flags`
@@ -16,35 +18,36 @@ pub fn account(zero: &str, flags: &str) -> Vec<String> {
     let command = if flags.contains('c') { "true" } else { "" };
 
     [
-        "versinfo",
-        versinfo.as_str(),
-        "bash",
-        "/usr/bin/bash",
-        "zero",
-        zero,
-        "flags",
-        flags,
-        "shellopts",
-        "braceexpand:hashall",
-        "bashopts",
-        "checkwinsize",
-        "command",
-        command,
-        "subshell",
-        "0",
+        "parent", "1",
+        "shlvl", "5",
+        "subshell", "0",
+        "versinfo", versinfo.as_str(),
+        "bash", "/usr/bin/bash",
+        "zero", zero,
+        "flags", flags,
+        "shellopts", "braceexpand:hashall",
+        "bashopts", "checkwinsize",
+        "command", command,
     ]
     .iter()
     .map(ToString::to_string)
     .collect()
 }
 
+/// A shell, as one would arrive.
+pub fn shell(nth: usize, pid: u32, zero: &str, flags: &str) -> Arc<Shell> {
+    let joined = Sent { nth: 0, seq: 0, sent_at: Micros(100), heard_at: Micros(101) };
+
+    Arc::new(Shell::of(nth, Pid(pid), joined, &account(zero, flags)).expect("an account"))
+}
+
 /// A shell bash was handed a file to read.
-pub fn reading(zero: &str) -> Bash {
-    Bash::of(&account(zero, "hB")).expect("an account of a shell reading a file")
+pub fn reading(zero: &str) -> Arc<Shell> {
+    shell(0, 7, zero, "hB")
 }
 
 /// A shell bash was given its code directly, where `$0` is a word and not a
 /// path.
-pub fn given(zero: &str) -> Bash {
-    Bash::of(&account(zero, "hBc")).expect("an account of a shell given its code")
+pub fn given(zero: &str) -> Arc<Shell> {
+    shell(0, 7, zero, "hBc")
 }

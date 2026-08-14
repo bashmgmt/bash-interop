@@ -1,28 +1,43 @@
-//! The conversation itself: a workspace with a wire in it, a session beside
-//! it, and the loop that serves until nobody can speak any more.
+//! The conversation itself: a workspace with a wire in it, one reaction per
+//! shell, and the loop that serves until nobody can speak any more.
 //!
 //! What that means is an [`Until`] — a descriptor the role built. Which shells
 //! it stands for, and whether anything is owed to them afterwards, belongs to
 //! the role and not here.
 
+use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::sync::Arc;
 
 use tempfile::TempDir;
 
-use super::wire::{prelude, Kind, Wire};
-use super::{Rig, Workspace};
+use super::wire::{prelude, Arrived, Kind, Pid, Wire};
+use super::{Attended, Kept, Laid, Reacting, Rig, Shell, Workspace};
 use crate::failure::{Doing, Failure};
 
-/// A laid conversation: the workspace is written, the pipe is open, the
-/// session is up. What is missing is who speaks and what ends it.
+/// One shell and the reaction built for it. Having one is the whole proof that
+/// the shell announced itself: there is no other way to make one.
+struct Attending<A> {
+    shell: Arc<Shell>,
+    reacting: A,
+}
+
+/// A laid conversation: the workspace is written and the pipe is open. What is
+/// missing is who speaks and what ends it.
 pub(super) struct Serving<'r, R: Rig> {
     rig: &'r R,
-    session: R::Session,
+    laid: Laid,
     wire: Wire,
-    prelude: PathBuf,
+
+    shells: Vec<Attending<R::Attending>>,
+
+    /// The newest shell carrying each pid, which is what a later message from
+    /// that pid belongs to. A pid reused across a long run opens a new shell
+    /// rather than reopening the first.
+    newest: HashMap<Pid, usize>,
 
     /// Held only to be dropped: it takes the workspace with it, and it goes
     /// last so nothing is reading the files when it does.
@@ -50,36 +65,57 @@ impl<'r, R: Rig> Serving<'r, R> {
 
         let wire = Wire::create(&dir)?;
         let prelude = prelude(&dir, &rig.bash())?;
-        let session = rig.open()?;
 
-        Ok(Self { rig, session, wire, prelude, _temporary: temporary })
+        Ok(Self {
+            rig,
+            laid: Laid { dir, prelude },
+            wire,
+            shells: Vec::new(),
+            newest: HashMap::new(),
+            _temporary: temporary,
+        })
     }
 
     /// The file a shell has to source to join. It is the session's only
     /// address.
-    pub(super) fn prelude(&self) -> &Path {
-        &self.prelude
+    pub(super) fn address(&self) -> &Path {
+        &self.laid.prelude
     }
 
-    /// Every message the pipe holds, handed to the rig one at a time. A shell
-    /// that asked is blocked until its answer is written, so writing it is
-    /// part of delivering rather than something a caller does afterwards.
+    /// Every message the pipe holds, handed to the shell that sent it. An
+    /// account of itself makes that shell; everything else needs one to already
+    /// exist, and a message from a pid that never announced itself is a fault.
     ///
-    /// A shell's account of itself is delivered like anything nobody waits on:
-    /// it belongs to the session, where a decoder that has to read a walk
-    /// against the shell it was taken in will look for it.
+    /// A shell that asked is blocked until its answer is written, so writing it
+    /// is part of delivering rather than something a caller does afterwards.
     fn deliver(&mut self) -> Result<(), Failure> {
-        for line in self.wire.drain()? {
-            // The rig consumes the message, and the reply pipe is named after
-            // the shell that sent it.
-            let asking = line.sent.pid;
+        for arrived in self.wire.drain()? {
+            match arrived {
+                Arrived::Joined { pid, sent, account } => {
+                    let shell = Arc::new(Shell::of(self.shells.len(), pid, sent, &account)?);
+                    let reacting = self.rig.joined(&self.laid, shell.clone())?;
 
-            match line.kind {
-                Kind::Say | Kind::Join => self.rig.hear(&mut self.session, line)?,
-                Kind::Ask => {
-                    let answer = self.rig.answer(&mut self.session, line)?;
+                    self.newest.insert(pid, self.shells.len());
+                    self.shells.push(Attending { shell, reacting });
+                }
 
-                    self.wire.answer(asking, answer)?;
+                Arrived::Spoke { pid, line } => {
+                    let at = *self.newest.get(&pid).ok_or_else(|| {
+                        Failure::new(
+                            "placing a message",
+                            format!("pid {pid} spoke without ever joining"),
+                        )
+                    })?;
+                    let reacting = &mut self.shells[at].reacting;
+
+                    match line.kind {
+                        Kind::Say => reacting.hear(line)?,
+                        Kind::Ask => {
+                            let answer = reacting.answer(line)?;
+
+                            self.wire.answer(pid, answer)?;
+                        }
+                    }
                 }
             }
         }
@@ -101,13 +137,20 @@ impl<'r, R: Rig> Serving<'r, R> {
     }
 
     /// Release what the session holds. A message left half-read is reported
-    /// before the rig is asked to end, since it is the earlier fault.
-    pub(super) fn finish(self) -> (R::Session, Option<Failure>) {
-        let Self { rig, mut session, wire, .. } = self;
+    /// before any reaction is asked to finish, since it is the earlier fault.
+    pub(super) fn finish(self) -> (Vec<Attended<Kept<R>>>, Option<Failure>) {
+        let Self { shells, wire, .. } = self;
+        let mut failed = wire.finish().err();
+        let mut done = Vec::with_capacity(shells.len());
 
-        let failed = wire.finish().err().or_else(|| rig.end(&mut session).err());
+        for Attending { shell, reacting } in shells {
+            match reacting.finish() {
+                Ok(kept) => done.push(Attended { shell, kept }),
+                Err(why) => failed = failed.or(Some(why)),
+            }
+        }
 
-        (session, failed)
+        (done, failed)
     }
 }
 
@@ -146,8 +189,8 @@ enum Ready {
 ///
 /// `events` asks for `POLLIN` on both, which is what a pidfd reports when its
 /// process exits. A handle reports `POLLHUP` or `POLLERR` instead, and `poll`
-/// delivers those whether or not they were asked for — so the second
-/// descriptor is read as ready on anything at all.
+/// delivers those whether or not they were asked for — so the second descriptor
+/// is read as ready on anything at all.
 fn wait_for(wire: &Wire, until: &Until) -> Result<Ready, Failure> {
     loop {
         let mut watching = [

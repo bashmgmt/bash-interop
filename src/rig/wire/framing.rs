@@ -10,7 +10,7 @@
 
 use std::collections::HashMap;
 
-use super::message::{Line, Micros, Pid};
+use super::message::{Arrived, Framed, Micros, Pid};
 use crate::failure::{Doing, Failure};
 
 pub const DELIMITER: u8 = b'\n';
@@ -29,6 +29,10 @@ pub struct Reassembly {
     /// message where the frame fills, which is a byte and may be inside a
     /// character.
     partial: HashMap<(Pid, u32), Vec<u8>>,
+
+    /// How many messages the run has read. Per-shell folds keep each shell's
+    /// own order and nothing else; this is what puts them back together.
+    read: u64,
 }
 
 impl Reassembly {
@@ -39,7 +43,7 @@ impl Reassembly {
     /// them off the front one at a time would rescan and move what is left
     /// behind each of them, which is quadratic in the frames one read carries
     /// — and a busy read carries hundreds.
-    pub fn feed(&mut self, bytes: &[u8], heard_at: Micros) -> Result<Vec<Line>, Failure> {
+    pub fn feed(&mut self, bytes: &[u8], heard_at: Micros) -> Result<Vec<Arrived>, Failure> {
         self.bytes.extend_from_slice(bytes);
 
         let mut framed: Vec<Vec<u8>> = Vec::new();
@@ -54,8 +58,8 @@ impl Reassembly {
 
         let mut whole = Vec::new();
         for frame in &framed {
-            if let Some(line) = self.accept(frame, heard_at)? {
-                whole.push(line);
+            if let Some(arrived) = self.accept(frame, heard_at)? {
+                whole.push(arrived);
             }
         }
         Ok(whole)
@@ -78,11 +82,11 @@ impl Reassembly {
         }
     }
 
-    /// One frame in; a `Line` out once it completed a message.
+    /// One frame in; a whole message out once its last chunk arrived.
     ///
     /// A message is decoded when its last chunk arrives, never before: the
     /// sender cuts where the frame fills, so a character can span two of them.
-    fn accept(&mut self, framed: &[u8], heard_at: Micros) -> Result<Option<Line>, Failure> {
+    fn accept(&mut self, framed: &[u8], heard_at: Micros) -> Result<Option<Arrived>, Failure> {
         let shown = || format!("reading the frame {:?}", String::from_utf8_lossy(framed));
         let frame = Frame::read(framed).doing(shown)?;
         let key = (frame.pid, frame.seq);
@@ -99,7 +103,10 @@ impl Reassembly {
         let text = String::from_utf8(message)
             .doing(|| format!("reading message {pid}.{seq} as text"))?;
 
-        Line::read(pid, seq, heard_at, &text).map(Some)
+        let nth = self.read;
+        self.read += 1;
+
+        Arrived::read(Framed { pid, nth, seq, heard_at }, &text).map(Some)
     }
 }
 
@@ -137,17 +144,16 @@ impl<'a> Frame<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    use crate::bash::rig::Sent;
     use crate::bash::value::emit_array;
 
     const AT: Micros = Micros(9);
 
-    /// A whole message, as the bash writes one: the protocol's words in
-    /// front, then the client's.
+    /// A whole message, as the bash writes one: the protocol's words in front,
+    /// then the client's.
     fn whole(payload: &[&str]) -> String {
-        let ahead = ["SAY", "at=1.000002", "parent=7", "shlvl=4"];
-        let words: Vec<String> =
-            ahead.iter().chain(payload).map(|word| word.to_string()).collect();
+        let ahead = ["SAY", "at=1.000002"];
+        let words: Vec<String> = ahead.iter().chain(payload).map(|word| word.to_string()).collect();
 
         emit_array(&words)
     }
@@ -156,11 +162,19 @@ mod tests {
         format!(". {pid} {seq} {body}\n")
     }
 
-    fn words(line: &Line) -> Vec<&str> {
-        line.words.iter().map(String::as_str).collect()
+    /// What one message carried, and which shell wrote it.
+    fn said(arrived: &Arrived) -> (Pid, Sent, Vec<&str>) {
+        match arrived {
+            Arrived::Spoke { pid, line } => {
+                (*pid, line.sent, line.words.iter().map(String::as_str).collect())
+            }
+            Arrived::Joined { pid, sent, account } => {
+                (*pid, *sent, account.iter().map(String::as_str).collect())
+            }
+        }
     }
 
-    fn fed(incoming: &mut Reassembly, bytes: &[u8]) -> Vec<Line> {
+    fn fed(incoming: &mut Reassembly, bytes: &[u8]) -> Vec<Arrived> {
         incoming.feed(bytes, AT).unwrap()
     }
 
@@ -170,18 +184,21 @@ mod tests {
 
         let seen = fed(&mut Reassembly::default(), stream.as_bytes());
         assert_eq!(seen.len(), 2);
-        assert_eq!(words(&seen[0]), ["A", "one"]);
-        assert_eq!(seen[0].sent.sent_at, Micros(1_000_002), "the sender's clock, from the message");
-        assert_eq!(seen[0].sent.heard_at, AT, "the reader's, as it was handed in");
-        assert_eq!((seen[0].sent.pid, seen[0].sent.seq), (Pid(7), 0), "from the frame header");
+
+        let (pid, sent, words) = said(&seen[0]);
+        assert_eq!(words, ["A", "one"]);
+        assert_eq!(pid, Pid(7), "from the frame header, and routing alone");
+        assert_eq!(sent.seq, 0, "the same");
+        assert_eq!(sent.sent_at, Micros(1_000_002), "the sender's clock, from the message");
+        assert_eq!(sent.heard_at, AT, "the reader's, as it was handed in");
+        assert_eq!((sent.nth, said(&seen[1]).1.nth), (0, 1), "and the order the run read them");
 
         let mut dribbled = Reassembly::default();
         let mut byte_at_a_time = Vec::new();
         for byte in stream.as_bytes() {
             byte_at_a_time.extend(fed(&mut dribbled, &[*byte]));
         }
-        assert_eq!(byte_at_a_time.len(), 2);
-        assert_eq!(words(&byte_at_a_time[1]), ["B", "two"]);
+        assert_eq!(said(&byte_at_a_time[1]).2, ["B", "two"]);
         dribbled.finish().unwrap();
     }
 
@@ -195,22 +212,21 @@ mod tests {
         assert!(fed(&mut incoming, format!("+ 9 0 {}\n", &theirs[..cut]).as_bytes()).is_empty());
 
         let rejoined = fed(&mut incoming, format!(". 7 0 {}\n", &mine[cut..]).as_bytes());
-        assert_eq!(words(&rejoined[0]), ["WIDE", "aaaa"]);
+        assert_eq!(said(&rejoined[0]).2, ["WIDE", "aaaa"]);
 
         let other = fed(&mut incoming, format!(". 9 0 {}\n", &theirs[cut..]).as_bytes());
-        assert_eq!(words(&other[0]), ["OTHER", "bbbb"]);
+        assert_eq!(said(&other[0]).2, ["OTHER", "bbbb"]);
         incoming.finish().unwrap();
     }
 
     #[test]
     fn nothing_may_be_left_part_way() {
         let mut cut = Reassembly::default();
-        let no_delimiter = frame(7, 0, &whole(&["A"]));
-        fed(&mut cut, no_delimiter.trim_end().as_bytes());
+        fed(&mut cut, frame(7, 0, &whole(&["A"])).trim_end().as_bytes());
         assert!(cut.finish().is_err(), "a frame without its delimiter");
 
         let mut unfinished = Reassembly::default();
-        fed(&mut unfinished, b"+ 7 0 ('SAY'\n");
+        fed(&mut unfinished, b"+ 7 0 (\'SAY\'\n");
         assert!(unfinished.finish().is_err(), "a message without its last chunk");
 
         Reassembly::default().finish().unwrap();

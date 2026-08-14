@@ -31,15 +31,19 @@ mod transport;
 #[path = "../support/mod.rs"]
 mod support;
 
-use mb_resolver::bash::rig::{ExitStatus, Failure, Line, Master, Rig, Workspace};
+use std::sync::Arc;
+
+use mb_resolver::bash::rig::{
+    heard, Attended, Failure, Laid, Line, Master, Rig, Shell, Whole, Workspace,
+};
 
 use support::{bash, Scripts};
 
 /// Every proof starts the same script, beside whatever else it wrote.
 pub const ENTRY: &str = "main.bash";
 
-/// Keeps every message in arrival order, and answers nothing — the default
-/// `answer` hears the question and tells the shell the word is unknown.
+/// Keeps every message, and answers nothing — the default `answer` hears the
+/// question and tells the shell the word is unknown.
 #[derive(Default)]
 pub struct Keeping {
     workspace: Workspace,
@@ -53,42 +57,45 @@ impl Keeping {
 }
 
 impl Rig for Keeping {
-    type Session = Vec<Line>;
+    type Attending = Vec<Line>;
 
     fn workspace(&self) -> Workspace {
         self.workspace.clone()
     }
 
-    fn open(&self) -> Result<Vec<Line>, Failure> {
+    fn joined(&self, _at: &Laid, _shell: Arc<Shell>) -> Result<Vec<Line>, Failure> {
         Ok(Vec::new())
-    }
-
-    fn hear(&self, heard: &mut Vec<Line>, said: Line) -> Result<(), Failure> {
-        heard.push(said);
-
-        Ok(())
     }
 }
 
 impl Master for Keeping {}
 
-/// Every proof that expects a run to go through takes it whole: a partial
-/// reading proves nothing.
-pub fn heard(files: &[(&str, &str)]) -> (Vec<Line>, ExitStatus) {
+/// A run of that rig, taken whole: every proof that expects a run to go through
+/// takes it that way, since a partial reading proves nothing.
+pub type Ran = Whole<Vec<Line>>;
+
+pub fn running(files: &[(&str, &str)]) -> Ran {
     let scripts = Scripts::of(files);
-    let ran = Keeping::default().run(&bash(scripts.at(ENTRY))).unwrap_or_else(|error| panic!("{error}"));
+    let ran = Keeping::default()
+        .run(&bash(scripts.at(ENTRY)))
+        .unwrap_or_else(|error| panic!("{error}"));
 
     ran.whole().unwrap_or_else(|error| panic!("{error}"))
 }
 
-pub fn script(body: &str) -> (Vec<Line>, ExitStatus) {
-    heard(&[(ENTRY, body)])
+pub fn script(body: &str) -> Ran {
+    running(&[(ENTRY, body)])
+}
+
+/// Every message the run heard, whichever shell said it, in arrival order.
+pub fn lines<K: AsRef<[Line]>>(shells: &[Attended<K>]) -> Vec<&Line> {
+    heard(shells).into_iter().map(|said| said.line).collect()
 }
 
 /// Every message that begins with `lead`, as the words behind it. Words, not
 /// a joined string: the boundaries are what the wire is for.
-pub fn behind<'a>(heard: &'a [Line], lead: &str) -> Vec<&'a [String]> {
-    heard.iter().filter_map(|line| line.behind(lead)).collect()
+pub fn behind<'a, K: AsRef<[Line]>>(shells: &'a [Attended<K>], lead: &str) -> Vec<&'a [String]> {
+    lines(shells).into_iter().filter_map(|line| line.behind(lead)).collect()
 }
 
 /// How many of those begin with `word`.
@@ -109,10 +116,10 @@ pub fn gone(pid: i32) -> bool {
 }
 
 /// Everything that happened, for an assertion message.
-pub fn report(heard: &[Line]) -> String {
-    let lines: Vec<String> = heard
+pub fn report<K: AsRef<[Line]>>(shells: &[Attended<K>]) -> String {
+    let lines: Vec<String> = heard(shells)
         .iter()
-        .map(|line| format!("  pid {:>7} | {}", line.sent.pid, line.words.join(" ")))
+        .map(|said| format!("  pid {:>7} | {}", said.shell.pid, said.line.words.join(" ")))
         .collect();
 
     format!("\ncapture:\n{}", lines.join("\n"))

@@ -1,15 +1,49 @@
-//! The protocol: the bash that speaks it, the pipe it travels on, the frame
-//! around a message, and the answer that goes back.
+//! The protocol: the bash that speaks it, where its files sit, the pipe it
+//! travels on, the frame around a message, and the answer that goes back.
 
 mod framing;
-mod layout;
 mod message;
 mod pipes;
 
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use crate::failure::{Doing, Failure};
+
+pub(super) use message::Arrived;
 pub use message::{field, Answer, Kind, Line, Micros, Pid, Sent};
-pub use layout::prelude;
-pub(super) use layout::{reply, up};
 pub use pipes::Wire;
+
+/// The client half, shipped verbatim. It locates the workspace from its own
+/// path, so there is nothing to substitute into it.
+const PRELUDE: &str = include_str!("prelude.bash");
+
+/// The one FIFO every shell joins. `Wire` makes it and the bash names it, so it
+/// is derived here and nowhere else.
+pub(crate) fn up(dir: &Path) -> PathBuf {
+    dir.join("up")
+}
+
+/// Where a shell blocked on an ask is listening. Made for one question and
+/// removed with its answer, so a run holds no descriptor and leaves no file per
+/// ask. The bash builds the same path from `__BC__DIR`, which is why the run
+/// tells it the directory and not this.
+pub(crate) fn reply(dir: &Path, pid: Pid) -> PathBuf {
+    dir.join(format!("rep.{pid}"))
+}
+
+/// Lays the protocol's bash into `dir` with the rig's beside it, and returns
+/// the file `BASH_ENV` must name. Both are written as they are: `dir` must be
+/// absolute, since that path is what every shell reads its own location from.
+pub fn prelude(dir: &Path, bash: &str) -> Result<PathBuf, Failure> {
+    let entry = dir.join("prelude.bash");
+
+    for (file, body) in [(&entry, PRELUDE), (&dir.join("rig.bash"), bash)] {
+        fs::write(file, body).doing(|| format!("writing {}", file.display()))?;
+    }
+
+    Ok(entry)
+}
 
 #[cfg(test)]
 mod tests {
@@ -31,7 +65,7 @@ mod tests {
     #[test]
     fn the_protocol_half_touches_little_of_the_subject_s() {
         let code: Vec<&str> =
-            layout::PRELUDE.lines().filter(|line| !line.trim_start().starts_with('#')).collect();
+            PRELUDE.lines().filter(|line| !line.trim_start().starts_with('#')).collect();
 
         // Only what reaches past the namespace counts: a word of ours may be
         // spelled however it likes.

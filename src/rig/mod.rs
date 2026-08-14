@@ -5,10 +5,62 @@
 //! BC_INSTR ask which target              # ship one, block, run the answer
 //! ```
 //!
-//! A [`Rig`] is the reaction: the bash it gives the subject, the session it
-//! keeps, and what it does with what arrives. It says nothing about who
-//! started what — that is a second question with exactly two answers, and each
-//! is a trait that carries its own orchestration:
+//! A [`Rig`] is a **description**: the bash it gives the subject, where the
+//! session's files go, and how to build a reaction once a shell is there. The
+//! reaction is [`Reacting`], and it is made **per shell**, at the moment that
+//! shell announces itself — so which bash it is, how it was started and what it
+//! had switched on are members from construction, never parameters.
+//!
+//! ```no_run
+//! use std::sync::Arc;
+//! use mb_resolver::bash::rig::{Answer, Failure, Laid, Line, Master, Reacting, Rig, Shell};
+//!
+//! /// Keeps what one shell said, and tells it to use staging.
+//! struct Deploying;
+//!
+//! struct Told { shell: Arc<Shell>, heard: Vec<Line> }
+//!
+//! impl Rig for Deploying {
+//!     type Attending = Told;
+//!
+//!     /// A word the subject's scripts can call, in every shell.
+//!     fn bash(&self) -> String {
+//!         "STAGE() { BC_INSTR say STAGE \"$@\"; }".to_string()
+//!     }
+//!
+//!     fn joined(&self, _at: &Laid, shell: Arc<Shell>) -> Result<Told, Failure> {
+//!         Ok(Told { shell, heard: Vec::new() })
+//!     }
+//! }
+//!
+//! impl Reacting for Told {
+//!     type Kept = Self;
+//!
+//!     fn hear(&mut self, said: Line) -> Result<(), Failure> {
+//!         self.heard.push(said);
+//!         Ok(())
+//!     }
+//!
+//!     fn answer(&mut self, asked: Line) -> Result<Answer, Failure> {
+//!         Ok(match asked.words.first().map(String::as_str) {
+//!             Some("target") => Answer::of("declare", ["-g", "target=staging"]),
+//!             _ => Answer::status(1),
+//!         })
+//!     }
+//!
+//!     fn finish(self) -> Result<Self, Failure> { Ok(self) }
+//! }
+//!
+//! impl Master for Deploying {}
+//!
+//! for shell in Deploying.run(&["bash", "deploy.bash"])?.whole()?.shells {
+//!     println!("pid {} said {} things", shell.shell.pid, shell.kept.heard.len());
+//! }
+//! # Ok::<(), Failure>(())
+//! ```
+//!
+//! Who started the shells is a second question with exactly two answers, and
+//! each is a trait that carries its own orchestration:
 //!
 //! | | who started the shells | what the session lasts for | what comes back |
 //! |---|---|---|---|
@@ -22,66 +74,18 @@
 //! driven run puts it in `BASH_ENV`, a client that started the server sources
 //! what it was handed, and a shell that wants in for its own reasons — an
 //! interactive child, say — sources either. However it got there, the first
-//! thing it says is [`Kind::Join`], its own account of itself, and [`Shells`]
-//! is where that is read.
-//!
-//! ```no_run
-//! use mb_resolver::bash::rig::{Answer, Failure, Line, Master, Rig};
-//!
-//! /// Keeps every message, and tells a shell that asks to use staging.
-//! struct Deploying;
-//!
-//! impl Rig for Deploying {
-//!     type Session = Vec<Line>;
-//!
-//!     /// A word the subject's scripts can call, in every shell.
-//!     fn bash(&self) -> String {
-//!         "STAGE() { BC_INSTR say STAGE \"$@\"; }".to_string()
-//!     }
-//!
-//!     fn open(&self) -> Result<Vec<Line>, Failure> {
-//!         Ok(Vec::new())
-//!     }
-//!
-//!     fn hear(&self, heard: &mut Vec<Line>, said: Line) -> Result<(), Failure> {
-//!         heard.push(said);
-//!         Ok(())
-//!     }
-//!
-//!     fn answer(&self, heard: &mut Vec<Line>, asked: Line) -> Result<Answer, Failure> {
-//!         let target = asked.words.first().cloned();
-//!         heard.push(asked);
-//!
-//!         Ok(match target.as_deref() {
-//!             Some("target") => Answer::of("declare", ["-g", "target=staging"]),
-//!             _ => Answer::status(1),
-//!         })
-//!     }
-//! }
-//!
-//! impl Master for Deploying {}
-//!
-//! let (heard, status) = Deploying.run(&["bash", "deploy.bash"])?.whole()?;
-//!
-//! for line in &heard {
-//!     println!("pid {} said {:?}", line.sent.pid, line.words);
-//! }
-//! # Ok::<(), Failure>(())
-//! ```
-//!
-//! An answer is a command the shell runs, so its expressiveness is bash's.
-//! Only `open` is required: the rest default to giving the subject no words of
-//! its own, a workspace the run throws away, keeping nothing, hearing a
-//! question and saying the word is unknown, and doing nothing at the end.
+//! thing it says is its account of itself, and that is what makes a [`Shell`].
 
 mod master;
 mod serving;
 mod slave;
-mod status;
 mod tree;
-mod wire;
+pub(crate) mod wire;
 
 use std::path::PathBuf;
+use std::sync::Arc;
+
+use serde::Serialize;
 
 /// Where a session lays its bash and its pipes, and how long that outlives it.
 ///
@@ -98,71 +102,142 @@ pub enum Workspace {
     At(PathBuf),
 }
 
-pub use master::{Master, Run};
-pub use slave::{Served, Slave};
-pub use status::ExitStatus;
+/// Where the session's files ended up. Handed to every reaction at
+/// construction, so one that resolves paths afterwards knows where the
+/// instrument's own frames point without being told twice.
+#[derive(Clone, Debug)]
+pub struct Laid {
+    pub dir: PathBuf,
 
-pub use tree::{forest, shells, At, Joined, Shell, ShellNode, Shells};
+    /// The file a shell sources to join — the session's only address.
+    pub prelude: PathBuf,
+}
+
+/// What one shell's reaction leaves behind, for a given rig.
+pub type Kept<R> = <<R as Rig>::Attending as Reacting>::Kept;
+
+/// One shell, and what its reaction left behind.
+#[derive(Debug)]
+pub struct Attended<K> {
+    pub shell: Arc<Shell>,
+    pub kept: K,
+}
+
+/// One message, and the shell that sent it.
+///
+/// A reaction has both by construction. Anything reading a run afterwards needs
+/// them together too, since a frame walk means nothing without the shell it was
+/// taken in.
+#[derive(Copy, Clone, Debug, Serialize)]
+pub struct Said<'a> {
+    pub shell: &'a Arc<Shell>,
+    pub line: &'a Line,
+}
+
+/// Everything the shells said, in the order the run heard it.
+///
+/// A run folds per shell, so each shell's own order is kept and nothing else.
+/// `Sent::nth` counts messages over the whole run and is what puts them back
+/// together.
+pub fn heard<K: AsRef<[Line]>>(shells: &[Attended<K>]) -> Vec<Said<'_>> {
+    let mut said: Vec<Said<'_>> = shells
+        .iter()
+        .flat_map(|at| at.kept.as_ref().iter().map(|line| Said { shell: &at.shell, line }))
+        .collect();
+
+    said.sort_by_key(|said| said.line.sent.nth);
+    said
+}
+
+pub use master::{ExitStatus, Master, Run, Whole};
+pub use slave::{Served, Slave};
+pub use tree::{forest, ShellNode};
+
 pub use wire::{field, Answer, Kind, Line, Micros, Pid, Sent};
 
-pub use crate::bash::shell::{Bash, Flags, Started, State, Version};
-
+pub use crate::bash::shell::Shell;
 pub use crate::failure::{Doing, Failure};
 
-/// The reaction inside the protocol a rig defines: what bash it gives the
-/// subject, how its session is opened, and what it does with what arrives.
+/// What bash a rig gives the subject, where the session's files go, and how a
+/// reaction is made once a shell is there.
 ///
-/// Nothing here knows who started the subject. [`Master`] and [`Slave`] are
-/// where that is decided, and a rig declares which of them it supports by
-/// implementing it.
+/// A description: `&self` throughout, because nothing about it changes by
+/// running.
 pub trait Rig {
-    /// The client's state. No bounds, no lifetime: the session stores nothing
-    /// of its own in it, and hands it back when the conversation is over.
-    type Session;
+    /// What reacts to one shell.
+    type Attending: Reacting;
 
-    /// The words this rig gives the subject, laid beside the protocol's own
-    /// and sourced by it. The same text in either orchestration.
+    /// The words this rig gives the subject, laid beside the protocol's own and
+    /// sourced by it. The same text in either orchestration.
     fn bash(&self) -> String {
         String::new()
     }
 
-    /// Where the session's files go, and how long they outlive it. A rig whose
-    /// reading resolves a frame's source afterwards names a directory it keeps.
     fn workspace(&self) -> Workspace {
         Workspace::Temporary
     }
 
-    fn open(&self) -> Result<Self::Session, Failure>;
+    /// A shell has joined, and everything about it is known. This is where it
+    /// enters, and the last time it is a parameter.
+    fn joined(&self, at: &Laid, shell: Arc<Shell>) -> Result<Self::Attending, Failure>;
+}
 
-    /// A message nobody is waiting on, which is a [`Say`](Kind::Say) or the
-    /// [`Join`](Kind::Join) a shell opens with. A rig that reads walks keeps
-    /// the joins, since a walk is read against the shell it was taken in; one
-    /// that claims its messages by tag ignores them without trying.
+/// One shell's reaction, for as long as that shell can speak.
+///
+/// It owns its state, so nothing is threaded through it. What is shared across
+/// shells — a sink, an index — is the caller's own and comes in through
+/// [`Rig::joined`], which is why the core names no sharing discipline.
+pub trait Reacting: Sized {
+    /// What is left when the shell can no longer speak. `Self` where nothing is
+    /// released at the end.
+    type Kept;
+
+    /// A message nobody is waiting on.
     ///
-    /// A `Failure` from either this or [`answer`](Rig::answer) ends the
+    /// A `Failure` from either this or [`answer`](Reacting::answer) ends the
     /// conversation: under `Master` the subject is killed and the run yields
-    /// that reason. It is not negotiated with bash — a rig that cannot do its
-    /// work is not something bash can be asked about.
-    fn hear(&self, _session: &mut Self::Session, _said: Line) -> Result<(), Failure> {
+    /// that reason. It is not negotiated with bash — a reaction that cannot do
+    /// its work is not something bash can be asked about.
+    fn hear(&mut self, _said: Line) -> Result<(), Failure> {
         Ok(())
     }
 
-    /// A message a shell is blocked on; the session frames what comes back and
-    /// writes it to that shell. Hearing the question and telling the shell the
-    /// word is unknown, unless a rig says otherwise.
+    /// A message this shell is blocked on; the session frames what comes back
+    /// and writes it there.
     ///
     /// An answer is a command, and every answer is the same kind of thing.
     /// Saying no is a command that returns non-zero — what the subject makes of
     /// that is its own business, and the session only waits to see.
-    fn answer(&self, session: &mut Self::Session, asked: Line) -> Result<Answer, Failure> {
-        self.hear(session, asked)?;
+    fn answer(&mut self, asked: Line) -> Result<Answer, Failure> {
+        self.hear(asked)?;
 
         Ok(Answer::status(127))
     }
 
-    /// The conversation is over; release what the session holds. Reached once
-    /// per serving that got as far as opening one.
-    fn end(&self, _session: &mut Self::Session) -> Result<(), Failure> {
+    /// The conversation is over; release what this held.
+    fn finish(self) -> Result<Self::Kept, Failure>;
+}
+
+/// A reaction that keeps every message.
+impl Reacting for Vec<Line> {
+    type Kept = Self;
+
+    fn hear(&mut self, said: Line) -> Result<(), Failure> {
+        self.push(said);
+
+        Ok(())
+    }
+
+    fn finish(self) -> Result<Self, Failure> {
+        Ok(self)
+    }
+}
+
+/// A reaction that keeps nothing and answers nothing.
+impl Reacting for () {
+    type Kept = Self;
+
+    fn finish(self) -> Result<Self, Failure> {
         Ok(())
     }
 }

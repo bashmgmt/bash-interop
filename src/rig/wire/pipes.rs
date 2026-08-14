@@ -7,7 +7,7 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 use super::framing::{Reassembly, DELIMITER};
-use super::{Answer, Line, Micros, Pid};
+use super::{Answer, Arrived, Micros, Pid};
 use crate::failure::{Doing, Failure};
 
 const READ_CHUNK: usize = 64 * 1024;
@@ -41,7 +41,7 @@ impl Wire {
         self.reader.as_raw_fd()
     }
 
-    pub fn drain(&mut self) -> Result<Vec<Line>, Failure> {
+    pub fn drain(&mut self) -> Result<Vec<Arrived>, Failure> {
         let mut buffer = [0u8; READ_CHUNK];
         let mut heard = Vec::new();
 

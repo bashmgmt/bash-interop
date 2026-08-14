@@ -31,10 +31,10 @@ fn an_unfinished_message_is_reported_beside_the_subjects_status() {
     assert!(failed.to_string().contains("never finished"), "{failed}");
     assert_eq!(ran.subject, ExitStatus::Code(3), "and the subject's own status survives it");
     assert_eq!(
-        behind(&ran.session, "REC"),
+        behind(&ran.shells, "REC"),
         [["first"], ["second"]],
         "a stalled key holds up nothing else{}",
-        report(&ran.session)
+        report(&ran.shells)
     );
 }
 

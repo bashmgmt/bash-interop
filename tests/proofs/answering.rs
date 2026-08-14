@@ -1,9 +1,12 @@
 //! Every form an answer can take, under load, from two shells at once.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
-use mb_resolver::bash::rig::{Answer, ExitStatus, Failure, Line, Master, Rig, Run};
+use mb_resolver::bash::rig::{
+    Answer, ExitStatus, Failure, Laid, Line, Master, Reacting, Rig, Run, Shell,
+};
 
 use crate::support::{bash, sourcing, Scripts};
 use crate::{beginning, behind, report, ENTRY};
@@ -17,37 +20,49 @@ struct Answering {
     steps: PathBuf,
 }
 
-/// Its session keeps what it heard *and* counts what it answered — a rig is
-/// `&self`, so anything that changes belongs here.
-#[derive(Default)]
+/// One shell's turn of it: what that shell said, and how many of its questions
+/// were answered. Both are the reaction's own — a rig is `&self` and never
+/// changes.
 struct Soak {
+    steps: PathBuf,
     heard: Vec<Line>,
     answered: usize,
 }
 
+/// What makes the run's messages reachable through `heard` and `behind`.
+impl AsRef<[Line]> for Soak {
+    fn as_ref(&self) -> &[Line] {
+        &self.heard
+    }
+}
+
 impl Rig for Answering {
-    type Session = Soak;
+    type Attending = Soak;
 
     /// `NOTE` is this rig's own word, called back by several of the answers.
     fn bash(&self) -> String {
         SOAK_BASH.to_string()
     }
 
-    fn open(&self) -> Result<Soak, Failure> {
-        Ok(Soak::default())
+    fn joined(&self, _at: &Laid, _shell: Arc<Shell>) -> Result<Soak, Failure> {
+        Ok(Soak { steps: self.steps.clone(), heard: Vec::new(), answered: 0 })
     }
+}
 
-    fn hear(&self, soak: &mut Soak, said: Line) -> Result<(), Failure> {
-        soak.heard.push(said);
+impl Reacting for Soak {
+    type Kept = Self;
+
+    fn hear(&mut self, said: Line) -> Result<(), Failure> {
+        self.heard.push(said);
 
         Ok(())
     }
 
-    fn answer(&self, soak: &mut Soak, asked: Line) -> Result<Answer, Failure> {
+    fn answer(&mut self, asked: Line) -> Result<Answer, Failure> {
         let step: usize = asked.words.last().and_then(|word| word.parse().ok()).unwrap_or(0);
 
-        soak.answered += 1;
-        soak.heard.push(asked);
+        self.answered += 1;
+        self.heard.push(asked);
 
         Ok(match step % 7 {
             0 => Answer::status(0),
@@ -64,6 +79,10 @@ impl Rig for Answering {
             }
             _ => Answer::status(3),
         })
+    }
+
+    fn finish(self) -> Result<Self, Failure> {
+        Ok(self)
     }
 }
 
@@ -102,15 +121,19 @@ fn a_session_survives_every_way_of_answering() {
     ]);
 
     let answering = Answering { steps: scripts.dir().to_path_buf() };
-    let (soak, status) = answering.run(&bash(scripts.at(ENTRY)))
+    let ran = answering
+        .run(&bash(scripts.at(ENTRY)))
         .and_then(Run::whole)
         .unwrap_or_else(|error| panic!("{error}"));
 
-    let seen = soak.heard;
-    assert_eq!(status, ExitStatus::Code(0), "{}", report(&seen));
-    assert_eq!(soak.answered, 57, "56 from the first shell, one from the second");
+    assert_eq!(ran.subject, ExitStatus::Code(0), "{}", report(&ran.shells));
+    assert_eq!(
+        ran.shells.iter().map(|at| at.kept.answered).collect::<Vec<_>>(),
+        [56, 1],
+        "each shell's own questions, counted where they were answered"
+    );
 
-    let said = behind(&seen, "REC");
+    let said = behind(&ran.shells, "REC");
     assert_eq!(beginning(&said, "tick"), 56);
     assert_eq!(beginning(&said, "refused"), 8);
     assert_eq!(beginning(&said, "other"), 1, "the second shell got its answer too");
@@ -119,9 +142,9 @@ fn a_session_survives_every_way_of_answering() {
         "the split message rejoined to exactly what was written"
     );
 
-    let notes = behind(&seen, "NOTE");
+    let notes = behind(&ran.shells, "NOTE");
     for form in ["eval", "call", "source"] {
-        assert!(beginning(&notes, form) > 0, "no answer arrived by {form}{}", report(&seen));
+        assert!(beginning(&notes, form) > 0, "no answer arrived by {form}{}", report(&ran.shells));
     }
 
     let marks = said

@@ -1,6 +1,8 @@
 //! What the run starts, and what a rig puts in the shells it reaches.
 
-use mb_resolver::bash::rig::{ExitStatus, Failure, Line, Master, Rig};
+use std::sync::Arc;
+
+use mb_resolver::bash::rig::{ExitStatus, Failure, Laid, Line, Master, Rig, Shell};
 
 use crate::support::{bash, Scripts};
 use crate::{behind, report, ENTRY};
@@ -9,20 +11,14 @@ use crate::{behind, report, ENTRY};
 struct Deploying;
 
 impl Rig for Deploying {
-    type Session = Vec<Line>;
+    type Attending = Vec<Line>;
 
     fn bash(&self) -> String {
         "TELL() { BC_INSTR say TELL \"$@\"; }".to_string()
     }
 
-    fn open(&self) -> Result<Vec<Line>, Failure> {
+    fn joined(&self, _at: &Laid, _shell: Arc<Shell>) -> Result<Vec<Line>, Failure> {
         Ok(Vec::new())
-    }
-
-    fn hear(&self, heard: &mut Vec<Line>, said: Line) -> Result<(), Failure> {
-        heard.push(said);
-
-        Ok(())
     }
 }
 
@@ -53,14 +49,14 @@ fn the_rigs_word_reaches_every_shell_and_so_does_the_callers_environment() {
     let mut argv = vec!["env".to_string(), "DEPLOY_TARGET=staging".to_string()];
     argv.extend(bash(scripts.at(ENTRY)).iter().map(|word| word.to_string_lossy().to_string()));
 
-    let (seen, status) = Deploying.run(&argv).unwrap().whole().unwrap();
+    let ran = Deploying.run(&argv).unwrap().whole().unwrap();
 
-    assert_eq!(status, ExitStatus::Code(0), "{}", report(&seen));
+    assert_eq!(ran.subject, ExitStatus::Code(0), "{}", report(&ran.shells));
     assert_eq!(
-        behind(&seen, "TELL"),
+        behind(&ran.shells, "TELL"),
         [["subject", "staging", "0"].as_slice(), ["child", "staging"].as_slice()],
         "{}",
-        report(&seen)
+        report(&ran.shells)
     );
 }
 
@@ -69,13 +65,14 @@ fn the_rigs_word_reaches_every_shell_and_so_does_the_callers_environment() {
 #[test]
 fn the_command_line_is_run_as_asked() {
     let scripts = Scripts::of(&[(ENTRY, "BC_INSTR say REC \"$0\" \"$#\"")]);
-    let (seen, status) = crate::Keeping::default().run(&bash(scripts.at(ENTRY))).unwrap().whole().unwrap();
+    let ran =
+        crate::Keeping::default().run(&bash(scripts.at(ENTRY))).unwrap().whole().unwrap();
 
-    assert_eq!(status, ExitStatus::Code(0));
+    assert_eq!(ran.subject, ExitStatus::Code(0));
     assert_eq!(
-        behind(&seen, "REC"),
+        behind(&ran.shells, "REC"),
         [[scripts.at(ENTRY).to_string_lossy().to_string(), "0".to_string()]],
         "the program it names, and nothing appended{}",
-        report(&seen)
+        report(&ran.shells)
     );
 }

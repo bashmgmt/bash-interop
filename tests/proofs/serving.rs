@@ -9,8 +9,9 @@ use std::io::{pipe, Write};
 use std::os::fd::OwnedFd;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
+use std::sync::Arc;
 
-use mb_resolver::bash::rig::{shells, Answer, Failure, Line, Rig, Slave};
+use mb_resolver::bash::rig::{Answer, Attended, Failure, Laid, Line, Rig, Shell, Slave};
 
 use crate::support::Scripts;
 use crate::{behind, report, ENTRY};
@@ -19,20 +20,14 @@ use crate::{behind, report, ENTRY};
 struct Attaching;
 
 impl Rig for Attaching {
-    type Session = Vec<Line>;
+    type Attending = Vec<Line>;
 
     fn bash(&self) -> String {
         "TELL() { BC_INSTR say TELL \"$@\"; }".to_string()
     }
 
-    fn open(&self) -> Result<Vec<Line>, Failure> {
+    fn joined(&self, _at: &Laid, _shell: Arc<Shell>) -> Result<Vec<Line>, Failure> {
         Ok(Vec::new())
-    }
-
-    fn hear(&self, heard: &mut Vec<Line>, said: Line) -> Result<(), Failure> {
-        heard.push(said);
-
-        Ok(())
     }
 }
 
@@ -57,9 +52,9 @@ fn joining(address: &Answer, script: &Path, handle: OwnedFd) -> Child {
         .expect("a shell to join with")
 }
 
-/// Serve `scripts`' entry in a shell started for it, and hand back what the
-/// session heard beside how that shell ended.
-fn joined(scripts: &Scripts) -> (Vec<Line>, Option<i32>) {
+/// Serve `scripts`' entry in a shell started for it, and hand back the shells
+/// that joined beside how that shell ended.
+fn joined(scripts: &Scripts) -> (Vec<Attended<Vec<Line>>>, Option<i32>) {
     let (held, handle) = pipe().expect("a handle");
 
     let mut child = None;
@@ -74,7 +69,7 @@ fn joined(scripts: &Scripts) -> (Vec<Line>, Option<i32>) {
 
     let status = child.expect("the shell").wait().expect("reaping the shell");
 
-    (served.session, status.code())
+    (served.shells, status.code())
 }
 
 /// Everything the joined shell says arrives, subshells included, and the
@@ -93,13 +88,13 @@ fn a_shell_that_joined_is_heard_until_it_lets_go() {
         "#,
     )]);
 
-    let (heard, status) = joined(&scripts);
+    let (shells, status) = joined(&scripts);
 
     assert_eq!(
-        behind(&heard, "TELL"),
+        behind(&shells, "TELL"),
         [["first"].as_slice(), ["from-a-subshell"].as_slice(), ["last"].as_slice()],
         "{}",
-        report(&heard)
+        report(&shells)
     );
     assert_eq!(status, Some(3), "the initiator's own status, which is not ours to hold");
 }
@@ -122,13 +117,13 @@ fn a_joined_shell_may_publish_the_address_to_its_children() {
         ("child.bash", "TELL child \"$BASHPID\"\n"),
     ]);
 
-    let (heard, status) = joined(&scripts);
-    let said = behind(&heard, "TELL");
+    let (shells, status) = joined(&scripts);
+    let said = behind(&shells, "TELL");
 
-    assert_eq!(status, Some(0), "{}", report(&heard));
-    assert_eq!(said.len(), 2, "the script and the bash it started: {}", report(&heard));
+    assert_eq!(status, Some(0), "{}", report(&shells));
+    assert_eq!(said.len(), 2, "the script and the bash it started: {}", report(&shells));
     assert_eq!(said[0][0], "parent");
-    assert_eq!(said[1][0], "child", "{}", report(&heard));
+    assert_eq!(said[1][0], "child", "{}", report(&shells));
     assert_ne!(
         said[0][1], said[1][1],
         "a process of its own, reached because the client published the address"
@@ -178,20 +173,19 @@ fn a_shell_says_what_it_is_rather_than_being_guessed_at() {
     child.expect("the shell").wait().expect("reaping the shell");
     assert!(served.failed.is_none(), "the session closed up cleanly");
 
-    let heard = served.session;
-    assert_eq!(behind(&heard, "TELL"), [["at-the-prompt"]], "{}", report(&heard));
+    assert_eq!(behind(&served.shells, "TELL"), [["at-the-prompt"]], "{}", report(&served.shells));
+    assert_eq!(served.shells.len(), 1);
 
-    let shells = shells(&heard).expect("every shell said what it was");
-    assert_eq!(shells.len(), 1);
+    let shell = &served.shells[0].shell;
+    let started = &shell.bash.started;
 
-    let bash = &shells[0].joined.bash;
-    assert!(bash.started.interactive, "it said so: {:?}", bash.started);
-    assert!(bash.started.standard_input, "and where its code came from");
-    assert!(bash.started.command.is_none(), "which was not a command line");
-    assert!(bash.version.at_least(5, 0, 0), "$EPOCHREALTIME is bash 5");
-    assert_eq!(bash.subshell, 0);
+    assert!(started.interactive, "it said so: {started:?}");
+    assert!(started.standard_input, "and where its code came from");
+    assert!(started.command.is_none(), "which was not a command line");
+    assert!(shell.bash.version.at_least(5, 0, 0), "$EPOCHREALTIME is bash 5");
+    assert_eq!(shell.subshell, 0);
 
     // Interactive is not something the options can be turned into: `set`
     // refuses `-i`, so this is settled at startup and true of the whole shell.
-    assert!(shells[0].joined.at_join.flags.has('i'));
+    assert!(shell.state.flags.has('i'));
 }
