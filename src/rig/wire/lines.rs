@@ -1,4 +1,5 @@
-//! A fifo read end, cut at newlines.
+//! A fifo read end, cut at newlines. Bytes out; what a line means is the
+//! reader's.
 //!
 //! Bytes go straight into the buffer at each read, so a `next` dropped
 //! mid-await loses nothing; the only await is on readiness.
@@ -9,15 +10,22 @@ use std::path::Path;
 
 use tokio::net::unix::pipe;
 
-use super::message::{Line, Micros};
+use super::message::Micros;
 use crate::failure::{Doing, Failure};
 
 const READ_CHUNK: usize = 64 * 1024;
 
+/// One line, without its newline, and the run's clock at the read that
+/// completed it.
+pub(crate) struct Raw {
+    pub bytes: Vec<u8>,
+    pub heard_at: Micros,
+}
+
 pub(crate) struct Lines {
     receiver: pipe::Receiver,
     bytes: Vec<u8>,
-    ready: VecDeque<Line>,
+    ready: VecDeque<Raw>,
     what: String,
 }
 
@@ -51,8 +59,13 @@ impl Lines {
         Ok(Self { receiver, bytes: Vec::new(), ready: VecDeque::new(), what })
     }
 
+    /// The fifo, as it names itself in a complaint.
+    pub(crate) fn what(&self) -> &str {
+        &self.what
+    }
+
     /// The next whole line, or `None` at end of input.
-    pub(crate) async fn next(&mut self) -> Result<Option<Line>, Failure> {
+    pub(crate) async fn next(&mut self) -> Result<Option<Raw>, Failure> {
         loop {
             if let Some(line) = self.ready.pop_front() {
                 return Ok(Some(line));
@@ -68,7 +81,7 @@ impl Lines {
     }
 
     /// Every whole line already there, without waiting for more.
-    pub(crate) fn drain(&mut self) -> Result<Vec<Line>, Failure> {
+    pub(crate) fn drain(&mut self) -> Result<Vec<Raw>, Failure> {
         while let Read::Some = self.read()? {}
 
         Ok(self.ready.drain(..).collect())
@@ -90,7 +103,7 @@ impl Lines {
         match self.receiver.try_read(&mut buffer) {
             Ok(0) => Ok(Read::End),
             Ok(count) => {
-                self.cut(&buffer[..count], Micros::now())?;
+                self.cut(&buffer[..count], Micros::now());
                 Ok(Read::Some)
             }
             Err(cause) if cause.kind() == io::ErrorKind::WouldBlock => Ok(Read::Nothing),
@@ -99,20 +112,16 @@ impl Lines {
     }
 
     /// Everything one read carried arrived at one moment.
-    fn cut(&mut self, bytes: &[u8], heard_at: Micros) -> Result<(), Failure> {
+    fn cut(&mut self, bytes: &[u8], heard_at: Micros) {
         self.bytes.extend_from_slice(bytes);
 
         let mut from = 0;
         while let Some(offset) = self.bytes[from..].iter().position(|byte| *byte == b'\n') {
             let end = from + offset;
-            let text = String::from_utf8(self.bytes[from..end].to_vec())
-                .doing(|| format!("reading {} as text", self.what))?;
 
-            self.ready.push_back(Line { text, heard_at });
+            self.ready.push_back(Raw { bytes: self.bytes[from..end].to_vec(), heard_at });
             from = end + 1;
         }
         self.bytes.drain(..from);
-
-        Ok(())
     }
 }

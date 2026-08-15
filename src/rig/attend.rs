@@ -26,12 +26,12 @@ pub(super) async fn attend<A: Reacting>(
     let parted = loop {
         tokio::select! {
             biased;
-            next = pipe.lines.next() => match next? {
+            next = pipe.next() => match next? {
                 Some(line) => react(&mut reaction, &pipe, line).await?,
                 None => break Some(Micros::now()),
             },
             _ = closing.changed() => {
-                for line in pipe.lines.drain()? {
+                for line in pipe.drain()? {
                     react(&mut reaction, &pipe, line).await?;
                 }
                 break None;

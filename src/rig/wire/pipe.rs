@@ -6,13 +6,12 @@ use std::path::PathBuf;
 use tokio::io::AsyncWriteExt;
 use tokio::net::unix::pipe;
 
-use super::lines::Lines;
-use super::message::Answer;
+use super::lines::{Lines, Raw};
+use super::message::{Answer, Line};
 use crate::failure::{Doing, Failure};
 
 pub(crate) struct Pipe {
-    /// What the shell writes, a line at a time.
-    pub lines: Lines,
+    lines: Lines,
     up: PathBuf,
     rep: PathBuf,
 }
@@ -22,6 +21,24 @@ impl Pipe {
     /// write end.
     pub(crate) fn open(up: PathBuf, rep: PathBuf) -> Result<Self, Failure> {
         Ok(Self { lines: Lines::open(&up)?, up, rep })
+    }
+
+    /// The next line the shell wrote, or `None` once nobody can write there.
+    /// One writer, so a whole line is a whole message.
+    pub(crate) async fn next(&mut self) -> Result<Option<Line>, Failure> {
+        self.lines.next().await?.map(|raw| self.line(raw)).transpose()
+    }
+
+    /// Every whole line already there, without waiting for more.
+    pub(crate) fn drain(&mut self) -> Result<Vec<Line>, Failure> {
+        self.lines.drain()?.into_iter().map(|raw| self.line(raw)).collect()
+    }
+
+    fn line(&self, raw: Raw) -> Result<Line, Failure> {
+        let text = String::from_utf8(raw.bytes)
+            .doing(|| format!("reading {} as text", self.lines.what()))?;
+
+        Ok(Line { text, heard_at: raw.heard_at })
     }
 
     /// One line down the reply pipe. Opening it to write blocks until someone

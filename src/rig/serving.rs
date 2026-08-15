@@ -12,7 +12,7 @@ use tokio::task::LocalSet;
 
 use super::session::Session;
 use super::watch::Watch;
-use super::{Answer, Attended, Kept, Rig};
+use super::{Attended, Kept, Layout, Rig};
 use crate::failure::{Doing, Failure};
 
 /// What a served session produced.
@@ -32,36 +32,36 @@ pub struct Served<K> {
 ///
 /// | | |
 /// |---|---|
+/// | what the client is handed | the address — the file it sources to join, one line |
 /// | what ends it | the handle the initiator holds, watched and never closed here |
 /// | what comes back | [`Served`] |
 ///
 /// `held` is a descriptor the initiator holds open for as long as it wants the
 /// session: serving ends when the last holder has let go. `announce` is handed
-/// the session's address — one command, which the client runs to join — once,
-/// before anything is served.
+/// the address once, before anything is served; the client puts it in
+/// `BC_SESSION` and runs `source "$BC_SESSION"` — see [`JOINING`](super::JOINING).
 ///
 /// What the address reaches is the client's decision. Sourcing it instruments
 /// that shell, its functions, its subshells and what it sources; exporting
 /// `BASH_ENV` to the same path instruments the processes it starts.
+///
+/// A `Failure` while serving still sees the session out: every shell released
+/// or finished, the workspace's fifos gone.
 #[expect(async_fn_in_trait, reason = "single-threaded by design: no Send bound")]
 pub trait Serving: Rig {
     async fn serve<A>(&self, held: OwnedFd, announce: A) -> Result<Served<Kept<Self>>, Failure>
     where
-        A: FnOnce(&Answer) -> Result<(), Failure>,
+        A: FnOnce(&str) -> Result<(), Failure>,
         Self: Sized,
     {
         LocalSet::new()
             .run_until(async {
                 let mut session = Session::open(self)?;
+                announce(address(&session.layout)?)?;
 
-                let address = &session.layout.prelude;
-                let path = address.to_str().ok_or_else(|| {
-                    Failure::new("announcing the session", format!("{} is not text", address.display()))
-                })?;
-                announce(&Answer::of("source", [path]))?;
-
-                session.serve(&Watch::held(held)?).await?;
+                let served = session.serve(&Watch::held(held)?).await;
                 let (shells, failed) = session.close().await;
+                served?;
 
                 Ok(Served { shells, failed })
             })
@@ -89,4 +89,13 @@ pub trait Serving: Rig {
         })
         .await
     }
+}
+
+/// The address as one line of text: what `read -r` on the client's side takes.
+fn address(layout: &Layout) -> Result<&str, Failure> {
+    let path = layout.prelude.to_str().filter(|path| !path.contains('\n')).ok_or_else(|| {
+        Failure::new("announcing the session", format!("{} is not one line", layout.prelude.display()))
+    })?;
+
+    Ok(path)
 }

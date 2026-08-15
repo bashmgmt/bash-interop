@@ -14,9 +14,10 @@
 //! is many straight-line loops that interleave.
 //!
 //! ```no_run
+//! use std::ffi::OsString;
 //! use std::sync::Arc;
 //! use mb_resolver::bash::rig::{
-//!     Answer, Driving, Failure, Layout, Message, Reacting, Rig, Setup, Shell, Workspace,
+//!     Answer, Driving, Failure, Layout, Message, Reaching, Reacting, Rig, Setup, Shell, Workspace,
 //! };
 //!
 //! /// Keeps what one shell said, and tells it to use staging.
@@ -59,7 +60,12 @@
 //!     async fn finish(self) -> Result<Self, Failure> { Ok(self) }
 //! }
 //!
-//! impl Driving for Deploying {}
+//! impl Driving for Deploying {
+//!     /// Every non-interactive bash in the tree joins as it starts.
+//!     fn environment(&self, at: &Layout) -> Vec<(OsString, OsString)> {
+//!         Reaching::BashEnv.environment(at)
+//!     }
+//! }
 //!
 //! # #[tokio::main(flavor = "current_thread")]
 //! # async fn main() -> Result<(), Failure> {
@@ -73,10 +79,13 @@
 //! Who started the shells is a second question with exactly two answers, and
 //! each is a trait that carries its own orchestration:
 //!
-//! | | who started the shells | what the session lasts for | what comes back |
-//! |---|---|---|---|
-//! | [`Driving`] | the run — `BASH_ENV`, own process group | that process group | [`Run`], with the subject's [`ExitStatus`] |
-//! | [`Serving`] | a bash script, which took the address | whoever holds the handle | [`Served`] |
+//! | | who started the shells | how they find the address | what the session lasts for | what comes back |
+//! |---|---|---|---|---|
+//! | [`Driving`] | the run, in a process group of its own | `BC_SESSION` in the environment, plus what [`Driving::environment`] adds | that process group | [`Run`], with the subject's [`ExitStatus`] |
+//! | [`Serving`] | a bash script, which started the server | it is handed the address, once | whoever holds the handle | [`Served`] |
+//!
+//! Either way, the address is the file a shell sources to join, and
+//! [`JOINING`] shows every way a script does that.
 //!
 //! **A session lasts as long as anyone who could still speak.** Nothing inside
 //! a rig ends one.
@@ -89,7 +98,7 @@
 //!
 //! | | |
 //! |---|---|
-//! | `attended` | [`Setup`], [`Workspace`], [`Layout`], [`Attended`], [`Kept`], [`Said`], [`heard`] |
+//! | `attended` | [`Setup`], [`Workspace`], [`Layout`], [`Reaching`], [`Attended`], [`Kept`], [`Said`], [`heard`] |
 //! | `session`, `attend` | the conversation: the workspace, the control fifo, one task per shell |
 //! | `watch` | the descriptor a session ends on |
 //! | `driving`, `serving` | the two roles, and what each hands back |
@@ -105,7 +114,7 @@ pub(crate) mod wire;
 
 use std::sync::Arc;
 
-pub use attended::{heard, Attended, Kept, Layout, Said, Setup, Workspace};
+pub use attended::{heard, Attended, Kept, Layout, Reaching, Said, Setup, Workspace};
 pub use driving::{Driving, ExitStatus, Run, Whole};
 pub use serving::{Served, Serving};
 
@@ -113,6 +122,14 @@ pub use wire::{field, Answer, Message, Micros, Pid, Stamp, Verb};
 
 pub use crate::bash::shell::Shell;
 pub use crate::failure::{Doing, Failure};
+
+/// How a bash script joins a session, in every way there is. Both tools print
+/// it under `--help`.
+///
+/// ```bash
+#[doc = include_str!("joining.txt")]
+/// ```
+pub const JOINING: &str = include_str!("joining.txt");
 
 /// What bash a rig gives the subject, where the session's files go, and how a
 /// reaction is made once a shell is there.

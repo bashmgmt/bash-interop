@@ -1,7 +1,7 @@
-//! Rust orchestrates: the run starts the subject, reaches every shell in the
-//! tree it creates, and owns its life.
+//! Rust orchestrates: the run starts the subject, exports the session's
+//! address into it, and owns its life.
 
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::io;
 use std::process::{Child, Command};
@@ -49,13 +49,13 @@ pub struct Whole<K> {
 /// A rig whose run Rust orchestrates.
 ///
 /// The command line is run as it is given and carries its own program, so a
-/// caller wanting a launcher or an environment puts one there — `env VAR=v --
-/// cmd` is the whole story, and `env -u BASH_ENV -- cmd` is a subject that
-/// sources `"$BC_SESSION/prelude.bash"` where it chooses.
+/// caller wanting a launcher puts one there: `env TARGET=staging -- bash
+/// x.bash` is the whole story.
 ///
 /// | | |
 /// |---|---|
-/// | what reaches the shells | `BC_SESSION=<dir>` and `BASH_ENV=<dir>/prelude.bash` |
+/// | what every shell finds | `BC_SESSION=<the address>` — the file a shell sources to join |
+/// | what else reaches them | [`environment`](Driving::environment): the rig's answer, [`Reaching`](super::Reaching) the two usual ones |
 /// | what ends it | a pidfd on the subject, watched and never signalled; then the group is killed |
 /// | what comes back | [`Run`], and [`Run::whole`] → [`Whole`] |
 ///
@@ -63,6 +63,10 @@ pub struct Whole<K> {
 /// from a current-thread runtime or `block_on`.
 #[expect(async_fn_in_trait, reason = "single-threaded by design: no Send bound")]
 pub trait Driving: Rig {
+    /// What the subject's environment gets beyond the address. Nothing is a
+    /// legitimate answer: the shells then join by hand.
+    fn environment(&self, at: &Layout) -> Vec<(OsString, OsString)>;
+
     async fn run<A: AsRef<OsStr>>(&self, argv: &[A]) -> Result<Run<Kept<Self>>, Failure>
     where
         Self: Sized,
@@ -73,7 +77,8 @@ pub trait Driving: Rig {
 
                 // Declared after the session, so it drops before it: leaving
                 // through `?` stops the subject before releasing its files.
-                let mut subject = Subject::spawn(argv, &session.layout)?;
+                let environment = self.environment(&session.layout);
+                let mut subject = Subject::spawn(argv, &session.layout, environment)?;
 
                 session.serve(&Watch::process(subject.pid())?).await?;
                 let subject = subject.finish().doing(|| "waiting for bash".into())?;
@@ -92,7 +97,11 @@ struct Subject {
 }
 
 impl Subject {
-    fn spawn<A: AsRef<OsStr>>(argv: &[A], layout: &Layout) -> Result<Self, Failure> {
+    fn spawn<A: AsRef<OsStr>>(
+        argv: &[A],
+        layout: &Layout,
+        environment: Vec<(OsString, OsString)>,
+    ) -> Result<Self, Failure> {
         use std::os::unix::process::CommandExt;
 
         let said =
@@ -102,11 +111,7 @@ impl Subject {
             .ok_or_else(|| Failure::new("starting the subject", "the command line is empty"))?;
 
         let mut command = Command::new(program);
-        command
-            .args(rest)
-            .env("BC_SESSION", &layout.dir)
-            .env("BASH_ENV", &layout.prelude)
-            .process_group(0);
+        command.args(rest).env("BC_SESSION", &layout.prelude).envs(environment).process_group(0);
 
         let child = command.spawn().doing(|| format!("spawning {}", said()))?;
         let group = child.id() as libc::pid_t;
@@ -126,9 +131,7 @@ impl Subject {
     }
 
     fn release(&self) {
-        unsafe {
-            libc::kill(-self.group, libc::SIGKILL);
-        }
+        let _ = unsafe { libc::kill(-self.group, libc::SIGKILL) };
     }
 }
 

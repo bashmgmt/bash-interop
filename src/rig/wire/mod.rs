@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use crate::failure::{Doing, Failure};
 
-pub(crate) use control::Control;
+pub(crate) use control::{Announced, Control};
 pub(crate) use message::{Account, Line};
 pub(crate) use pipe::Pipe;
 pub use message::{field, Answer, Message, Micros, Pid, Stamp, Verb};

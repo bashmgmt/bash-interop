@@ -1,6 +1,7 @@
 //! What a rig states about itself, where a session puts its files, and what a
 //! run hands back.
 
+use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -36,8 +37,39 @@ pub enum Workspace {
 pub struct Layout {
     pub dir: PathBuf,
 
-    /// The file a shell sources to join — the session's only address.
+    /// The file a shell sources to join — the session's only address, and what
+    /// `BC_SESSION` carries in a driven subject's environment.
     pub prelude: PathBuf,
+}
+
+impl Layout {
+    /// The address, spelled for `BASH_ENV`: reaches every non-interactive bash
+    /// in the tree the subject creates.
+    pub fn bash_env(&self) -> (OsString, OsString) {
+        (OsString::from("BASH_ENV"), self.prelude.clone().into_os_string())
+    }
+}
+
+/// The two usual answers a driving rig gives to [`Driving::environment`](super::Driving::environment).
+/// The core consults neither.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub enum Reaching {
+    /// `BASH_ENV` names the address: every non-interactive bash in the
+    /// subject's tree joins as it starts.
+    BashEnv,
+
+    /// Nothing beyond the address: a shell joins where its script says
+    /// `source "$BC_SESSION"`.
+    ByHand,
+}
+
+impl Reaching {
+    pub fn environment(self, at: &Layout) -> Vec<(OsString, OsString)> {
+        match self {
+            Self::BashEnv => vec![at.bash_env()],
+            Self::ByHand => Vec::new(),
+        }
+    }
 }
 
 /// What one shell's reaction leaves behind, for a given rig.

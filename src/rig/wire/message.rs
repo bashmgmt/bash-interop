@@ -1,9 +1,9 @@
-//! One line on a shell's pipe, and the one that goes back.
+//! What travels: a shell's account of itself, the messages it sends, and the
+//! answers it is sent.
 //!
-//! A line is a bash array literal. The protocol puts its own words in front —
-//! the verb, then the sending shell's clock — and the reader shifts exactly
-//! those back off, leaving what the shell wrote. The first line on a pipe is
-//! the shell's [`Account`] of itself; every line after it is a [`Message`].
+//! Each is a bash array literal. The protocol puts its own words in front — a
+//! verb where there is one, then the sending shell's clock as `at=` — and the
+//! reader shifts exactly those back off, leaving what the shell wrote.
 
 use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -86,20 +86,24 @@ impl Message {
         }
     }
 
-    /// Any line after the first.
+    /// One line off a shell's pipe: the verb, the clock, the words.
     pub(crate) fn read(line: Line) -> Result<Self, Failure> {
-        let (verb, stamp, ahead) = line.open()?;
-        let verb = match verb.as_str() {
+        let refused = |why: &str| Failure::new(format!("reading the line {:?}", line.text), why);
+        let mut ahead = Ahead::over(&line.text).map_err(|why| refused(&why))?;
+
+        let verb = match ahead.word().map_err(refused)?.as_str() {
             "SAY" => Verb::Say,
             "ASK" => Verb::Ask,
-            _ => return Err(line.refused(&format!("{verb} is not a message"))),
+            other => return Err(refused(&format!("{other} is not a verb"))),
         };
+        let sent_at = ahead.clock().map_err(refused)?;
 
-        Ok(Self { verb, stamp, words: ahead.rest() })
+        Ok(Self { verb, stamp: Stamp { sent_at, heard_at: line.heard_at }, words: ahead.rest() })
     }
 }
 
-/// A shell's account of itself: the first line on its pipe.
+/// A shell's account of itself, as it announces itself: the clock, then the
+/// pairs [`Shell::of`](crate::bash::shell::Shell::of) reads.
 #[derive(Debug)]
 pub(crate) struct Account {
     pub stamp: Stamp,
@@ -107,54 +111,39 @@ pub(crate) struct Account {
 }
 
 impl Account {
-    pub(crate) fn read(line: Line) -> Result<Self, Failure> {
-        let (verb, stamp, ahead) = line.open()?;
-        if verb != "JOIN" {
-            return Err(line.refused(&format!("{verb} is not an account")));
-        }
+    pub(crate) fn read(text: &str, heard_at: Micros) -> Result<Self, Failure> {
+        let refused = |why: &str| Failure::new(format!("reading the account {text:?}"), why);
+        let mut ahead = Ahead::over(text).map_err(|why| refused(&why))?;
+        let sent_at = ahead.clock().map_err(refused)?;
 
-        Ok(Self { stamp, words: ahead.rest() })
+        Ok(Self { stamp: Stamp { sent_at, heard_at }, words: ahead.rest() })
     }
 }
 
-/// One line as read off a pipe, with the run's clock at the read.
+/// One line as read off a shell's pipe, with the run's clock at the read.
 #[derive(Debug)]
 pub(crate) struct Line {
     pub text: String,
     pub heard_at: Micros,
 }
 
-impl Line {
-    /// The protocol's own words off the front: the verb and the clock.
-    fn open(&self) -> Result<(String, Stamp, Ahead), Failure> {
-        let words = parse_array(&self.text).map_err(|why| self.refused(&why.to_string()))?;
-        let mut ahead = Ahead(words.into_iter());
-
-        let verb = ahead.word().map_err(|why| self.refused(why))?;
-        let at = ahead.header("at").map_err(|why| self.refused(why))?;
-        let sent_at = Micros::parse_epoch(&at).ok_or_else(|| self.refused("bad at"))?;
-
-        Ok((verb, Stamp { sent_at, heard_at: self.heard_at }, ahead))
-    }
-
-    fn refused(&self, why: &str) -> Failure {
-        Failure::new(format!("reading the line {:?}", self.text), why.to_string())
-    }
-}
-
 /// The protocol's own words, taken off the front one at a time.
 struct Ahead(vec::IntoIter<String>);
 
 impl Ahead {
+    fn over(text: &str) -> Result<Self, String> {
+        parse_array(text).map(|words| Self(words.into_iter())).map_err(|why| why.to_string())
+    }
+
     fn word(&mut self) -> Result<String, &'static str> {
         self.0.next().ok_or("the line ended early")
     }
 
-    /// One `key=value` header, whose key must be `key`.
-    fn header(&mut self, key: &'static str) -> Result<String, &'static str> {
+    /// The `at=` header: the sender's `$EPOCHREALTIME`.
+    fn clock(&mut self) -> Result<Micros, &'static str> {
         match self.word()?.split_once('=') {
-            Some((found, value)) if found == key => Ok(value.to_string()),
-            _ => Err(key),
+            Some(("at", value)) => Micros::parse_epoch(value).ok_or("bad at"),
+            _ => Err("no at= header"),
         }
     }
 
@@ -206,8 +195,7 @@ impl Answer {
 }
 
 /// One line, whatever it carries: the bash array literal a shell reads back
-/// with `declare -a`. How an answer travels the reply pipe, and how a session's
-/// address travels whatever channel its initiator gave it.
+/// with `declare -a` — how an answer travels the reply pipe.
 impl fmt::Display for Answer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", emit_array(&self.0))
@@ -252,21 +240,24 @@ mod tests {
         assert_eq!(message.behind("REC"), None);
     }
 
-    /// An account and a message are told apart by the verb, and neither reads
-    /// as the other.
+    /// An account has no verb: the clock comes first.
     #[test]
-    fn an_account_is_not_a_message_and_a_message_is_not_an_account() {
-        let account = Account::read(line("JOIN", &["zero", "x.bash", "flags", "hB"])).unwrap();
+    fn an_account_is_the_clock_and_the_pairs() {
+        let text = emit_array(&words(&["at=1.000002", "zero", "x.bash", "flags", "hB"]));
+        let account = Account::read(&text, Micros(50)).unwrap();
+
+        assert_eq!(account.stamp, Stamp { sent_at: Micros(1_000_002), heard_at: Micros(50) });
         assert_eq!(field(&account.words, "zero"), Some("x.bash"));
 
-        assert!(Message::read(line("JOIN", &[])).is_err(), "a second account is malformed");
-        assert!(Account::read(line("SAY", &[])).is_err(), "a first line that is not one");
+        let verbed = emit_array(&words(&["JOIN", "at=1.000002"]));
+        assert!(Account::read(&verbed, Micros(0)).is_err(), "a verb where the clock goes");
     }
 
     #[test]
     fn a_header_the_protocol_did_not_write_is_an_error() {
         let bad = [
             emit_array(&words(&["MUMBLE", "at=1.000002"])),
+            emit_array(&words(&["JOIN", "at=1.000002"])),
             emit_array(&words(&["SAY", "when=1.000002"])),
             emit_array(&words(&["SAY", "at=1.0"])),
             emit_array(&words(&["SAY"])),

@@ -10,7 +10,7 @@ use tokio::task::JoinSet;
 
 use super::attend::{attend, Attendance};
 use super::watch::Watch;
-use super::wire::{self, prelude, Account, Control, Pipe};
+use super::wire::{self, prelude, Announced, Control, Pipe};
 use super::{Attended, Kept, Layout, Rig, Shell, Workspace};
 use crate::failure::{Doing, Failure};
 
@@ -73,7 +73,7 @@ impl<'r, R: Rig> Session<'r, R> {
         loop {
             tokio::select! {
                 biased;
-                token = self.control.next() => self.announced(token?).await?,
+                announced = self.control.next() => self.announced(announced?).await?,
                 Some(done) = self.attending.join_next() => {
                     let Attendance { attended, cut } = finished(done)?;
                     self.done.push(attended);
@@ -86,16 +86,14 @@ impl<'r, R: Rig> Session<'r, R> {
         }
     }
 
-    /// A token on the control fifo. The reply pipe is made before the shell's
-    /// pipe is opened, so it exists before the shell can be released; the
-    /// shell's first line is its account, and only then is there a shell.
-    async fn announced(&mut self, token: String) -> Result<(), Failure> {
+    /// A shell announced on the control fifo. The reply pipe is made before
+    /// the shell's pipe is opened, so it exists before the shell is released;
+    /// nothing here awaits the shell.
+    async fn announced(&mut self, Announced { token, account }: Announced) -> Result<(), Failure> {
         let (up, rep) = (wire::up(&self.layout.dir, &token), wire::rep(&self.layout.dir, &token));
         wire::mkfifo(&rep)?;
-        let mut pipe = Pipe::open(up, rep)?;
+        let pipe = Pipe::open(up, rep)?;
 
-        let Some(first) = pipe.lines.next().await? else { return pipe.close() };
-        let account = Account::read(first)?;
         let shell = Arc::new(Shell::of(self.joined, account)?);
         self.joined += 1;
         let reaction = self.rig.joined(&self.layout, Arc::clone(&shell)).await?;

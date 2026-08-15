@@ -1,6 +1,6 @@
-# The client half of the protocol. Sourced through BASH_ENV by every shell in a
-# driven subject's process tree, or by hand. Shipped verbatim into the run's
-# workspace; everything it needs it finds from its own path.
+# The client half of the protocol. Sourced by every shell that joins — through
+# BASH_ENV, or by hand as `source "$BC_SESSION"`. Shipped verbatim into the
+# run's workspace; everything it needs it finds from its own path.
 #
 # One entry per label. `declare -gA` on an array that exists keeps it, so a
 # second session's prelude sourced into the same shell adds a label and takes
@@ -59,28 +59,27 @@ BC_INSTR() {
     esac
 }
 
-# $1 the label. This process's pipe: make it, announce it, open it — the open
-# completes when the run has it in hand, and the run makes the reply pipe
-# before that, so both exist by the time this returns.
+# $1 the label. This process's pipe: make it, announce it with the account,
+# open it — the open completes when the run has it in hand, and the run makes
+# the reply pipe before that, so both exist by the time this returns.
 #
 # `>` would create a regular file where no fifo is, so the control fifo is
 # checked before it is written: a session that closed unlinked it.
 __bc_attach() {
     local __bc_dir=${__BC__DIR[$1]}
     local __bc_tok="$1::$BASHPID.${EPOCHREALTIME#*[.,]}.${SRANDOM:-$RANDOM$RANDOM}"
-    local __bc_fd __bc_rep
+    local __bc_fd __bc_rep __bc_acct
 
     [[ -p "$__bc_dir/join" ]] || { __bc_complain "no session at $__bc_dir"; return "$__BC__FAILED"; }
-    mkfifo "$__bc_dir/up.$__bc_tok"                 || __BC_THROW
-    printf '%s\n' "$__bc_tok" >"$__bc_dir/join"     || __BC_THROW
-    exec {__bc_fd}>"$__bc_dir/up.$__bc_tok"         || __BC_THROW
-    exec {__bc_rep}<>"$__bc_dir/rep.$__bc_tok"      || __BC_THROW
+    __bc_account __bc_acct
+    mkfifo "$__bc_dir/up.$__bc_tok"                                 || __BC_THROW
+    __bc_announce "$__bc_tok" "$__bc_acct" >"$__bc_dir/join"        || __BC_BAIL
+    exec {__bc_fd}>"$__bc_dir/up.$__bc_tok"                         || __BC_THROW
+    exec {__bc_rep}<>"$__bc_dir/rep.$__bc_tok"                      || __BC_THROW
 
     __BC__FD[$1]=$__bc_fd
     __BC__REP[$1]=$__bc_rep
     __BC__OWNER[$1]=$BASHPID
-
-    __bc_account "$1" || __BC_BAIL
 }
 
 # $1 the label. A fork inherited its parent's descriptors; it drops them and
@@ -92,13 +91,14 @@ __bc_reattach() {
     __bc_attach "$1"
 }
 
-# $1 the label. The first line on the pipe, and the only line of its kind.
-# Every value is passed as bash reports it; what any of it means is read on
-# the other side. `IFS` is local so `[*]` joins with a space whatever the
-# subject's is, and the subject's — unset included — is back on return.
+# $1 the name to write into: this shell's account of itself, one array
+# literal, the clock first. Every value is passed as bash reports it; what any
+# of it means is read on the other side. `IFS` is local so `[*]` joins with a
+# space whatever the subject's is, and the subject's — unset included — is back
+# on return.
 __bc_account() {
-    local IFS=' '
-    __bc_send "$1" JOIN \
+    local __bc_out=$1 IFS=' '
+    set -- "at=$EPOCHREALTIME" \
         pid       "$BASHPID" \
         shlvl     "$SHLVL" \
         subshell  "$BASH_SUBSHELL" \
@@ -109,6 +109,22 @@ __bc_account() {
         shellopts "$SHELLOPTS" \
         bashopts  "$BASHOPTS" \
         command   "${BASH_EXECUTION_STRING-}"
+    printf -v "$__bc_out" '(%s)' "${*@Q}"
+}
+
+# $1 the token, $2 the account; standard output is the control fifo. Every
+# shell writes there and a write is atomic up to PIPE_BUF, so the account goes
+# in frames that each fit it whole: `<token> + <bytes>` for one with more to
+# come, `<token> . <bytes>` for the last. Under `LC_ALL=C` `${#2}` and
+# `${2:a:b}` count bytes; `local` puts the subject's locale back on return.
+__bc_announce() {
+    local LC_ALL=C
+    local __bc_room=$(( 4096 - ${#1} - 4 )) __bc_from=0
+    while (( ${#2} - __bc_from > __bc_room )); do
+        printf '%s + %s\n' "$1" "${2:__bc_from:__bc_room}" || __BC_THROW
+        __bc_from=$(( __bc_from + __bc_room ))
+    done
+    printf '%s . %s\n' "$1" "${2:__bc_from}" || __BC_THROW
 }
 
 # $1 the label, $2 the verb, the rest the words. One line, one printf: the
