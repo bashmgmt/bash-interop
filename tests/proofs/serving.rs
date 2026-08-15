@@ -56,8 +56,9 @@ fn joining(address: &str, script: &Path, handle: OwnedFd) -> Child {
 }
 
 /// Serve `scripts`' entry in a shell started for it — the workspace is the
-/// initiator's to name, so this side makes one — and hand back the shells
-/// that joined beside how that shell ended.
+/// initiator's to name, so this side makes one, and the address is the file
+/// under it this side could already spell — and hand back the shells that
+/// joined beside how that shell ended.
 async fn joined(scripts: &Scripts) -> (Vec<Attended<Vec<Message>>>, std::process::ExitStatus) {
     let workspace = tempfile::tempdir().expect("a workspace to prescribe");
     let (held, handle) = pipe().expect("a handle");
@@ -65,6 +66,9 @@ async fn joined(scripts: &Scripts) -> (Vec<Attended<Vec<Message>>>, std::process
     let mut child = None;
     let served = Attaching
         .serve(workspace.path(), held.into(), |address| {
+            let expected = workspace.path().canonicalize().unwrap().join("session.bash");
+            assert_eq!(Path::new(address), expected, "the prescribed dir, as prescribed");
+
             child = Some(joining(address, &scripts.at(ENTRY), handle.into()));
             Ok(())
         })
@@ -215,43 +219,4 @@ async fn a_shell_says_what_it_is_rather_than_being_guessed_at() {
     // Interactive is not something the options can be turned into: `set`
     // refuses `-i`, so this is settled at startup and true of the whole shell.
     assert!(shell.options.flags.has('i'));
-}
-
-/// The workspace is the client's: the session is laid where it prescribed —
-/// created if missing — and the address is the file under it the client could
-/// already spell. What a laid workspace holds afterwards is `owning.rs`'s
-/// proof; here the fact is who chose the directory.
-#[tokio::test]
-async fn the_session_is_laid_where_the_client_prescribed() {
-    let temp = tempfile::tempdir().unwrap();
-    let at = temp.path().join("under").join("here");
-    let scripts = Scripts::of(&[(
-        ENTRY,
-        r#"
-        TELL first
-        ( TELL from-a-subshell )
-        "#,
-    )]);
-
-    let (held, handle) = pipe().expect("a handle");
-    let mut child = None;
-    let served = Attaching
-        .serve(&at, held.into(), |address| {
-            let expected = std::fs::canonicalize(&at).unwrap().join("session.bash");
-            assert_eq!(Path::new(address), expected, "the client's own dir, as prescribed");
-
-            child = Some(joining(address, &scripts.at(ENTRY), handle.into()));
-            Ok(())
-        })
-        .await
-        .expect("the session");
-
-    child.expect("the shell").wait().expect("reaping the shell");
-    assert!(served.failed.is_none(), "the session closed up cleanly");
-    assert_eq!(
-        behind(&served.shells, "TELL"),
-        [["first"].as_slice(), ["from-a-subshell"].as_slice()],
-        "{}",
-        report(&served.shells)
-    );
 }

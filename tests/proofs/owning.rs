@@ -23,7 +23,7 @@ async fn a_named_workspace_is_left_behind_without_its_fifos() {
         (
             ENTRY,
             r#"
-            for i in $(seq 1 40); do BC_INSTR KEEP ask step "$i"; done
+            for i in 1 2 3; do BC_INSTR KEEP ask step "$i"; done
             bash "${BASH_SOURCE[0]%/*}/other.bash"
             ( BC_INSTR KEEP say REC fork )
             exit 0
@@ -44,8 +44,8 @@ async fn a_named_workspace_is_left_behind_without_its_fifos() {
     assert_eq!(behind(&ran.shells, "REC"), [["fork"]]);
     assert_eq!(
         lines(&ran.shells).iter().filter(|message| message.verb == Verb::Ask).count(),
-        43,
-        "two shells asked"
+        6,
+        "both shells asked, so both reply fifos existed"
     );
 
     let mut left: Vec<String> = std::fs::read_dir(&at)

@@ -218,8 +218,7 @@ mechanism that cannot be checked by reading the source. One file per subject.
 
 | `serving.rs` | establishes |
 |---|---|
-| `a_shell_that_joined_is_heard_until_it_lets_go` | a client's words and its subshell's arrive; the session ends with the handle; the client's status is its own |
-| `the_session_is_laid_where_the_client_prescribed` | the session is laid where the client said, and the address is `<at>/session.bash` — a path the client could already spell |
+| `a_shell_that_joined_is_heard_until_it_lets_go` | a client's words and its subshell's arrive; the session ends with the handle; the client's status is its own. Every serving proof asserts the address is `<at>/session.bash`, at the announce |
 | `a_shell_the_session_outlived_is_left_to_its_own_devices` | a client that released the handle while running has `parted: None`, and its next word takes `SIGPIPE` |
 | `a_joined_shell_may_publish_the_address_to_its_children` | `export BASH_ENV="$BC_SESSION"` reaches a child process |
 | `a_shell_says_what_it_is_rather_than_being_guessed_at` | an interactive shell joins by sourcing, and says `-i`, `-s`, no command line |
