@@ -3,12 +3,11 @@
 //! killed rather than told something and left to interpret it. What the
 //! subject gets wrong stays the subject's.
 
-use std::ffi::OsString;
 use std::sync::Arc;
 use std::time::Instant;
 
 use mb_resolver::bash::rig::{
-    Answer, Driving, ExitStatus, Failure, Layout, Message, Reaching, Reacting, Rig, Setup, Shell,
+    Answer, Driving, ExitStatus, Failure, Layout, Message, Reached, Reaching, Reacting, Rig, Setup, Shell,
     Verb,
 };
 
@@ -61,12 +60,6 @@ impl Reacting for Breaks {
     }
 }
 
-impl Driving for Breaking {
-    fn environment(&self, at: &Layout) -> Vec<(OsString, OsString)> {
-        Reaching::BashEnv.environment(at)
-    }
-}
-
 /// The subject reports its own pid before the message that breaks the rig, so
 /// a proof can ask whether it outlived the run.
 const REPORTING: &str = r#"echo $BASHPID > "${BASH_SOURCE[0]%/*}/pid"
@@ -87,7 +80,7 @@ fn blocked(scripts: &Scripts) -> i32 {
 async fn a_rig_that_cannot_answer_ends_the_run_and_kills_the_subject() {
     let scripts = Scripts::of(&[(ENTRY, &format!("{REPORTING}BC_INSTR KEEP ask anything"))]);
 
-    let failure = Breaking { on: Verb::Ask }
+    let failure = Reached { rig: Breaking { on: Verb::Ask }, reaching: Reaching::BashEnv }
         .run(&bash(scripts.at(ENTRY)))
         .await
         .err()
@@ -115,7 +108,7 @@ async fn a_failure_while_hearing_ends_the_run_and_kills_the_subject() {
     )]);
 
     let started = Instant::now();
-    let failure = Breaking { on: Verb::Say }
+    let failure = Reached { rig: Breaking { on: Verb::Say }, reaching: Reaching::BashEnv }
         .run(&bash(scripts.at(ENTRY)))
         .await
         .err()

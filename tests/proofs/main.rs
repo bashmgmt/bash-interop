@@ -33,11 +33,11 @@ mod transport;
 #[path = "../support/mod.rs"]
 mod support;
 
-use std::ffi::OsString;
 use std::sync::Arc;
 
 use mb_resolver::bash::rig::{
-    heard, Attended, Driving, Failure, Layout, Message, Reaching, Rig, Setup, Shell, Whole,
+    heard, Attended, Driving, Failure, Layout, Message, Reached, Reaching, Rig, Setup, Shell,
+    Whole,
 };
 
 use support::{bash, Scripts};
@@ -49,19 +49,18 @@ pub const ENTRY: &str = "main.bash";
 pub const LABEL: &str = "KEEP";
 
 /// Keeps every message, and answers nothing.
-pub struct Keeping {
-    reaching: Reaching,
-}
+pub struct Keeping;
 
 impl Keeping {
-    /// Every shell of the subject's tree joins as it starts.
-    pub fn bash_env() -> Self {
-        Self { reaching: Reaching::BashEnv }
+    /// Driven so every shell of the subject's tree joins as it starts.
+    pub fn bash_env() -> Reached<Self> {
+        Reached { rig: Keeping, reaching: Reaching::BashEnv }
     }
 
-    /// The address alone: a script joins where it says `source "$BC_SESSION"`.
-    pub fn by_hand() -> Self {
-        Self { reaching: Reaching::ByHand }
+    /// Driven with the address alone: a script joins where it says
+    /// `source "$BC_SESSION"`.
+    pub fn by_hand() -> Reached<Self> {
+        Reached { rig: Keeping, reaching: Reaching::ByHand }
     }
 }
 
@@ -75,12 +74,6 @@ impl Rig for Keeping {
 
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Vec<Message>, Failure> {
         Ok(Vec::new())
-    }
-}
-
-impl Driving for Keeping {
-    fn environment(&self, at: &Layout) -> Vec<(OsString, OsString)> {
-        self.reaching.environment(at)
     }
 }
 

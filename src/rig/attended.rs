@@ -45,28 +45,6 @@ impl Layout {
     }
 }
 
-/// The two usual answers a driving rig gives to [`Driving::environment`](super::Driving::environment).
-/// The core consults neither.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, clap::ValueEnum)]
-pub enum Reaching {
-    /// `BASH_ENV` names the address: every non-interactive bash in the
-    /// subject's tree joins as it starts.
-    BashEnv,
-
-    /// Nothing beyond the address: a shell joins where its script says
-    /// `source "$BC_SESSION"`.
-    ByHand,
-}
-
-impl Reaching {
-    pub fn environment(self, at: &Layout) -> Vec<(OsString, OsString)> {
-        match self {
-            Self::BashEnv => vec![at.bash_env()],
-            Self::ByHand => Vec::new(),
-        }
-    }
-}
-
 /// What one shell's reaction leaves behind, for a given rig.
 pub type Kept<R> = <<R as Rig>::Reaction as Reacting>::Kept;
 

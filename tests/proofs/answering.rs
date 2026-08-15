@@ -1,14 +1,13 @@
 //! Every form an answer can take, from two shells at once — and an answer that
 //! waits on another shell's word, which only serving concurrently can give.
 
-use std::ffi::OsString;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
 use mb_resolver::bash::rig::{
-    Answer, Driving, ExitStatus, Failure, Layout, Message, Reaching, Reacting, Rig, Run, Setup,
+    Answer, Driving, ExitStatus, Failure, Layout, Message, Reached, Reaching, Reacting, Rig, Run, Setup,
     Shell,
 };
 use tokio::sync::Notify;
@@ -91,12 +90,6 @@ impl Reacting for Soak {
     }
 }
 
-impl Driving for Answering {
-    fn environment(&self, at: &Layout) -> Vec<(OsString, OsString)> {
-        Reaching::BashEnv.environment(at)
-    }
-}
-
 /// Every answer form in turn — one deliberately slow, one past the pipe's
 /// buffer — mixed with saying and with a message too wide for one write, from
 /// two shells asking independently.
@@ -134,7 +127,8 @@ async fn a_session_survives_every_way_of_answering() {
         ),
     ]);
 
-    let answering = Answering { steps: scripts.dir().to_path_buf() };
+    let answering =
+        Reached { rig: Answering { steps: scripts.dir().to_path_buf() }, reaching: Reaching::BashEnv };
     let ran = answering
         .run(&bash(scripts.at(ENTRY)))
         .await
@@ -221,12 +215,6 @@ impl Reacting for Gate {
     }
 }
 
-impl Driving for Gated {
-    fn environment(&self, at: &Layout) -> Vec<(OsString, OsString)> {
-        Reaching::BashEnv.environment(at)
-    }
-}
-
 /// One shell blocks on an answer that depends on another shell's word. Serving
 /// each shell on a task of its own is what lets the second shell be heard while
 /// the first is waiting.
@@ -241,7 +229,7 @@ async fn an_answer_may_wait_on_another_shells_word() {
         wait
         "#,
     )]);
-    let gated = Gated { open: Rc::new(Notify::new()) };
+    let gated = Reached { rig: Gated { open: Rc::new(Notify::new()) }, reaching: Reaching::BashEnv };
     let argv = bash(scripts.at(ENTRY));
 
     let ran = tokio::time::timeout(Duration::from_secs(10), gated.run(&argv))

@@ -2,11 +2,10 @@
 //! the run, held for the shell's life. Every process that sources the prelude
 //! attaches; a fork attaches on its first word.
 
-use std::ffi::OsString;
 use std::sync::Arc;
 
 use mb_resolver::bash::rig::{
-    Driving, ExitStatus, Failure, Layout, Message, Reaching, Rig, Setup, Shell,
+    Driving, ExitStatus, Failure, Layout, Message, Reached, Reaching, Rig, Setup, Shell,
 };
 
 use crate::support::{bash, Scripts};
@@ -72,12 +71,6 @@ impl Rig for Twice {
     }
 }
 
-impl Driving for Twice {
-    fn environment(&self, at: &Layout) -> Vec<(OsString, OsString)> {
-        Reaching::BashEnv.environment(at)
-    }
-}
-
 #[tokio::test]
 async fn two_labels_in_one_process_are_two_shells() {
     let scripts = Scripts::of(&[(
@@ -90,7 +83,8 @@ async fn two_labels_in_one_process_are_two_shells() {
         "#,
     )]);
 
-    let ran = Twice.run(&bash(scripts.at(ENTRY))).await.unwrap().whole().unwrap();
+    let twice = Reached { rig: Twice, reaching: Reaching::BashEnv };
+    let ran = twice.run(&bash(scripts.at(ENTRY))).await.unwrap().whole().unwrap();
 
     assert_eq!(ran.shells.len(), 2, "{}", report(&ran.shells));
     assert_eq!(ran.shells[0].shell.pid, ran.shells[1].shell.pid, "one process");

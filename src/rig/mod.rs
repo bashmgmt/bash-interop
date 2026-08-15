@@ -14,10 +14,9 @@
 //! is many straight-line loops that interleave.
 //!
 //! ```no_run
-//! use std::ffi::OsString;
 //! use std::sync::Arc;
 //! use mb_resolver::bash::rig::{
-//!     Answer, Driving, Failure, Layout, Message, Reaching, Reacting, Rig, Setup, Shell,
+//!     Answer, Driving, Failure, Layout, Message, Reached, Reaching, Reacting, Rig, Setup, Shell,
 //! };
 //!
 //! /// Keeps what one shell said, and tells it to use staging.
@@ -60,16 +59,13 @@
 //!     async fn finish(self) -> Result<Self, Failure> { Ok(self) }
 //! }
 //!
-//! impl Driving for Deploying {
-//!     /// Every non-interactive bash in the tree joins as it starts.
-//!     fn environment(&self, at: &Layout) -> Vec<(OsString, OsString)> {
-//!         Reaching::BashEnv.environment(at)
-//!     }
-//! }
-//!
 //! # #[tokio::main(flavor = "current_thread")]
 //! # async fn main() -> Result<(), Failure> {
-//! for shell in Deploying.run(&["bash", "deploy.bash"]).await?.whole()?.shells {
+//! // Driven with the usual reach: `BASH_ENV`, so every non-interactive bash
+//! // in the tree joins as it starts. A rig with an environment of its own
+//! // implements `Driving` instead.
+//! let ran = Reached { rig: Deploying, reaching: Reaching::BashEnv };
+//! for shell in ran.run(&["bash", "deploy.bash"]).await?.whole()?.shells {
 //!     println!("pid {} said {} things", shell.shell.pid, shell.kept.heard.len());
 //! }
 //! # Ok(())
@@ -98,10 +94,10 @@
 //!
 //! | | |
 //! |---|---|
-//! | `attended` | [`Setup`], [`Layout`], [`Reaching`], [`Attended`], [`Kept`], [`Said`], [`heard`] |
+//! | `attended` | [`Setup`], [`Layout`], [`Attended`], [`Kept`], [`Said`], [`heard`] |
 //! | `session`, `attend` | the conversation: the workspace, the control fifo, one task per shell |
 //! | `watch` | the descriptor a session ends on |
-//! | `driving`, `serving` | the two roles, and what each hands back |
+//! | `driving`, `serving` | the two roles, [`Reached`] and [`Reaching`], and what each hands back |
 //! | `wire` | [`Message`], [`Answer`], and the protocol that carries them |
 
 mod attend;
@@ -114,8 +110,8 @@ pub(crate) mod wire;
 
 use std::sync::Arc;
 
-pub use attended::{heard, Attended, Kept, Layout, Reaching, Said, Setup};
-pub use driving::{Driving, ExitStatus, Run, Whole};
+pub use attended::{heard, Attended, Kept, Layout, Said, Setup};
+pub use driving::{Driving, ExitStatus, Reached, Reaching, Run, Whole};
 pub use serving::{Served, Serving};
 
 pub use wire::{field, Answer, Message, Micros, Pid, Stamp, Verb};

@@ -5,12 +5,13 @@ use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::io;
 use std::process::{Child, Command};
+use std::sync::Arc;
 
 use tokio::task::LocalSet;
 
 use super::session::Session;
 use super::watch::Watch;
-use super::{Attended, Kept, Layout, Rig};
+use super::{Attended, Kept, Layout, Rig, Setup, Shell};
 use crate::failure::{Doing, Failure};
 
 /// What a driven run produced.
@@ -55,7 +56,7 @@ pub struct Whole<K> {
 /// | | |
 /// |---|---|
 /// | what every shell finds | `BC_SESSION=<the address>` — the file a shell sources to join |
-/// | what else reaches them | [`environment`](Driving::environment): the rig's answer, [`Reaching`](super::Reaching) the two usual ones |
+/// | what else reaches them | [`environment`](Driving::environment): the rig's answer, [`Reached`] the two usual ones |
 /// | what ends it | a pidfd on the subject, watched and never signalled; then the group is killed |
 /// | what comes back | [`Run`], and [`Run::whole`] → [`Whole`] |
 ///
@@ -87,6 +88,52 @@ pub trait Driving: Rig {
                 Ok(Run { shells, subject: ExitStatus::from(subject), failed })
             })
             .await
+    }
+}
+
+/// The two usual answers to [`Driving::environment`], and the enum the
+/// tools' `--reach` parses. The core consults neither: what carries them is
+/// [`Reached`].
+#[derive(Copy, Clone, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub enum Reaching {
+    /// `BASH_ENV` names the address: every non-interactive bash in the
+    /// subject's tree joins as it starts.
+    BashEnv,
+
+    /// Nothing beyond the address: a shell joins where its script says
+    /// `source "$BC_SESSION"`.
+    ByHand,
+}
+
+/// A rig driven with one of them.
+///
+/// The rig describes; how a driven subject's shells find it is the run's
+/// question, so it is stated where the run is made rather than kept on the
+/// rig — a rig that serves never carries it. A rig with an environment of
+/// its own implements [`Driving`] directly instead.
+pub struct Reached<R> {
+    pub rig: R,
+    pub reaching: Reaching,
+}
+
+impl<R: Rig> Rig for Reached<R> {
+    type Reaction = R::Reaction;
+
+    fn setup(&self) -> Setup {
+        self.rig.setup()
+    }
+
+    async fn joined(&self, at: &Layout, shell: Arc<Shell>) -> Result<R::Reaction, Failure> {
+        self.rig.joined(at, shell).await
+    }
+}
+
+impl<R: Rig> Driving for Reached<R> {
+    fn environment(&self, at: &Layout) -> Vec<(OsString, OsString)> {
+        match self.reaching {
+            Reaching::BashEnv => vec![at.bash_env()],
+            Reaching::ByHand => Vec::new(),
+        }
     }
 }
 
