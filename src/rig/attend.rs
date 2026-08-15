@@ -8,6 +8,13 @@ use super::wire::{Line, Micros, Pipe, Verb};
 use super::{Attended, Message, Reacting, Shell};
 use crate::failure::Failure;
 
+/// What a task hands back: the shell attended, and a line its pipe was left
+/// holding, if any — reported beside what the shell said, not instead of it.
+pub(super) struct Attendance<K> {
+    pub attended: Attended<K>,
+    pub cut: Option<Failure>,
+}
+
 /// Serve one shell until nobody can write on its pipe, or until the session
 /// closes — whichever comes first — then finish its reaction.
 pub(super) async fn attend<A: Reacting>(
@@ -15,7 +22,7 @@ pub(super) async fn attend<A: Reacting>(
     mut pipe: Pipe,
     mut reaction: A,
     mut closing: watch::Receiver<bool>,
-) -> Result<Attended<A::Kept>, Failure> {
+) -> Result<Attendance<A::Kept>, Failure> {
     let parted = loop {
         tokio::select! {
             biased;
@@ -31,9 +38,9 @@ pub(super) async fn attend<A: Reacting>(
             }
         }
     };
-    pipe.close()?;
+    let kept = reaction.finish().await?;
 
-    Ok(Attended { shell, kept: reaction.finish().await?, parted })
+    Ok(Attendance { attended: Attended { shell, kept, parted }, cut: pipe.close().err() })
 }
 
 async fn react<A: Reacting>(reaction: &mut A, pipe: &Pipe, line: Line) -> Result<(), Failure> {

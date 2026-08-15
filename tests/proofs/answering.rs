@@ -1,18 +1,23 @@
-//! Every form an answer can take, under load, from two shells at once.
+//! Every form an answer can take, from two shells at once — and an answer that
+//! waits on another shell's word, which only serving concurrently can give.
 
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
 use mb_resolver::bash::rig::{
-    Answer, Driving, ExitStatus, Failure, Layout, Message, Reacting, Rig, Run, Shell, Workspace,
+    Answer, Driving, ExitStatus, Failure, Layout, Message, Reacting, Rig, Run, Setup, Shell,
+    Workspace,
 };
+use tokio::sync::Notify;
 
 use crate::support::{bash, sourcing, Scripts};
 use crate::{beginning, behind, report, ENTRY};
 
 const SOAK_BASH: &str = r#"
-NOTE() { BC_INSTR say NOTE "$@"; }
+NOTE() { BC_INSTR SOAK say NOTE "$@"; }
+BC_JOIN SOAK
 "#;
 
 /// Answers each question a different way, cycling through every form.
@@ -21,8 +26,7 @@ struct Answering {
 }
 
 /// One shell's turn of it: what that shell said, and how many of its questions
-/// were answered. Both are the reaction's own — a rig is `&self` and never
-/// changes.
+/// were answered.
 struct Soak {
     steps: PathBuf,
     heard: Vec<Message>,
@@ -39,16 +43,12 @@ impl AsRef<[Message]> for Soak {
 impl Rig for Answering {
     type Reaction = Soak;
 
-    fn workspace(&self) -> Workspace {
-        Workspace::Temporary
-    }
-
     /// `NOTE` is this rig's own word, called back by several of the answers.
-    fn bash(&self) -> String {
-        SOAK_BASH.to_string()
+    fn setup(&self) -> Setup {
+        Setup { bash: SOAK_BASH.to_string(), workspace: Workspace::Temporary }
     }
 
-    fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Soak, Failure> {
+    async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Soak, Failure> {
         Ok(Soak { steps: self.steps.clone(), heard: Vec::new(), answered: 0 })
     }
 }
@@ -56,13 +56,13 @@ impl Rig for Answering {
 impl Reacting for Soak {
     type Kept = Self;
 
-    fn hear(&mut self, said: Message) -> Result<(), Failure> {
+    async fn hear(&mut self, said: Message) -> Result<(), Failure> {
         self.heard.push(said);
 
         Ok(())
     }
 
-    fn answer(&mut self, asked: Message) -> Result<Answer, Failure> {
+    async fn answer(&mut self, asked: Message) -> Result<Answer, Failure> {
         let step: usize = asked.words.last().and_then(|word| word.parse().ok()).unwrap_or(0);
 
         self.answered += 1;
@@ -81,45 +81,51 @@ impl Reacting for Soak {
                 std::thread::sleep(Duration::from_millis(2));
                 Answer::status(0)
             }
+            6 => Answer::of("printf", ["%s".to_string(), "x".repeat(100_000)]),
             _ => Answer::status(3),
         })
     }
 
-    fn finish(self) -> Result<Self, Failure> {
+    async fn finish(self) -> Result<Self, Failure> {
         Ok(self)
     }
 }
 
 impl Driving for Answering {}
 
-/// Every answer form in turn, one deliberately slow, mixed with saying and
-/// with a message too wide for one frame, from two shells asking
-/// independently.
-#[test]
-fn a_session_survives_every_way_of_answering() {
+/// Every answer form in turn — one deliberately slow, one past the pipe's
+/// buffer — mixed with saying and with a message too wide for one write, from
+/// two shells asking independently.
+#[tokio::test]
+async fn a_session_survives_every_way_of_answering() {
     let scripts = Scripts::of(&[
         (
             ENTRY,
             r#"
             declare -i i=0
             while (( i < 56 )); do
-                BC_INSTR say REC tick "$i"
-                BC_INSTR ask step "$i" || BC_INSTR say REC refused "$i"
+                BC_INSTR SOAK say REC tick "$i"
+                if (( i % 7 == 6 )); then
+                    got="$(BC_INSTR SOAK ask step "$i")"
+                    BC_INSTR SOAK say REC big "${#got}"
+                else
+                    BC_INSTR SOAK ask step "$i" || BC_INSTR SOAK say REC refused "$i"
+                fi
                 (( i += 1 ))
             done
 
             wide="$(printf 'W%.0s' {1..9000})"
-            BC_INSTR say REC wide "$wide"
+            BC_INSTR SOAK say REC wide "$wide"
 
             bash "${BASH_SOURCE[0]%/*}/other.bash"
-            BC_INSTR say REC marks ${!mark_@}
+            BC_INSTR SOAK say REC marks ${!mark_@}
             "#,
         ),
         (
             "other.bash",
             r#"
-            BC_INSTR ask step 4
-            BC_INSTR say REC other done
+            BC_INSTR SOAK ask step 4
+            BC_INSTR SOAK say REC other done
             "#,
         ),
     ]);
@@ -127,23 +133,27 @@ fn a_session_survives_every_way_of_answering() {
     let answering = Answering { steps: scripts.dir().to_path_buf() };
     let ran = answering
         .run(&bash(scripts.at(ENTRY)))
+        .await
         .and_then(Run::whole)
         .unwrap_or_else(|error| panic!("{error}"));
 
     assert_eq!(ran.subject, ExitStatus::Code(0), "{}", report(&ran.shells));
     assert_eq!(
         ran.shells.iter().map(|at| at.kept.answered).collect::<Vec<_>>(),
-        [56, 1],
-        "each shell's own questions, counted where they were answered"
+        [48, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+        "each shell's own questions, counted where they were answered — the \
+         eight command substitutions are shells of their own, then the child"
     );
 
     let said = behind(&ran.shells, "REC");
     assert_eq!(beginning(&said, "tick"), 56);
-    assert_eq!(beginning(&said, "refused"), 8);
+    assert_eq!(beginning(&said, "refused"), 0);
+    assert_eq!(beginning(&said, "big"), 8, "{}", report(&ran.shells));
+    assert!(said.iter().filter(|words| words[0] == "big").all(|words| words[1] == "100000"));
     assert_eq!(beginning(&said, "other"), 1, "the second shell got its answer too");
     assert!(
         said.iter().any(|words| words.iter().any(|word| word.len() == 9000)),
-        "the split message rejoined to exactly what was written"
+        "the wide message arrived as exactly what was written"
     );
 
     let notes = behind(&ran.shells, "NOTE");
@@ -161,4 +171,77 @@ fn a_session_survives_every_way_of_answering() {
             "`declare -g` reached the subject's own scope, but {name} is missing from {marks:?}"
         );
     }
+}
+
+/// Answers a question only once another shell has spoken.
+struct Gated {
+    open: Rc<Notify>,
+}
+
+struct Gate {
+    open: Rc<Notify>,
+}
+
+impl Rig for Gated {
+    type Reaction = Gate;
+
+    fn setup(&self) -> Setup {
+        Setup { bash: "BC_JOIN GATE\n".to_string(), workspace: Workspace::Temporary }
+    }
+
+    async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Gate, Failure> {
+        Ok(Gate { open: Rc::clone(&self.open) })
+    }
+}
+
+impl Reacting for Gate {
+    type Kept = ();
+
+    /// Any word from any shell opens the gate.
+    async fn hear(&mut self, _said: Message) -> Result<(), Failure> {
+        self.open.notify_one();
+
+        Ok(())
+    }
+
+    /// The answer waits for that word. Every other shell keeps being served
+    /// while it does — or the word never arrives, and this never returns.
+    async fn answer(&mut self, _asked: Message) -> Result<Answer, Failure> {
+        self.open.notified().await;
+
+        Ok(Answer::of("echo", ["opened"]))
+    }
+
+    async fn finish(self) -> Result<(), Failure> {
+        Ok(())
+    }
+}
+
+impl Driving for Gated {}
+
+/// One shell blocks on an answer that depends on another shell's word. Serving
+/// each shell on a task of its own is what lets the second shell be heard while
+/// the first is waiting.
+#[tokio::test]
+async fn an_answer_may_wait_on_another_shells_word() {
+    let scripts = Scripts::of(&[(
+        ENTRY,
+        r#"
+        got="$(BC_INSTR GATE ask open-please)" &
+        sleep 0.2
+        BC_INSTR GATE say REC opening
+        wait
+        "#,
+    )]);
+    let gated = Gated { open: Rc::new(Notify::new()) };
+    let argv = bash(scripts.at(ENTRY));
+
+    let ran = tokio::time::timeout(Duration::from_secs(10), gated.run(&argv))
+        .await
+        .expect("served concurrently, or this would never return")
+        .unwrap();
+
+    assert_eq!(ran.subject, ExitStatus::Code(0));
+    assert_eq!(ran.shells.len(), 2, "the asker in its subshell, and the script");
+    assert!(ran.failed.is_none());
 }

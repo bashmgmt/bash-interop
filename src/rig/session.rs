@@ -8,7 +8,7 @@ use tempfile::TempDir;
 use tokio::sync::watch;
 use tokio::task::JoinSet;
 
-use super::attend::attend;
+use super::attend::{attend, Attendance};
 use super::watch::Watch;
 use super::wire::{self, prelude, Account, Control, Pipe};
 use super::{Attended, Kept, Layout, Rig, Shell, Workspace};
@@ -18,7 +18,7 @@ pub(super) struct Session<'r, R: Rig> {
     rig: &'r R,
     pub(super) layout: Layout,
     control: Control,
-    attending: JoinSet<Result<Attended<Kept<R>>, Failure>>,
+    attending: JoinSet<Result<Attendance<Kept<R>>, Failure>>,
     closing: watch::Sender<bool>,
 
     /// The next shell's `nth`.
@@ -67,13 +67,20 @@ impl<'r, R: Rig> Session<'r, R> {
     }
 
     /// Serve until the watch fires. Everything a shell says is heard by its
-    /// own task; this loop admits shells and notices a task that failed.
+    /// own task; this loop admits shells and notices a task that failed — or
+    /// a pipe left holding a cut line, which is a fault of the same kind.
     pub(super) async fn serve(&mut self, watch: &Watch) -> Result<(), Failure> {
         loop {
             tokio::select! {
                 biased;
                 token = self.control.next() => self.announced(token?).await?,
-                Some(done) = self.attending.join_next() => self.done.push(finished(done)?),
+                Some(done) = self.attending.join_next() => {
+                    let Attendance { attended, cut } = finished(done)?;
+                    self.done.push(attended);
+                    if let Some(why) = cut {
+                        return Err(why);
+                    }
+                }
                 fired = watch.fired() => return fired,
             }
         }
@@ -106,7 +113,10 @@ impl<'r, R: Rig> Session<'r, R> {
 
         while let Some(done) = self.attending.join_next().await {
             match finished(done) {
-                Ok(at) => self.done.push(at),
+                Ok(Attendance { attended, cut }) => {
+                    self.done.push(attended);
+                    failed = failed.or(cut);
+                }
                 Err(why) => failed = failed.or(Some(why)),
             }
         }
@@ -118,8 +128,8 @@ impl<'r, R: Rig> Session<'r, R> {
 
 /// A task's outcome. A panic in a reaction is a defect and stays one.
 fn finished<K>(
-    done: Result<Result<Attended<K>, Failure>, tokio::task::JoinError>,
-) -> Result<Attended<K>, Failure> {
+    done: Result<Result<Attendance<K>, Failure>, tokio::task::JoinError>,
+) -> Result<Attendance<K>, Failure> {
     match done {
         Ok(outcome) => outcome,
         Err(join) => std::panic::resume_unwind(join.into_panic()),

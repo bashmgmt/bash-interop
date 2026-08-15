@@ -1,4 +1,5 @@
-//! What the subject keeps: its own exit status, its own trap, its own `IFS`.
+//! What the subject keeps: its own exit status, its own trap, its own `IFS`,
+//! its own locale.
 
 use mb_resolver::bash::rig::ExitStatus;
 
@@ -6,15 +7,16 @@ use crate::{behind, report, script};
 
 /// Reported as signalled rather than flattened into a code, and nothing said
 /// before the signal is lost. The rig installs no handler.
-#[test]
-fn a_signalled_subject_is_reported_and_loses_nothing() {
+#[tokio::test]
+async fn a_signalled_subject_is_reported_and_loses_nothing() {
     let ran = script(
         r#"
-        BC_INSTR say REC before
+        BC_INSTR KEEP say REC before
         kill -TERM $$
-        BC_INSTR say REC never
+        BC_INSTR KEEP say REC never
         "#,
-    );
+    )
+    .await;
 
     assert_eq!(ran.subject, ExitStatus::Signal(15));
     assert_eq!(ran.subject.shell_code(), 143, "128 + signal, the shell convention");
@@ -25,15 +27,16 @@ fn a_signalled_subject_is_reported_and_loses_nothing() {
 /// handler and shadows no builtin, so both survive a message going out — and
 /// the account a shell gives of itself, which joins an array with `[*]`, takes
 /// an `IFS` of its own for that frame rather than the subject's.
-#[test]
-fn a_clients_own_trap_and_ifs_are_untouched() {
+#[tokio::test]
+async fn a_clients_own_trap_and_ifs_are_untouched() {
     let ran = script(
         r#"
         trap 'echo mine' EXIT
         IFS=,
-        BC_INSTR say REC one two
+        BC_INSTR KEEP say REC one two
         "#,
-    );
+    )
+    .await;
 
     assert_eq!(behind(&ran.shells, "REC"), [["one", "two"]], "{}", report(&ran.shells));
     assert!(
@@ -43,25 +46,23 @@ fn a_clients_own_trap_and_ifs_are_untouched() {
     );
 }
 
-/// A message wider than the narrow lane is framed in bytes, which takes
-/// `LC_ALL` for as long as that frame lasts. It is a `local`, so it is gone
-/// before the send returns — and the subject, which runs everything of its own
-/// between sends, never sees it.
-///
-/// Observed rather than asserted about: `${#text}` counts characters in a
-/// UTF-8 locale and bytes in `C`, so the subject can say which one it is in.
-#[test]
-fn a_clients_own_locale_is_untouched_by_a_wide_message() {
+/// A message wider than a pipe's atomic write is still one `printf` in the
+/// subject's own locale, which is not touched. Observed rather than asserted
+/// about: `${#text}` counts characters in a UTF-8 locale and bytes in `C`, so
+/// the subject can say which one it is in.
+#[tokio::test]
+async fn a_clients_own_locale_is_untouched_by_a_wide_message() {
     let ran = script(
         r#"
         export LC_ALL=C.UTF-8
         wide="ä"
 
-        BC_INSTR say REC before "${#wide}" "$LC_ALL"
-        BC_INSTR say REC "$(printf 'x%.0s' {1..9000})"
-        BC_INSTR say REC after "${#wide}" "$LC_ALL"
+        BC_INSTR KEEP say REC before "${#wide}" "$LC_ALL"
+        BC_INSTR KEEP say REC "$(printf 'x%.0s' {1..9000})"
+        BC_INSTR KEEP say REC after "${#wide}" "$LC_ALL"
         "#,
-    );
+    )
+    .await;
 
     let said = behind(&ran.shells, "REC");
     assert_eq!(said[0], ["before", "1", "C.UTF-8"], "{}", report(&ran.shells));

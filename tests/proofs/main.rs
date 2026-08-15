@@ -6,20 +6,22 @@
 //!
 //! | | |
 //! |---|---|
-//! | [`transport`] | every shell reaches the wire, and a message arrives whole |
+//! | [`attaching`] | a shell's pipe: the rendezvous, a fork's own, two labels in one shell |
+//! | [`transport`] | every shell reaches the run, and a message arrives whole |
 //! | [`transparency`] | what the subject keeps: its status, its trap, its `IFS` |
-//! | [`answering`] | every form of answer, under load, from two shells at once |
+//! | [`answering`] | every form of answer, from two shells at once, one waiting on the other |
 //! | [`starting`] | what a driven run starts, and what a rig puts in every shell |
 //! | [`serving`] | a session a script joins for itself, and how far it reaches |
 //! | [`owning`] | the run's workspace, and the process group it takes with it |
 //! | [`failing`] | what a fault on either side does to the run and to the subject |
-//! | [`malformed`] | what the reader does with a stream the protocol did not write |
+//! | [`malformed`] | what the reader does with a line the protocol did not write |
 //!
 //! This file holds what more than one of them needs.
 //!
 //! `cargo test --test proofs`
 
 mod answering;
+mod attaching;
 mod failing;
 mod malformed;
 mod owning;
@@ -34,7 +36,7 @@ mod support;
 use std::sync::Arc;
 
 use mb_resolver::bash::rig::{
-    heard, Attended, Driving, Failure, Layout, Message, Rig, Shell, Whole, Workspace,
+    heard, Attended, Driving, Failure, Layout, Message, Rig, Setup, Shell, Whole, Workspace,
 };
 
 use support::{bash, Scripts};
@@ -42,8 +44,10 @@ use support::{bash, Scripts};
 /// Every proof starts the same script, beside whatever else it wrote.
 pub const ENTRY: &str = "main.bash";
 
-/// Keeps every message, and answers nothing — the default `answer` hears the
-/// question and tells the shell the word is unknown.
+/// The label the proofs' scripts speak under: `BC_INSTR KEEP say …`.
+pub const JOIN: &str = "BC_JOIN KEEP\n";
+
+/// Keeps every message, and answers nothing.
 #[derive(Default)]
 pub struct Keeping {
     workspace: Workspace,
@@ -59,16 +63,12 @@ impl Keeping {
 impl Rig for Keeping {
     type Reaction = Vec<Message>;
 
-    /// No words of its own in the subject's shells.
-    fn bash(&self) -> String {
-        String::new()
+    /// No words of its own in the subject's shells: only the label.
+    fn setup(&self) -> Setup {
+        Setup { bash: JOIN.to_string(), workspace: self.workspace.clone() }
     }
 
-    fn workspace(&self) -> Workspace {
-        self.workspace.clone()
-    }
-
-    fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Vec<Message>, Failure> {
+    async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Vec<Message>, Failure> {
         Ok(Vec::new())
     }
 }
@@ -79,20 +79,22 @@ impl Driving for Keeping {}
 /// takes it that way, since a partial reading proves nothing.
 pub type Ran = Whole<Vec<Message>>;
 
-pub fn running(files: &[(&str, &str)]) -> Ran {
+pub async fn running(files: &[(&str, &str)]) -> Ran {
     let scripts = Scripts::of(files);
     let ran = Keeping::default()
         .run(&bash(scripts.at(ENTRY)))
+        .await
         .unwrap_or_else(|error| panic!("{error}"));
 
     ran.whole().unwrap_or_else(|error| panic!("{error}"))
 }
 
-pub fn script(body: &str) -> Ran {
-    running(&[(ENTRY, body)])
+pub async fn script(body: &str) -> Ran {
+    running(&[(ENTRY, body)]).await
 }
 
-/// Every message the run heard, whichever shell said it, in arrival order.
+/// Every message the run heard, whichever shell said it, in the order it was
+/// said.
 pub fn lines<K: AsRef<[Message]>>(shells: &[Attended<K>]) -> Vec<&Message> {
     heard(shells).into_iter().map(|said| said.message).collect()
 }

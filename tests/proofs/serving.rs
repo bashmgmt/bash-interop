@@ -7,12 +7,13 @@
 
 use std::io::{pipe, Write};
 use std::os::fd::OwnedFd;
+use std::os::unix::process::ExitStatusExt;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 
 use mb_resolver::bash::rig::{
-    Answer, Attended, Failure, Layout, Message, Rig, Serving, Shell, Workspace,
+    Answer, Attended, Failure, Layout, Message, Rig, Serving, Setup, Shell, Workspace,
 };
 
 use crate::support::Scripts;
@@ -24,15 +25,14 @@ struct Attaching;
 impl Rig for Attaching {
     type Reaction = Vec<Message>;
 
-    fn workspace(&self) -> Workspace {
-        Workspace::Temporary
+    fn setup(&self) -> Setup {
+        Setup {
+            bash: "TELL() { BC_INSTR TELL say TELL \"$@\"; }\nBC_JOIN TELL\n".to_string(),
+            workspace: Workspace::Temporary,
+        }
     }
 
-    fn bash(&self) -> String {
-        "TELL() { BC_INSTR say TELL \"$@\"; }".to_string()
-    }
-
-    fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Vec<Message>, Failure> {
+    async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Vec<Message>, Failure> {
         Ok(Vec::new())
     }
 }
@@ -41,13 +41,14 @@ impl Serving for Attaching {}
 
 /// The client's side of joining: run the one command it was handed, then carry
 /// on with its own script. `declare -a` reads the address exactly as the
-/// prelude reads an answer, because it is the same kind of thing.
+/// prelude reads an answer, because it is the same kind of thing. `__join[1]`
+/// is the prelude's path, which the script may publish to its children.
 const JOINING: &str = r#"declare -a __join="$1"; "${__join[@]}"; source "$2""#;
 
-/// A shell of the initiator's own, holding the session's handle — what a
-/// client holds when it started the server as a coprocess. Nothing reads that
-/// pipe; it hangs up when the last shell holding it is gone, which is what a
-/// client does deliberately with `exec {fd}>&-`.
+/// A shell of the initiator's own, holding the session's handle on its
+/// standard output — what a client holds when it started the server as a
+/// coprocess. It hangs up when the last shell holding it is gone, or when the
+/// client closes it deliberately.
 fn joining(address: &Answer, script: &Path, handle: OwnedFd) -> Child {
     Command::new("bash")
         .args(["-c", JOINING, "--"])
@@ -60,7 +61,7 @@ fn joining(address: &Answer, script: &Path, handle: OwnedFd) -> Child {
 
 /// Serve `scripts`' entry in a shell started for it, and hand back the shells
 /// that joined beside how that shell ended.
-fn joined(scripts: &Scripts) -> (Vec<Attended<Vec<Message>>>, Option<i32>) {
+async fn joined(scripts: &Scripts) -> (Vec<Attended<Vec<Message>>>, std::process::ExitStatus) {
     let (held, handle) = pipe().expect("a handle");
 
     let mut child = None;
@@ -69,21 +70,22 @@ fn joined(scripts: &Scripts) -> (Vec<Attended<Vec<Message>>>, Option<i32>) {
             child = Some(joining(address, &scripts.at(ENTRY), handle.into()));
             Ok(())
         })
+        .await
         .expect("the session");
 
     assert!(served.failed.is_none(), "the session closed up cleanly");
 
     let status = child.expect("the shell").wait().expect("reaping the shell");
 
-    (served.shells, status.code())
+    (served.shells, status)
 }
 
 /// Everything the joined shell says arrives, subshells included, and the
 /// session lasts exactly as long as the handle does. Nothing of that shell's
 /// life is the session's: it is neither started nor stopped here, and its
 /// status is the initiator's to collect.
-#[test]
-fn a_shell_that_joined_is_heard_until_it_lets_go() {
+#[tokio::test]
+async fn a_shell_that_joined_is_heard_until_it_lets_go() {
     let scripts = Scripts::of(&[(
         ENTRY,
         r#"
@@ -94,7 +96,7 @@ fn a_shell_that_joined_is_heard_until_it_lets_go() {
         "#,
     )]);
 
-    let (shells, status) = joined(&scripts);
+    let (shells, status) = joined(&scripts).await;
 
     assert_eq!(
         behind(&shells, "TELL"),
@@ -102,38 +104,57 @@ fn a_shell_that_joined_is_heard_until_it_lets_go() {
         "{}",
         report(&shells)
     );
-    assert_eq!(status, Some(3), "the initiator's own status, which is not ours to hold");
+    assert_eq!(status.code(), Some(3), "the initiator's own status, which is not ours to hold");
+    assert!(shells[1].parted.is_some(), "the subshell parted long before the handle went");
 }
 
-/// How far a joined session reaches is the client's decision, and `$__BC__DIR`
-/// is where it finds the address again. Exporting `BASH_ENV` to it puts the
-/// session in every process the script starts, which is what a driven run does
-/// for the tree it creates.
-#[test]
-fn a_joined_shell_may_publish_the_address_to_its_children() {
+/// A client that lets go while still running is a shell the session outlived,
+/// and says so. Its next word finds nobody at the other end of its pipe.
+#[tokio::test]
+async fn a_shell_the_session_outlived_is_left_to_its_own_devices() {
+    let scripts = Scripts::of(&[(
+        ENTRY,
+        r#"
+        TELL before
+        exec 1>&-
+        sleep 0.3
+        TELL after
+        echo unreachable >&2
+        "#,
+    )]);
+
+    let (shells, status) = joined(&scripts).await;
+
+    assert_eq!(behind(&shells, "TELL"), [["before"]], "{}", report(&shells));
+    assert!(shells[0].parted.is_none(), "still running when the handle went");
+    assert_eq!(status.signal(), Some(libc::SIGPIPE), "the word after the session took SIGPIPE");
+}
+
+/// How far a joined session reaches is the client's decision. Exporting
+/// `BASH_ENV` to the prelude puts the session in every process the script
+/// starts, which is what a driven run does for the tree it creates.
+#[tokio::test]
+async fn a_joined_shell_may_publish_the_address_to_its_children() {
     let scripts = Scripts::of(&[
         (
             ENTRY,
             r#"
             TELL parent "$BASHPID"
-            export BASH_ENV="$__BC__DIR/prelude.bash"
+            export BASH_ENV="${__join[1]}"
             bash "${BASH_SOURCE[0]%/*}/child.bash"
             "#,
         ),
         ("child.bash", "TELL child \"$BASHPID\"\n"),
     ]);
 
-    let (shells, status) = joined(&scripts);
+    let (shells, status) = joined(&scripts).await;
     let said = behind(&shells, "TELL");
 
-    assert_eq!(status, Some(0), "{}", report(&shells));
+    assert_eq!(status.code(), Some(0), "{}", report(&shells));
     assert_eq!(said.len(), 2, "the script and the bash it started: {}", report(&shells));
     assert_eq!(said[0][0], "parent");
     assert_eq!(said[1][0], "child", "{}", report(&shells));
-    assert_ne!(
-        said[0][1], said[1][1],
-        "a process of its own, reached because the client published the address"
-    );
+    assert_ne!(said[0][1], said[1][1], "a process of its own");
 }
 
 /// A shell nothing started, joining because it wants to.
@@ -164,8 +185,8 @@ fn interactively(address: &Answer, handle: OwnedFd) -> Child {
 /// defined at its prompt and pushes no frame for the prompt itself — both of
 /// which a script can also produce, and neither of which says *interactive*.
 /// The shell says so itself, once, when it joins.
-#[test]
-fn a_shell_says_what_it_is_rather_than_being_guessed_at() {
+#[tokio::test]
+async fn a_shell_says_what_it_is_rather_than_being_guessed_at() {
     let (held, handle) = pipe().expect("a handle");
 
     let mut child = None;
@@ -174,6 +195,7 @@ fn a_shell_says_what_it_is_rather_than_being_guessed_at() {
             child = Some(interactively(address, handle.into()));
             Ok(())
         })
+        .await
         .expect("the session");
 
     child.expect("the shell").wait().expect("reaping the shell");

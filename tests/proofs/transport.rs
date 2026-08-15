@@ -1,32 +1,33 @@
-//! Every shell reaches the wire, and what it writes arrives whole.
+//! Every shell reaches the run, and what it writes arrives whole.
 
-use mb_resolver::bash::rig::{forest, ExitStatus, ShellNode};
+use mb_resolver::bash::rig::ExitStatus;
 
 use crate::{behind, report, running, script, ENTRY};
 
-/// Nothing is inherited, and the forest follows the emitting parent — which
-/// `$PPID` would get wrong inside a subshell.
-#[test]
-fn every_descendant_shell_reaches_the_wire() {
+/// Every kind of descendant is a shell of its own: a subshell, a command
+/// substitution, a child process, and its subshell.
+#[tokio::test]
+async fn every_descendant_shell_reaches_the_run() {
     let ran = running(&[
         (
             ENTRY,
             r#"
-            BC_INSTR say REC top
-            ( BC_INSTR say REC paren )
-            value=$( BC_INSTR say REC cmdsubst; echo hi )
+            BC_INSTR KEEP say REC top
+            ( BC_INSTR KEEP say REC paren )
+            value=$( BC_INSTR KEEP say REC cmdsubst; echo hi )
             bash "${BASH_SOURCE[0]%/*}/child.bash"
-            BC_INSTR say REC after
+            BC_INSTR KEEP say REC after
             "#,
         ),
         (
             "child.bash",
             r#"
-            BC_INSTR say REC child
-            ( BC_INSTR say REC grandchild )
+            BC_INSTR KEEP say REC child
+            ( BC_INSTR KEEP say REC grandchild )
             "#,
         ),
-    ]);
+    ])
+    .await;
 
     assert_eq!(
         behind(&ran.shells, "REC"),
@@ -34,46 +35,17 @@ fn every_descendant_shell_reaches_the_wire() {
         "{}",
         report(&ran.shells)
     );
+    assert_eq!(ran.shells.len(), 5, "the shell, two subshells, the child, its subshell");
 
-    let forest = forest(&ran.shells);
-    assert_eq!(forest.len(), 1, "one root: nothing is orphaned{}", report(&ran.shells));
-
-    let tree = descend(&forest, None);
-    assert_eq!(tree.len(), 5, "the shell, two subshells, the child, its subshell");
-    assert_eq!(tree.iter().map(|(shell, _)| shell.depth).max(), Some(3), "main, child, grandchild");
-    assert!(
-        tree.iter().all(|(shell, above)| above.is_none_or(|up| shell.shlvl >= up.shlvl)),
-        "SHLVL never drops toward a descendant{}",
-        report(&ran.shells)
-    );
+    let shlvl: Vec<u32> = ran.shells.iter().map(|at| at.shell.shlvl).collect();
+    assert!(shlvl[3] > shlvl[0], "the child is one level down: {shlvl:?}");
+    assert_eq!(shlvl[1], shlvl[0], "a subshell is not: {shlvl:?}");
 }
 
-#[derive(Copy, Clone)]
-struct Descendant {
-    depth: usize,
-    shlvl: u32,
-}
-
-/// Every shell under `nodes`, with the one that started it where there is one.
-fn descend(
-    nodes: &[ShellNode],
-    above: Option<Descendant>,
-) -> Vec<(Descendant, Option<Descendant>)> {
-    nodes
-        .iter()
-        .flat_map(|node| {
-            let shell =
-                Descendant { depth: above.map_or(1, |up| up.depth + 1), shlvl: node.shell.shlvl };
-
-            std::iter::once((shell, above)).chain(descend(&node.children, Some(shell)))
-        })
-        .collect()
-}
-
-/// One pipe, many writers: frames stay under `PIPE_BUF` so they cannot
-/// interleave, and anything longer is split and rejoined by `(pid, seq)`.
-#[test]
-fn concurrent_writers_never_interleave() {
+/// Many shells at once, each on a pipe of its own, each writing lines far
+/// wider than a pipe's atomic write. Nothing crosses.
+#[tokio::test]
+async fn many_shells_at_once_arrive_whole_and_apart() {
     let ran = running(&[
         (
             ENTRY,
@@ -89,37 +61,38 @@ fn concurrent_writers_never_interleave() {
             small="$(printf 'S%.0s' {1..500})"
             large="$(printf 'L%.0s' {1..9000})"
             for index in $(seq 1 40); do
-                BC_INSTR say REC "$1-$index-$small"
-                BC_INSTR say REC "$1-$index-$large"
+                BC_INSTR KEEP say REC "$1" "$index" "$small"
+                BC_INSTR KEEP say REC "$1" "$index" "$large"
             done
             "#,
         ),
-    ]);
+    ])
+    .await;
 
     let records = behind(&ran.shells, "REC");
     assert_eq!(records.len(), 8 * 80);
-    assert_eq!(
-        records.iter().filter(|words| words[0].len() > 9000).count(),
-        8 * 40,
-        "oversized messages rejoined intact"
-    );
+    assert_eq!(records.iter().filter(|words| words[2].len() == 9000).count(), 8 * 40);
+
+    for at in &ran.shells[1..] {
+        let names: std::collections::HashSet<&str> =
+            at.kept.iter().map(|message| message.words[1].as_str()).collect();
+        assert_eq!(names.len(), 1, "one shell's pipe carries one shell's words: {names:?}");
+    }
 }
 
-/// A frame is filled to the byte, because `PIPE_BUF` is bytes. A message is
-/// text. The two meet where a chunk boundary falls inside a character — which
-/// it does here, the frame's room not dividing by three — and neither side has
-/// to know what the other did: the sender cuts where the frame fills, the
-/// reader joins the chunks as bytes and decodes the message once.
-#[test]
-fn a_message_of_wide_characters_survives_being_cut() {
-    let ran = running(&[(
-        ENTRY,
+/// A line is text and a pipe hands it over in bytes: a message of wide
+/// characters, longer than the pipe's atomic write, comes back character for
+/// character.
+#[tokio::test]
+async fn a_message_of_wide_characters_arrives_whole() {
+    let ran = script(
         r#"
         wide="$(printf '€%.0s' {1..6000})"
-        for name in a b c d; do ( BC_INSTR say REC "$name" "$wide" ) & done
+        for name in a b c d; do ( BC_INSTR KEEP say REC "$name" "$wide" ) & done
         wait
         "#,
-    )]);
+    )
+    .await;
 
     let records = behind(&ran.shells, "REC");
     assert_eq!(records.len(), 4, "one per writer{}", report(&ran.shells));
@@ -130,32 +103,34 @@ fn a_message_of_wide_characters_survives_being_cut() {
     }
 }
 
-/// Messages written immediately before the last writer exits must still be
-/// readable once the subject is gone.
-#[test]
-fn nothing_is_lost_at_the_end() {
+/// Messages written immediately before the subject exits are read after it is
+/// gone: the group is killed first, and every pipe is read to its end.
+#[tokio::test]
+async fn nothing_is_lost_at_the_end() {
     for _ in 0..10 {
         let ran = script(
             r#"
-            for i in $(seq 1 200); do BC_INSTR say REC "r$i"; done
+            for i in $(seq 1 200); do BC_INSTR KEEP say REC "r$i"; done
             exit 3
             "#,
-        );
+        )
+        .await;
         assert_eq!(behind(&ran.shells, "REC").len(), 200);
         assert_eq!(ran.subject, ExitStatus::Code(3));
     }
 }
 
-/// The delimiter separates frames and is part of none of them, so a value
+/// The delimiter separates lines and is part of none of them, so a value
 /// carrying one arrives whole — and as one word, beside the next.
-#[test]
-fn a_newline_inside_a_value_is_escaped_not_framed() {
+#[tokio::test]
+async fn a_newline_inside_a_value_is_escaped_not_a_line() {
     let ran = script(
         r#"
         payload=$'first\nsecond\tthird\\fourth'
-        BC_INSTR say REC "$payload" plain
+        BC_INSTR KEEP say REC "$payload" plain
         "#,
-    );
+    )
+    .await;
 
     assert_eq!(
         behind(&ran.shells, "REC"),
@@ -163,5 +138,4 @@ fn a_newline_inside_a_value_is_escaped_not_framed() {
         "{}",
         report(&ran.shells)
     );
-    assert_eq!(behind(&ran.shells, "REC").len(), 1, "one message, not two frames of nonsense");
 }
