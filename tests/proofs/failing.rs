@@ -9,11 +9,11 @@ use std::time::Instant;
 
 use mb_resolver::bash::rig::{
     Answer, Driving, ExitStatus, Failure, Layout, Message, Reaching, Reacting, Rig, Setup, Shell,
-    Verb, Workspace,
+    Verb,
 };
 
 use crate::support::{bash, Scripts};
-use crate::{behind, gone, report, script, ENTRY, JOIN};
+use crate::{behind, gone, report, script, ENTRY, LABEL};
 
 /// Fails the first time it is given a message of the kind it breaks on.
 struct Breaking {
@@ -29,7 +29,7 @@ impl Rig for Breaking {
     type Reaction = Breaks;
 
     fn setup(&self) -> Setup {
-        Setup { bash: JOIN.to_string(), workspace: Workspace::Temporary }
+        Setup { label: LABEL.to_string(), bash: String::new() }
     }
 
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Breaks, Failure> {

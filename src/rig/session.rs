@@ -2,6 +2,7 @@
 //! shell, and the loop that admits shells until the watch fires.
 
 use std::fs;
+use std::path::Path;
 use std::sync::Arc;
 
 use tempfile::TempDir;
@@ -10,8 +11,8 @@ use tokio::task::JoinSet;
 
 use super::attend::{attend, Attendance};
 use super::watch::Watch;
-use super::wire::{self, prelude, Announced, Control, Pipe};
-use super::{Attended, Kept, Layout, Rig, Shell, Workspace};
+use super::wire::{self, Announced, Control, Pipe};
+use super::{Attended, Kept, Layout, Rig, Shell};
 use crate::failure::{Doing, Failure};
 
 pub(super) struct Session<'r, R: Rig> {
@@ -30,14 +31,17 @@ pub(super) struct Session<'r, R: Rig> {
 }
 
 impl<'r, R: Rig> Session<'r, R> {
-    /// The workspace is canonicalised: every shell reads its own location from
-    /// the path it was sourced from. The session's soft descriptor limit is
-    /// raised to the hard one, since every attached shell holds one.
-    pub(super) fn open(rig: &'r R) -> Result<Self, Failure> {
+    /// `at` is a directory the caller prescribed — created if missing, left
+    /// behind — or nothing, for a workspace of the session's own that goes
+    /// when it ends. Either is canonicalised before it is spelled into the
+    /// invocation: the join states an absolute path. The session's soft
+    /// descriptor limit is raised to the hard one, since every attached shell
+    /// holds one.
+    pub(super) fn open(rig: &'r R, at: Option<&Path>) -> Result<Self, Failure> {
         let setup = rig.setup();
-        let (at, temporary) = match setup.workspace {
-            Workspace::At(at) => (at, None),
-            Workspace::Temporary => {
+        let (at, temporary) = match at {
+            Some(at) => (at.to_path_buf(), None),
+            None => {
                 let temp =
                     tempfile::tempdir().doing(|| "opening a workspace for the run".into())?;
 
@@ -51,12 +55,12 @@ impl<'r, R: Rig> Session<'r, R> {
 
         raise_descriptor_limit()?;
         let control = Control::open(&dir)?;
-        let prelude = prelude(&dir, &setup.bash)?;
+        let address = wire::lay(&dir, &setup)?;
         let (closing, _) = watch::channel(false);
 
         Ok(Self {
             rig,
-            layout: Layout { dir, prelude },
+            layout: Layout { dir, address },
             control,
             attending: JoinSet::new(),
             closing,

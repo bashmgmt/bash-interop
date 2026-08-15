@@ -1,6 +1,7 @@
-# The client half of the protocol. Sourced by every shell that joins — through
-# BASH_ENV, or by hand as `source "$BC_SESSION"`. Shipped verbatim into the
-# run's workspace; everything it needs it finds from its own path.
+# The client half of the protocol. Sourced by every shell that joins, through
+# the session's invocation file — the address. Generic: nothing here reads the
+# environment or this file's own location; the session's one coordinate, its
+# workspace, is an argument of BC_JOIN.
 #
 # One entry per label. `declare -gA` on an array that exists keeps it, so a
 # second session's prelude sourced into the same shell adds a label and takes
@@ -26,21 +27,20 @@ __bc_complain() {
     printf 'BC_INSTR: %s at %s\n' "$1" "${__BC__at:-?}" >&2
 }
 
-# $1 the label. Registers it for this shell and attaches this process. Called
-# once, by the rig's own bash, at source; a fork inherits the entry and
+# $1 the label, $2 the session's workspace. Binds the name to the coordinate
+# for this shell and attaches this process; a fork inherits the entry and
 # attaches itself on its first word.
-#
-# `BASH_SOURCE[0]` inside a function is the file the function was defined in,
-# which is the session whose prelude this is.
 BC_JOIN() {
     __BC__at="${BASH_SOURCE[1]:-?}:${BASH_LINENO[0]:-?}"
 
     [[ -n ${1-} && $1 != */* && $1 != *[[:space:]]* ]] \
         || { __bc_complain "label ${1-} will not name a file"; return "$__BC__FAILED"; }
+    [[ ${2-} == /* ]] \
+        || { __bc_complain "workspace ${2-} is not an absolute path"; return "$__BC__FAILED"; }
     [[ -z ${__BC__DIR[$1]-} ]] \
         || { __bc_complain "label $1 is already joined from ${__BC__DIR[$1]}"; return "$__BC__FAILED"; }
 
-    __BC__DIR[$1]="${BASH_SOURCE[0]%/*}"
+    __BC__DIR[$1]=$2
     __bc_attach "$1"
 }
 
@@ -148,7 +148,3 @@ __bc_ask() {
     local -a __bc_answer="$__bc_line"
     "${__bc_answer[@]}"
 }
-
-# The rig's own bash, laid beside this file by the run. It ends with
-# `BC_JOIN <LABEL>`.
-source "${BASH_SOURCE[0]%/*}/rig.bash"

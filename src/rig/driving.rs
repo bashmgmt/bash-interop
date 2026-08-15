@@ -73,7 +73,7 @@ pub trait Driving: Rig {
     {
         LocalSet::new()
             .run_until(async {
-                let mut session = Session::open(self)?;
+                let mut session = Session::open(self, None)?;
 
                 // Declared after the session, so it drops before it: leaving
                 // through `?` stops the subject before releasing its files.
@@ -111,7 +111,7 @@ impl Subject {
             .ok_or_else(|| Failure::new("starting the subject", "the command line is empty"))?;
 
         let mut command = Command::new(program);
-        command.args(rest).env("BC_SESSION", &layout.prelude).envs(environment).process_group(0);
+        command.args(rest).env("BC_SESSION", &layout.address).envs(environment).process_group(0);
 
         let child = command.spawn().doing(|| format!("spawning {}", said()))?;
         let group = child.id() as libc::pid_t;

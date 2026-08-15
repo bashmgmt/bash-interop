@@ -8,7 +8,7 @@ use std::ffi::OsString;
 use std::sync::Arc;
 
 use crate::bash::rig::{
-    Answer, Driving, Failure, Layout, Message, Reaching, Reacting, Rig, Setup, Shell, Workspace,
+    Answer, Driving, Failure, Layout, Message, Reaching, Reacting, Rig, Setup, Shell,
 };
 use crate::bash::stack::{self, Columns, Site, Source, Stack};
 use crate::tests::scripts::{bash, Scripts};
@@ -22,7 +22,6 @@ WALK() {
     __bc_stack __w 2
     BC_INSTR WALK say WALK "${__w[@]}"
 }
-BC_JOIN WALK
 "#;
 
 struct Walking;
@@ -38,7 +37,7 @@ impl Rig for Walking {
     type Reaction = Walks;
 
     fn setup(&self) -> Setup {
-        Setup { bash: stack::with_walk(&[BASH]), workspace: Workspace::Temporary }
+        Setup { label: "WALK".to_string(), bash: stack::with_walk(&[BASH]) }
     }
 
     async fn joined(&self, _at: &Layout, shell: Arc<Shell>) -> Result<Walks, Failure> {

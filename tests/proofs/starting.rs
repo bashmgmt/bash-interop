@@ -4,7 +4,7 @@ use std::ffi::OsString;
 use std::sync::Arc;
 
 use mb_resolver::bash::rig::{
-    Driving, ExitStatus, Failure, Layout, Message, Rig, Setup, Shell, Workspace,
+    Driving, ExitStatus, Failure, Layout, Message, Rig, Setup, Shell,
 };
 
 use crate::support::{bash, Scripts};
@@ -18,8 +18,8 @@ impl Rig for Deploying {
 
     fn setup(&self) -> Setup {
         Setup {
-            bash: "TELL() { BC_INSTR TELL say TELL \"$@\"; }\nBC_JOIN TELL\n".to_string(),
-            workspace: Workspace::Temporary,
+            label: "TELL".to_string(),
+            bash: "TELL() { BC_INSTR TELL say TELL \"$@\"; }\n".to_string(),
         }
     }
 

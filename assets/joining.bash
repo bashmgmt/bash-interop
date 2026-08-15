@@ -2,7 +2,7 @@
 # starts a server with it; from then on `BC_INSTR` is defined:
 #
 #     source lib/joining.bash
-#     BC_START bashprof serve --into build.times
+#     BC_START bashprof serve --at prof.d --into build.times
 #
 #     BC_INSTR BASHPROF say STEP compile
 #     BC_INSTR BASHPROF ask NEXT
@@ -15,7 +15,10 @@
 #
 # The convention has a second half in Rust, `Serving::serve_coprocess`: the
 # client holds the server's standard input, and the server writes one line on
-# its standard output — the address, the file a shell sources to join.
+# its standard output — the address, the file a shell sources to join. The
+# workspace is the client's to name (`--at`), so the address is known before
+# the server runs; reading the line is what says the session is laid and
+# ready.
 #
 # The session lasts as long as anyone holds that handle. A subshell inherits it
 # and keeps the session open for as long as it lives, because it can still

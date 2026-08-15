@@ -4,10 +4,10 @@
 # joins where its script says so:
 source "$BC_SESSION"
 
-# A script that starts the tool itself, as a coprocess, holds the session
-# open for as long as it runs and joins as above:
+# A script that starts the tool itself, as a coprocess, names the session's
+# workspace, holds the session open for as long as it runs and joins as above:
 source lib/joining.bash
-BC_START bashprof serve --into build.times     # start, take the address, join
+BC_START bashprof serve --at prof.d --into build.times   # start, sync, join
 BC_LEAVE                                       # let go, wait, return its status
 
 # Only if there is a session — a script that runs the same with or without one:

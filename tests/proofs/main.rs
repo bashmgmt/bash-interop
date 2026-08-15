@@ -38,7 +38,6 @@ use std::sync::Arc;
 
 use mb_resolver::bash::rig::{
     heard, Attended, Driving, Failure, Layout, Message, Reaching, Rig, Setup, Shell, Whole,
-    Workspace,
 };
 
 use support::{bash, Scripts};
@@ -47,28 +46,22 @@ use support::{bash, Scripts};
 pub const ENTRY: &str = "main.bash";
 
 /// The label the proofs' scripts speak under: `BC_INSTR KEEP say …`.
-pub const JOIN: &str = "BC_JOIN KEEP\n";
+pub const LABEL: &str = "KEEP";
 
 /// Keeps every message, and answers nothing.
 pub struct Keeping {
-    workspace: Workspace,
     reaching: Reaching,
 }
 
 impl Keeping {
     /// Every shell of the subject's tree joins as it starts.
     pub fn bash_env() -> Self {
-        Self { workspace: Workspace::Temporary, reaching: Reaching::BashEnv }
+        Self { reaching: Reaching::BashEnv }
     }
 
     /// The address alone: a script joins where it says `source "$BC_SESSION"`.
     pub fn by_hand() -> Self {
-        Self { workspace: Workspace::Temporary, reaching: Reaching::ByHand }
-    }
-
-    /// A workspace of the caller's, left behind to read.
-    pub fn at(path: &std::path::Path) -> Self {
-        Self { workspace: Workspace::At(path.to_path_buf()), reaching: Reaching::BashEnv }
+        Self { reaching: Reaching::ByHand }
     }
 }
 
@@ -77,7 +70,7 @@ impl Rig for Keeping {
 
     /// No words of its own in the subject's shells: only the label.
     fn setup(&self) -> Setup {
-        Setup { bash: JOIN.to_string(), workspace: self.workspace.clone() }
+        Setup { label: LABEL.to_string(), bash: String::new() }
     }
 
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Vec<Message>, Failure> {

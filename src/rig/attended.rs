@@ -12,23 +12,15 @@ use super::{Message, Micros, Reacting, Rig, Shell};
 /// Everything a rig states up front, in one literal.
 #[derive(Clone, Debug)]
 pub struct Setup {
-    /// The rig's own bash, laid beside the protocol's and sourced by it. Ends
-    /// with `BC_JOIN <LABEL>`, which is where the label a client's words use
-    /// comes from.
+    /// The name the rig's words speak under: `BC_INSTR <label> …`. The
+    /// session writes the join — `BC_JOIN <label> '<dir>'` — into the
+    /// invocation it generates, and refuses at open a label that will not
+    /// name a file.
+    pub label: String,
+
+    /// The rig's own bash — words and effects, no join line. Laid beside the
+    /// protocol's and sourced after the join.
     pub bash: String,
-
-    pub workspace: Workspace,
-}
-
-/// Where a session lays its bash and its fifos, and how long that outlives it.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub enum Workspace {
-    /// A directory of the session's own, removed when it ends.
-    #[default]
-    Temporary,
-
-    /// One of the caller's, created if it is not there and left behind.
-    At(PathBuf),
 }
 
 /// Where the session's files ended up. Handed to every reaction at
@@ -37,16 +29,19 @@ pub enum Workspace {
 pub struct Layout {
     pub dir: PathBuf,
 
-    /// The file a shell sources to join — the session's only address, and what
-    /// `BC_SESSION` carries in a driven subject's environment.
-    pub prelude: PathBuf,
+    /// The session's only address: `<dir>/session.bash`, the file a shell
+    /// sources to join, and what `BC_SESSION` carries in a driven subject's
+    /// environment. Text, because it crosses into bash and onto the announce
+    /// line — validated whole at open. Its dirname is the workspace, so any
+    /// shell holding the address knows the coordinate: `${BC_SESSION%/*}`.
+    pub address: String,
 }
 
 impl Layout {
     /// The address, spelled for `BASH_ENV`: reaches every non-interactive bash
     /// in the tree the subject creates.
     pub fn bash_env(&self) -> (OsString, OsString) {
-        (OsString::from("BASH_ENV"), self.prelude.clone().into_os_string())
+        (OsString::from("BASH_ENV"), self.address.clone().into())
     }
 }
 

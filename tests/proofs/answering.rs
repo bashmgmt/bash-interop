@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use mb_resolver::bash::rig::{
     Answer, Driving, ExitStatus, Failure, Layout, Message, Reaching, Reacting, Rig, Run, Setup,
-    Shell, Workspace,
+    Shell,
 };
 use tokio::sync::Notify;
 
@@ -18,7 +18,6 @@ use crate::{beginning, behind, report, ENTRY};
 
 const SOAK_BASH: &str = r#"
 NOTE() { BC_INSTR SOAK say NOTE "$@"; }
-BC_JOIN SOAK
 "#;
 
 /// Answers each question a different way, cycling through every form.
@@ -46,7 +45,7 @@ impl Rig for Answering {
 
     /// `NOTE` is this rig's own word, called back by several of the answers.
     fn setup(&self) -> Setup {
-        Setup { bash: SOAK_BASH.to_string(), workspace: Workspace::Temporary }
+        Setup { label: "SOAK".to_string(), bash: SOAK_BASH.to_string() }
     }
 
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Soak, Failure> {
@@ -191,7 +190,7 @@ impl Rig for Gated {
     type Reaction = Gate;
 
     fn setup(&self) -> Setup {
-        Setup { bash: "BC_JOIN GATE\n".to_string(), workspace: Workspace::Temporary }
+        Setup { label: "GATE".to_string(), bash: String::new() }
     }
 
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Gate, Failure> {

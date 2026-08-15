@@ -13,7 +13,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 
 use mb_resolver::bash::rig::{
-    Attended, Failure, Layout, Message, Rig, Serving, Setup, Shell, Workspace,
+    Attended, Failure, Layout, Message, Rig, Serving, Setup, Shell,
 };
 
 use crate::support::Scripts;
@@ -27,8 +27,8 @@ impl Rig for Attaching {
 
     fn setup(&self) -> Setup {
         Setup {
-            bash: "TELL() { BC_INSTR TELL say TELL \"$@\"; }\nBC_JOIN TELL\n".to_string(),
-            workspace: Workspace::Temporary,
+            label: "TELL".to_string(),
+            bash: "TELL() { BC_INSTR TELL say TELL \"$@\"; }\n".to_string(),
         }
     }
 
@@ -58,14 +58,16 @@ fn joining(address: &str, script: &Path, handle: OwnedFd) -> Child {
         .expect("a shell to join with")
 }
 
-/// Serve `scripts`' entry in a shell started for it, and hand back the shells
+/// Serve `scripts`' entry in a shell started for it — the workspace is the
+/// initiator's to name, so this side makes one — and hand back the shells
 /// that joined beside how that shell ended.
 async fn joined(scripts: &Scripts) -> (Vec<Attended<Vec<Message>>>, std::process::ExitStatus) {
+    let workspace = tempfile::tempdir().expect("a workspace to prescribe");
     let (held, handle) = pipe().expect("a handle");
 
     let mut child = None;
     let served = Attaching
-        .serve(held.into(), |address| {
+        .serve(workspace.path(), held.into(), |address| {
             child = Some(joining(address, &scripts.at(ENTRY), handle.into()));
             Ok(())
         })
@@ -186,11 +188,12 @@ fn interactively(address: &str, handle: OwnedFd) -> Child {
 /// The shell says so itself, once, when it joins.
 #[tokio::test]
 async fn a_shell_says_what_it_is_rather_than_being_guessed_at() {
+    let workspace = tempfile::tempdir().expect("a workspace to prescribe");
     let (held, handle) = pipe().expect("a handle");
 
     let mut child = None;
     let served = Attaching
-        .serve(held.into(), |address| {
+        .serve(workspace.path(), held.into(), |address| {
             child = Some(interactively(address, handle.into()));
             Ok(())
         })
@@ -215,4 +218,57 @@ async fn a_shell_says_what_it_is_rather_than_being_guessed_at() {
     // Interactive is not something the options can be turned into: `set`
     // refuses `-i`, so this is settled at startup and true of the whole shell.
     assert!(shell.options.flags.has('i'));
+}
+
+/// The workspace is the client's: the session is laid where it prescribed —
+/// created if missing — and the address sits under it. What remains when the
+/// session ends is the three bash files and nothing that was a pipe: the
+/// control fifo goes when the session closes, and a shell's two when it
+/// parts.
+#[tokio::test]
+async fn the_prescribed_workspace_is_left_behind_without_its_fifos() {
+    let temp = tempfile::tempdir().unwrap();
+    let at = temp.path().join("under").join("here");
+    let scripts = Scripts::of(&[(
+        ENTRY,
+        r#"
+        TELL first
+        ( TELL from-a-subshell )
+        BC_INSTR TELL ask anything
+        TELL "returned $?"
+        "#,
+    )]);
+
+    let (held, handle) = pipe().expect("a handle");
+    let mut child = None;
+    let served = Attaching
+        .serve(&at, held.into(), |address| {
+            let expected = std::fs::canonicalize(&at).unwrap().join("session.bash");
+            assert_eq!(Path::new(address), expected, "the client's own dir, as prescribed");
+
+            child = Some(joining(address, &scripts.at(ENTRY), handle.into()));
+            Ok(())
+        })
+        .await
+        .expect("the session");
+
+    child.expect("the shell").wait().expect("reaping the shell");
+    assert!(served.failed.is_none(), "the session closed up cleanly");
+    assert_eq!(
+        behind(&served.shells, "TELL"),
+        [["first"].as_slice(), ["from-a-subshell"].as_slice(), ["returned 127"].as_slice()],
+        "{}",
+        report(&served.shells)
+    );
+
+    let mut left: Vec<String> = std::fs::read_dir(&at)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    left.sort();
+    assert_eq!(
+        left,
+        ["prelude.bash", "rig.bash", "session.bash"],
+        "the bash, and nothing that was a pipe"
+    );
 }

@@ -6,7 +6,7 @@ use std::ffi::OsString;
 use std::sync::Arc;
 
 use mb_resolver::bash::rig::{
-    Driving, ExitStatus, Failure, Layout, Message, Reaching, Rig, Setup, Shell, Workspace,
+    Driving, ExitStatus, Failure, Layout, Message, Reaching, Rig, Setup, Shell,
 };
 
 use crate::support::{bash, Scripts};
@@ -54,15 +54,17 @@ async fn a_fork_that_speaks_is_a_shell_of_its_own_and_parts_on_its_own() {
     assert!(fork_parted < parent.kept[1].stamp.sent_at, "and before the parent's last word");
 }
 
-/// Two labels in one shell are two sessions of one process: `BC_JOIN` twice
-/// gives it two pipes, and Rust hears two shells with the same pid.
+/// Two labels in one shell are two sessions of one process: a second join
+/// gives it a second pipe, and Rust hears two shells with the same pid. The
+/// second join states its coordinate — the address names the workspace, so
+/// `${BC_SESSION%/*}` is how a script spells it.
 struct Twice;
 
 impl Rig for Twice {
     type Reaction = Vec<Message>;
 
     fn setup(&self) -> Setup {
-        Setup { bash: "BC_JOIN ONE\nBC_JOIN TWO\n".to_string(), workspace: Workspace::Temporary }
+        Setup { label: "ONE".to_string(), bash: String::new() }
     }
 
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Vec<Message>, Failure> {
@@ -81,6 +83,7 @@ async fn two_labels_in_one_process_are_two_shells() {
     let scripts = Scripts::of(&[(
         ENTRY,
         r#"
+        BC_JOIN TWO "${BC_SESSION%/*}"
         BC_INSTR ONE say REC one
         BC_INSTR TWO say REC two
         BC_INSTR ONE say REC one-again
