@@ -17,6 +17,7 @@ walk can say on its own which word that is. A tool composes them.
 
 ```
 KB/mb_resolver/bash/                              src/bash/
+  onboarding.md     start here: the words, the surface as code, one rig
   values.md         quoted forms, BashVal, codecs   value/
   shell.md          what a shell is                 shell.rs
   wire.md           the bash, the fifos, the lines  rig/wire/
@@ -135,5 +136,5 @@ one building block belongs beside it, in `src/<module>/tests/`.
 
 ## Reading order
 
-README → rig.md → wire.md, then whichever concern applies. Changing the
+onboarding.md → README → rig.md → wire.md, then whichever concern applies. Changing the
 transport: wire.md → measurements.md. Writing a tool: stack.md → bashcap.md.
