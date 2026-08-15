@@ -34,7 +34,7 @@ Every module under `src/bash/rig/` is private; `mod.rs` carries `Rig` and
 `Reacting` and one re-export list that is the rest of the API:
 
 ```rust
-pub use attended::{heard, Attended, Kept, Layout, Said, Setup};
+pub use attended::{heard, Attended, Kept, Layout, Said};
 pub use driving::{Driving, ExitStatus, Reached, Reaching, Run, Whole};
 pub use serving::{Served, Serving};
 pub use wire::{field, Answer, Message, Micros, Pid, Stamp, Verb};
@@ -58,20 +58,23 @@ traits extending `Rig` with one provided `async fn`, so a rig declares which
 orchestrations it supports by implementing them. A session lasts as long as
 anyone who could still speak, and nothing inside a rig ends one.
 
-**One coordinate, passed.** The workspace directory is the session's only
-coordinate — every fifo and file is `<dir>/…`, and the address is
-`<dir>/session.bash`: the generated invocation a shell sources to join, which
-sources the generic prelude, joins with the label and the dir spelled
-literally, and sources the rig's bash. Nothing self-locates: `BC_JOIN` takes
-the dir as an argument, and the address names the workspace
+**One coordinate, passed; no label in the core.** The workspace directory is
+the session's only coordinate — every fifo and file is `<dir>/…`, and the
+address is `<dir>/session.bash`: the generated invocation a shell sources to
+join. It is two lines — source the generic prelude, then source the rig's
+bash with the dir as `$1` — and joining is the rig's bash's own text:
+`BC_JOIN <LABEL> "$1" [word…]`, zero, one or many labels. The label is client
+vocabulary, the same species as a message's leading word; Rust is never told
+it. Nothing self-locates, and the address names the workspace
 (`${BC_SESSION%/*}`). A driven subject finds the address as `BC_SESSION` in
 its environment; a serving client chose the dir (`--at`, required), so the
 line it reads back is a value its own choice fixed — the read is what says the
 session is laid. Whether `BASH_ENV` also names the address is the run's
 question, not the rig's: `Reached { rig, reaching }` drives a rig with one of
-the two usual answers, and a rig with an environment of its own implements
-`Driving::environment` itself. `JOINING` is every way a script joins, in bash,
-and both binaries print it under `--help`.
+the two usual answers, a rig with an environment of its own implements
+`Driving::environment` itself, and `run_at` is `run` with a directory the
+caller names. `JOINING` is every way a script joins, in bash, and both
+binaries print it under `--help`.
 
 Every instrument that reports a walk is composed by `stack::with_walk(&[…])`,
 which puts `stack.bash` first: `__bc_stack` has to be defined before anything
@@ -81,7 +84,7 @@ calls it, and that rule lives there rather than at each tool.
 
 | moment | started by | effect |
 |---|---|---|
-| join | the invocation, at source — `BC_JOIN <LABEL> '<dir>'` | the shell makes its pipe, announces it on the control fifo with its account, and blocks until the run has opened it. A fork does the same on its first word |
+| join | the rig's bash, at source — `BC_JOIN <LABEL> "$1" [word…]` | the shell makes its pipe, announces it on the control fifo with its account — the words the join brought included — and blocks until the run has opened it. A fork does the same on its first word |
 | say | the subject | `BC_INSTR <LABEL> say …` ships an arglist and returns |
 | ask | the subject | `BC_INSTR <LABEL> ask …` ships one, blocks, and runs what comes back |
 
@@ -123,14 +126,15 @@ An **answer** is an arglist too, and it is a command the shell runs:
 
 ## Building on it
 
-Implement `Rig` — `setup`, `joined` — and a `Reacting` for what it builds,
-unless `Vec<Message>` or `()` is what you want. `Setup` states the label and
-the rig's bash; the session writes the join. To drive it, wrap it —
-`Reached { rig, reaching }` — or implement `Driving` where the rig has an
-environment of its own; to serve it, `impl Serving` and pass the workspace the
-client prescribed. What several shells share is yours, held by the rig and
-handed to each reaction it builds — an `Rc<RefCell<_>>` is enough, and its
-borrow is never held across an `.await`.
+Implement `Rig` — `bash`, `joined` — and a `Reacting` for what it builds,
+unless `Vec<Message>` or `()` is what you want. The rig's bash states its own
+joins — `BC_JOIN <LABEL> "$1"`, with any words it wants on the shell
+afterwards (`Shell::brought`). To drive it, wrap it — `Reached { rig,
+reaching }` — or implement `Driving` where the rig has an environment of its
+own; to serve it, `impl Serving` and pass the workspace the client
+prescribed. What several shells share is yours, held by the rig and handed to
+each reaction it builds — an `Rc<RefCell<_>>` is enough, and its borrow is
+never held across an `.await`.
 
 Nothing on either trait defaults, so an `impl` block is the whole contract.
 What a default used to decide is a named value instead: `Answer::unknown()` is

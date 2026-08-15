@@ -16,7 +16,7 @@
 //! ```no_run
 //! use std::sync::Arc;
 //! use mb_resolver::bash::rig::{
-//!     Answer, Driving, Failure, Layout, Message, Reached, Reaching, Reacting, Rig, Setup, Shell,
+//!     Answer, Driving, Failure, Layout, Message, Reached, Reaching, Reacting, Rig, Shell,
 //! };
 //!
 //! /// Keeps what one shell said, and tells it to use staging.
@@ -27,13 +27,10 @@
 //! impl Rig for Deploying {
 //!     type Reaction = Told;
 //!
-//!     /// A word the subject's scripts can call, in every shell, and the label
-//!     /// it speaks under.
-//!     fn setup(&self) -> Setup {
-//!         Setup {
-//!             label: "DEPLOY".to_string(),
-//!             bash: "STAGE() { BC_INSTR DEPLOY say STAGE \"$@\"; }\n".to_string(),
-//!         }
+//!     /// A word the subject's scripts can call, in every shell, joined under
+//!     /// the label it speaks: `$1` is the session's workspace.
+//!     fn bash(&self) -> String {
+//!         "STAGE() { BC_INSTR DEPLOY say STAGE \"$@\"; }\nBC_JOIN DEPLOY \"$1\"\n".to_string()
 //!     }
 //!
 //!     async fn joined(&self, _at: &Layout, shell: Arc<Shell>) -> Result<Told, Failure> {
@@ -94,7 +91,7 @@
 //!
 //! | | |
 //! |---|---|
-//! | `attended` | [`Setup`], [`Layout`], [`Attended`], [`Kept`], [`Said`], [`heard`] |
+//! | `attended` | [`Layout`], [`Attended`], [`Kept`], [`Said`], [`heard`] |
 //! | `session`, `attend` | the conversation: the workspace, the control fifo, one task per shell |
 //! | `watch` | the descriptor a session ends on |
 //! | `driving`, `serving` | the two roles, [`Reached`] and [`Reaching`], and what each hands back |
@@ -110,7 +107,7 @@ pub(crate) mod wire;
 
 use std::sync::Arc;
 
-pub use attended::{heard, Attended, Kept, Layout, Said, Setup};
+pub use attended::{heard, Attended, Kept, Layout, Said};
 pub use driving::{Driving, ExitStatus, Reached, Reaching, Run, Whole};
 pub use serving::{Served, Serving};
 
@@ -127,8 +124,8 @@ pub use crate::failure::{Doing, Failure};
 /// ```
 pub const JOINING: &str = include_str!("joining.txt");
 
-/// What bash a rig gives the subject, where the session's files go, and how a
-/// reaction is made once a shell is there.
+/// What bash a rig gives the subject, and how a reaction is made once a
+/// shell is there.
 ///
 /// A description: `&self` throughout, because nothing about it changes by
 /// running. **No method has a default body.**
@@ -138,7 +135,7 @@ pub const JOINING: &str = include_str!("joining.txt");
 /// | [`&Layout`](Layout) — `dir`, and `address`, what a shell sources | [`Self::Reaction`](Rig::Reaction) |
 /// | [`Arc<Shell>`](Shell) — `bash: Bash`, `options: Options`, `joined: Stamp` | |
 ///
-/// [`Setup::bash`] is laid beside the protocol's own by the session;
+/// The rig's bash is laid beside the protocol's own by the session;
 /// [`stack::with_walk`](crate::bash::stack::with_walk) composes it where the
 /// rig reports a frame walk.
 #[expect(async_fn_in_trait, reason = "single-threaded by design: no Send bound")]
@@ -146,7 +143,10 @@ pub trait Rig {
     /// What reacts to one shell.
     type Reaction: Reacting;
 
-    fn setup(&self) -> Setup;
+    /// The rig's own bash. The invocation sources it with the session's
+    /// workspace as `$1`; joining — which labels, with which words, or none —
+    /// is this text's own business: `BC_JOIN <LABEL> "$1" [word…]`.
+    fn bash(&self) -> String;
 
     /// A shell has joined, and everything about it is known. Awaited in the
     /// accept loop, so a slow `joined` delays the next join and nothing else.

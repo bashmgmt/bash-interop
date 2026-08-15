@@ -4,7 +4,7 @@ use std::ffi::OsString;
 use std::sync::Arc;
 
 use mb_resolver::bash::rig::{
-    Driving, ExitStatus, Failure, Layout, Message, Rig, Setup, Shell,
+    Driving, ExitStatus, Failure, Layout, Message, Rig, Shell,
 };
 
 use crate::support::{bash, Scripts};
@@ -16,11 +16,8 @@ struct Deploying;
 impl Rig for Deploying {
     type Reaction = Vec<Message>;
 
-    fn setup(&self) -> Setup {
-        Setup {
-            label: "TELL".to_string(),
-            bash: "TELL() { BC_INSTR TELL say TELL \"$@\"; }\n".to_string(),
-        }
+    fn bash(&self) -> String {
+        "TELL() { BC_INSTR TELL say TELL \"$@\"; }\nBC_JOIN TELL \"$1\"\n".to_string()
     }
 
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Vec<Message>, Failure> {

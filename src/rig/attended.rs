@@ -9,20 +9,6 @@ use serde::Serialize;
 
 use super::{Message, Micros, Reacting, Rig, Shell};
 
-/// Everything a rig states up front, in one literal.
-#[derive(Clone, Debug)]
-pub struct Setup {
-    /// The name the rig's words speak under: `BC_INSTR <label> …`. The
-    /// session writes the join — `BC_JOIN <label> '<dir>'` — into the
-    /// invocation it generates, and refuses at open a label that will not
-    /// name a file.
-    pub label: String,
-
-    /// The rig's own bash — words and effects, no join line. Laid beside the
-    /// protocol's and sourced after the join.
-    pub bash: String,
-}
-
 /// Where the session's files ended up. Handed to every reaction at
 /// construction, since the instrument's own frames name a file in here.
 #[derive(Clone, Debug)]

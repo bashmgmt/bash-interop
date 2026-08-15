@@ -13,7 +13,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 
 use mb_resolver::bash::rig::{
-    Attended, Failure, Layout, Message, Rig, Serving, Setup, Shell,
+    Attended, Failure, Layout, Message, Rig, Serving, Shell,
 };
 
 use crate::support::Scripts;
@@ -25,11 +25,8 @@ struct Attaching;
 impl Rig for Attaching {
     type Reaction = Vec<Message>;
 
-    fn setup(&self) -> Setup {
-        Setup {
-            label: "TELL".to_string(),
-            bash: "TELL() { BC_INSTR TELL say TELL \"$@\"; }\n".to_string(),
-        }
+    fn bash(&self) -> String {
+        "TELL() { BC_INSTR TELL say TELL \"$@\"; }\nBC_JOIN TELL \"$1\"\n".to_string()
     }
 
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Vec<Message>, Failure> {
@@ -221,12 +218,11 @@ async fn a_shell_says_what_it_is_rather_than_being_guessed_at() {
 }
 
 /// The workspace is the client's: the session is laid where it prescribed —
-/// created if missing — and the address sits under it. What remains when the
-/// session ends is the three bash files and nothing that was a pipe: the
-/// control fifo goes when the session closes, and a shell's two when it
-/// parts.
+/// created if missing — and the address is the file under it the client could
+/// already spell. What a laid workspace holds afterwards is `owning.rs`'s
+/// proof; here the fact is who chose the directory.
 #[tokio::test]
-async fn the_prescribed_workspace_is_left_behind_without_its_fifos() {
+async fn the_session_is_laid_where_the_client_prescribed() {
     let temp = tempfile::tempdir().unwrap();
     let at = temp.path().join("under").join("here");
     let scripts = Scripts::of(&[(
@@ -234,8 +230,6 @@ async fn the_prescribed_workspace_is_left_behind_without_its_fifos() {
         r#"
         TELL first
         ( TELL from-a-subshell )
-        BC_INSTR TELL ask anything
-        TELL "returned $?"
         "#,
     )]);
 
@@ -256,19 +250,8 @@ async fn the_prescribed_workspace_is_left_behind_without_its_fifos() {
     assert!(served.failed.is_none(), "the session closed up cleanly");
     assert_eq!(
         behind(&served.shells, "TELL"),
-        [["first"].as_slice(), ["from-a-subshell"].as_slice(), ["returned 127"].as_slice()],
+        [["first"].as_slice(), ["from-a-subshell"].as_slice()],
         "{}",
         report(&served.shells)
-    );
-
-    let mut left: Vec<String> = std::fs::read_dir(&at)
-        .unwrap()
-        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
-        .collect();
-    left.sort();
-    assert_eq!(
-        left,
-        ["prelude.bash", "rig.bash", "session.bash"],
-        "the bash, and nothing that was a pipe"
     );
 }

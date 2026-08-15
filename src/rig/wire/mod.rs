@@ -9,7 +9,6 @@ mod pipe;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::Setup;
 use crate::bash::value::emit_scalar;
 use crate::failure::{Doing, Failure};
 
@@ -47,27 +46,20 @@ pub(crate) fn mkfifo(path: &Path) -> Result<(), Failure> {
 /// Lays the session's bash into `dir` — the protocol's, the rig's, and the
 /// generated invocation naming both — and returns the address as text: it
 /// crosses into bash and onto the announce line, so it is validated whole
-/// here. `dir` must be absolute: the invocation spells it into every path.
-pub(crate) fn lay(dir: &Path, setup: &Setup) -> Result<String, Failure> {
+/// here. `dir` must be absolute: the invocation spells it into every path,
+/// and hands it to the rig's bash as `$1` — which is where joining happens.
+pub(crate) fn lay(dir: &Path, bash: &str) -> Result<String, Failure> {
     let laying = || format!("laying the session at {}", dir.display());
-    let Setup { label, bash } = setup;
-
-    // The same predicate `BC_JOIN` applies: the label names a fifo and sits
-    // in a space-delimited frame token.
-    if label.is_empty() || label.contains('/') || label.contains(char::is_whitespace) {
-        return Err(Failure::new(laying(), format!("label {label:?} will not name a file")));
-    }
     let dir = dir
         .to_str()
         .filter(|dir| !dir.contains('\n'))
         .ok_or_else(|| Failure::new(laying(), "the workspace path is not one line of text"))?;
 
     let invocation = format!(
-        "source {}\nBC_JOIN {} {}\nsource {}\n",
+        "source {}\nsource {} {}\n",
         emit_scalar(&format!("{dir}/prelude.bash")),
-        emit_scalar(label),
-        emit_scalar(dir),
         emit_scalar(&format!("{dir}/rig.bash")),
+        emit_scalar(dir),
     );
 
     for (name, body) in [("prelude.bash", PRELUDE), ("rig.bash", bash), (SESSION, &invocation)] {
@@ -132,38 +124,25 @@ mod tests {
     }
 
     /// The invocation is where the coordinate is spelled, quoted: a workspace
-    /// path bash would split or expand still joins.
+    /// path bash would split or expand still joins, handed to the rig's bash
+    /// as its `$1`.
     #[test]
     fn the_invocation_spells_the_coordinate() {
         let temp = tempfile::tempdir().unwrap();
         let dir = temp.path().join("it's $HERE");
         std::fs::create_dir(&dir).unwrap();
 
-        let setup = Setup { label: "KEEP".into(), bash: "words\n".into() };
-        let address = lay(&dir, &setup).unwrap();
+        let address = lay(&dir, "words\n").unwrap();
 
         let dir = dir.to_str().unwrap();
         assert_eq!(address, format!("{dir}/session.bash"));
         assert_eq!(
             std::fs::read_to_string(&address).unwrap(),
             format!(
-                "source '{q}/prelude.bash'\nBC_JOIN 'KEEP' '{q}'\nsource '{q}/rig.bash'\n",
+                "source '{q}/prelude.bash'\nsource '{q}/rig.bash' '{q}'\n",
                 q = dir.replace('\'', r"'\''"),
             ),
         );
         assert_eq!(std::fs::read_to_string(format!("{dir}/rig.bash")).unwrap(), "words\n");
-    }
-
-    /// What `BC_JOIN` would refuse never reaches a shell.
-    #[test]
-    fn a_label_that_will_not_name_a_file_is_refused() {
-        let temp = tempfile::tempdir().unwrap();
-
-        for label in ["", "a/b", "two words"] {
-            let setup = Setup { label: label.into(), bash: String::new() };
-            let refused = lay(temp.path(), &setup).unwrap_err();
-
-            assert!(refused.to_string().contains("will not name a file"), "{refused}");
-        }
     }
 }

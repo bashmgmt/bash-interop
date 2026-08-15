@@ -30,6 +30,7 @@ pub fn account(pid: u32, zero: &str, flags: &str) -> Vec<String> {
         "shellopts", "braceexpand:hashall",
         "bashopts", "checkwinsize",
         "command", command,
+        "brought", "()",
     ]
     .iter()
     .map(ToString::to_string)

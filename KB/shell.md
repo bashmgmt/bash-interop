@@ -11,6 +11,7 @@ pub struct Shell {
     pub joined: Stamp,     // when it joined, on both clocks
     pub bash: Bash,        // which bash, and how it was invoked
     pub options: Options,  // what it had switched on then, which may change after
+    pub brought: Vec<String>, // the words its join carried, verbatim
 }
 
 pub struct Bash { pub version: Version, pub binary: PathBuf, pub zero: String, pub invocation: Invocation }
@@ -28,10 +29,12 @@ a shell, and a `Message` presupposes one.
 ```bash
 __bc_account() {
     local __bc_out=$1 IFS=' '
+    local -a __bc_meta="(${__BC__META[$2]-})"
     set -- "at=$EPOCHREALTIME" \
         pid "$BASHPID" shlvl "$SHLVL" subshell "$BASH_SUBSHELL" \
         versinfo "(${BASH_VERSINFO[*]@Q})" bash "$BASH" zero "$0" flags "$-" \
-        shellopts "$SHELLOPTS" bashopts "$BASHOPTS" command "${BASH_EXECUTION_STRING-}"
+        shellopts "$SHELLOPTS" bashopts "$BASHOPTS" command "${BASH_EXECUTION_STRING-}" \
+        brought "(${__bc_meta[*]@Q})"
     printf -v "$__bc_out" '(%s)' "${*@Q}"
 }
 ```
@@ -39,6 +42,13 @@ __bc_account() {
 One array literal, the clock first and no verb, written into the caller's
 local. Everything in it is passed as bash reports it, and what any of it means
 is decided in `Shell::of`. Adding a fact is a word here and a field there.
+
+`brought` is the one entry the client writes: the words its join carried
+(`BC_JOIN LABEL DIR word…`), one nested literal — the shape `versinfo` takes —
+landing verbatim on `Shell::brought`. An arglist like a message's: the
+protocol reserves no word in it, and `key value` pairs read with `field` are
+the client's own convention. A fork's reattach announces its label's words; a
+child process re-derives them at its own join.
 
 None of it can change while a shell lives: a subshell has a `$BASHPID` of its
 own and joins as a shell of its own, and `set` refuses `-i`, `-c` and `-s`, so

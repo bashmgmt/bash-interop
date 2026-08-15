@@ -7,7 +7,7 @@ what they share.
 ```
 rig/  mod.rs       the doc; `Rig`, `Reacting`, the two templates; the re-export list; `JOINING`
       joining.txt  how a script joins, in every way there is — `JOINING`'s text
-      attended.rs  `Setup`, `Layout`, `Attended`, `Kept`, `Said`, `heard`
+      attended.rs  `Layout`, `Attended`, `Kept`, `Said`, `heard`
       session.rs   `Session` — open, serve, announced, close
       attend.rs    `attend` — one shell's task, start to finish
       watch.rs     `Watch` — what a session ends on
@@ -29,21 +29,14 @@ trait that extends `Rig` and carries its own orchestration.
 pub trait Rig {
     type Reaction: Reacting;
 
-    fn setup(&self) -> Setup;
+    /// The rig's own bash. The invocation sources it with the session's
+    /// workspace as `$1`; joining — which labels, with which words, or none —
+    /// is this text's own business: `BC_JOIN <LABEL> "$1" [word…]`.
+    fn bash(&self) -> String;
 
     /// A shell has joined, and everything about it is known. Awaited in the
     /// accept loop, so a slow `joined` delays the next join and nothing else.
     async fn joined(&self, at: &Layout, shell: Arc<Shell>) -> Result<Self::Reaction, Failure>;
-}
-
-pub struct Setup {
-    /// The name the rig's words speak under: `BC_INSTR <label> …`. The session
-    /// writes the join into the invocation it generates, and refuses at open a
-    /// label that will not name a file.
-    pub label: String,
-    /// The rig's own bash — words and effects, no join line. Sourced after the
-    /// join.
-    pub bash: String,
 }
 
 pub trait Reacting: Sized + 'static {
@@ -162,7 +155,12 @@ pub trait Driving: Rig {
     /// legitimate answer: the shells then join by hand.
     fn environment(&self, at: &Layout) -> Vec<(OsString, OsString)>;
 
+    /// A workspace of the run's own, gone when the run ends.
     async fn run<A: AsRef<OsStr>>(&self, argv: &[A]) -> Result<Run<Kept<Self>>, Failure>;
+
+    /// The caller's directory instead — created if missing, left behind: a
+    /// reading taken later may follow source paths into it.
+    async fn run_at<A: AsRef<OsStr>>(&self, at: &Path, argv: &[A]) -> Result<Run<Kept<Self>>, Failure>;
 }
 
 pub struct Run<K> { pub shells: Vec<Attended<K>>, pub subject: ExitStatus, pub failed: Option<Failure> }

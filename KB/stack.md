@@ -244,7 +244,7 @@ it, and where it is checked without running bash.
 | `BASHPROF_TIMETHIS` (`tests/examples/bashprof.rs`) | 2 | whatever the shell has |
 
 Both reach it through `stack::with_walk`, which puts it in front of their own
-bash in `Setup::bash`.
+bash in `Rig::bash`.
 
 ## See also
 

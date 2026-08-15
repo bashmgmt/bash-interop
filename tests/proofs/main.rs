@@ -36,7 +36,7 @@ mod support;
 use std::sync::Arc;
 
 use mb_resolver::bash::rig::{
-    heard, Attended, Driving, Failure, Layout, Message, Reached, Reaching, Rig, Setup, Shell,
+    heard, Attended, Driving, Failure, Layout, Message, Reached, Reaching, Rig, Shell,
     Whole,
 };
 
@@ -45,8 +45,9 @@ use support::{bash, Scripts};
 /// Every proof starts the same script, beside whatever else it wrote.
 pub const ENTRY: &str = "main.bash";
 
-/// The label the proofs' scripts speak under: `BC_INSTR KEEP say …`.
-pub const LABEL: &str = "KEEP";
+/// The join the proofs' rigs state: `BC_INSTR KEEP say …` is how their
+/// scripts speak, and `$1` is the workspace the invocation hands the bash.
+pub const JOIN: &str = "BC_JOIN KEEP \"$1\"\n";
 
 /// Keeps every message, and answers nothing.
 pub struct Keeping;
@@ -67,9 +68,9 @@ impl Keeping {
 impl Rig for Keeping {
     type Reaction = Vec<Message>;
 
-    /// No words of its own in the subject's shells: only the label.
-    fn setup(&self) -> Setup {
-        Setup { label: LABEL.to_string(), bash: String::new() }
+    /// No words of its own in the subject's shells: only the join.
+    fn bash(&self) -> String {
+        JOIN.to_string()
     }
 
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Vec<Message>, Failure> {

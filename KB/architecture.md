@@ -80,14 +80,18 @@ is `<dir>/…`, and the address is `<dir>/session.bash` — the generated
 invocation a shell sources to join. The session lays three files: the generic
 prelude (shipped verbatim, reading neither its own location nor the
 environment), the rig's bash, and the invocation, which is the one generated
-file and the one place the coordinate is spelled — `source` the prelude,
-`BC_JOIN <label> '<dir>'`, `source` the rig's bash. `BC_JOIN` takes the dir
-as an argument and binds it to the label in the LUTs; nothing self-locates,
-and the address names the workspace: `${BC_SESSION%/*}`.
+file and the one place the coordinate is spelled — `source` the prelude, then
+`source` the rig's bash with the dir as `$1`. Joining is the rig's bash's own
+text — `BC_JOIN <label> "$1" [word…]`, zero, one or many labels — because the
+label is client vocabulary, the write-time-stable name the words speak that
+the join binds to a run-time coordinate; Rust is never told it. The words
+after the dir ride the announcement and land on `Shell::brought`. Nothing
+self-locates, and the address names the workspace: `${BC_SESSION%/*}`.
 
 A driven run exports the address, `BC_SESSION=<the address>`, into the
 subject and starts the command line; its workspace is a temporary directory of
-the run's own, so nothing external can prescribe or collide with it. **How the
+the run's own — or, `run_at`, one the caller names and keeps — so nothing
+external can prescribe or collide with it. **How the
 shells reach the address is the run's question, not the rig's**: `Reached {
 rig, reaching }` drives any rig with one of the two usual answers — `BashEnv`
 is `("BASH_ENV", <the same address>)`, which reaches every non-interactive
@@ -118,7 +122,7 @@ the run.
 ### 4. A rig is a description; a reaction is per shell, and a task
 
 ```rust
-trait Rig      { type Reaction: Reacting;  setup() -> Setup;  async joined(&Layout, Arc<Shell>) }
+trait Rig      { type Reaction: Reacting;  bash() -> String;  async joined(&Layout, Arc<Shell>) }
 trait Reacting { type Kept;  async hear(Message);  async answer(Message) -> Answer;  async finish() -> Kept }
 ```
 

@@ -6,7 +6,7 @@
 # One entry per label. `declare -gA` on an array that exists keeps it, so a
 # second session's prelude sourced into the same shell adds a label and takes
 # nothing away.
-declare -gA __BC__DIR __BC__FD __BC__REP __BC__OWNER
+declare -gA __BC__DIR __BC__META __BC__FD __BC__REP __BC__OWNER
 
 # `BC_INSTR` could not do its job — as distinct from an answer that ran and
 # returned non-zero, which is the subject's business. 125 is what `env` and
@@ -27,9 +27,10 @@ __bc_complain() {
     printf 'BC_INSTR: %s at %s\n' "$1" "${__BC__at:-?}" >&2
 }
 
-# $1 the label, $2 the session's workspace. Binds the name to the coordinate
-# for this shell and attaches this process; a fork inherits the entry and
-# attaches itself on its first word.
+# $1 the label, $2 the session's workspace, the rest words of the caller's
+# own. Binds the name to the coordinate for this shell, keeps the words, and
+# attaches this process; a fork inherits the entries and attaches itself on
+# its first word, announcing the same words.
 BC_JOIN() {
     __BC__at="${BASH_SOURCE[1]:-?}:${BASH_LINENO[0]:-?}"
 
@@ -41,7 +42,10 @@ BC_JOIN() {
         || { __bc_complain "label $1 is already joined from ${__BC__DIR[$1]}"; return "$__BC__FAILED"; }
 
     __BC__DIR[$1]=$2
-    __bc_attach "$1"
+    local __bc_label=$1 IFS=' '
+    shift 2
+    __BC__META[$__bc_label]="${*@Q}"
+    __bc_attach "$__bc_label"
 }
 
 # $1 the label, $2 the verb, the rest the client's words.
@@ -71,7 +75,7 @@ __bc_attach() {
     local __bc_fd __bc_rep __bc_acct
 
     [[ -p "$__bc_dir/join" ]] || { __bc_complain "no session at $__bc_dir"; return "$__BC__FAILED"; }
-    __bc_account __bc_acct
+    __bc_account __bc_acct "$1"
     mkfifo "$__bc_dir/up.$__bc_tok"                                 || __BC_THROW
     __bc_announce "$__bc_tok" "$__bc_acct" >"$__bc_dir/join"        || __BC_BAIL
     exec {__bc_fd}>"$__bc_dir/up.$__bc_tok"                         || __BC_THROW
@@ -91,13 +95,15 @@ __bc_reattach() {
     __bc_attach "$1"
 }
 
-# $1 the name to write into: this shell's account of itself, one array
-# literal, the clock first. Every value is passed as bash reports it; what any
-# of it means is read on the other side. `IFS` is local so `[*]` joins with a
-# space whatever the subject's is, and the subject's — unset included — is back
-# on return.
+# $1 the name to write into, $2 the label: this shell's account of itself,
+# one array literal, the clock first. Every value is passed as bash reports
+# it; what any of it means is read on the other side. The words the join
+# brought ride as one nested literal, the shape `versinfo` takes. `IFS` is
+# local so `[*]` joins with a space whatever the subject's is, and the
+# subject's — unset included — is back on return.
 __bc_account() {
     local __bc_out=$1 IFS=' '
+    local -a __bc_meta="(${__BC__META[$2]-})"
     set -- "at=$EPOCHREALTIME" \
         pid       "$BASHPID" \
         shlvl     "$SHLVL" \
@@ -108,7 +114,8 @@ __bc_account() {
         flags     "$-" \
         shellopts "$SHELLOPTS" \
         bashopts  "$BASHOPTS" \
-        command   "${BASH_EXECUTION_STRING-}"
+        command   "${BASH_EXECUTION_STRING-}" \
+        brought   "(${__bc_meta[*]@Q})"
     printf -v "$__bc_out" '(%s)' "${*@Q}"
 }
 

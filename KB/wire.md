@@ -18,7 +18,7 @@ wire/  mod.rs        the paths (join, up, rep), lay(), mkfifo
 ## The client surface
 
 ```bash
-BC_JOIN LABEL DIR          # once, from the invocation, at source
+BC_JOIN LABEL DIR word…    # once, from the rig's own bash, at source
 BC_INSTR LABEL say a b c   # ship the arglist and return
 BC_INSTR LABEL ask a b c   # ship it, block, and run the answer
 ```
@@ -30,12 +30,15 @@ label nobody joined is an error by absence: named on stderr at the call site,
 status 125.
 
 `DIR` is the session's workspace — the one coordinate, bound to the label by
-the join and read from `__BC__DIR` by everything after it. `BC_JOIN` refuses a
-relative dir, a label that will not name a file, and a label already joined. A
-second label joins with any dir its author can spell: a subject script says
-`BC_JOIN OTHER "${BC_SESSION%/*}"` — the address names the workspace — and a
-rig's own `rig.bash` may say `BC_JOIN OTHER "${BASH_SOURCE[0]%/*}"`, since it
-sits in the workspace. The protocol itself never self-locates.
+the join and read from `__BC__DIR` by everything after it; `rig.bash` gets it
+as `$1`, so joining a second label is a second `BC_JOIN OTHER "$1"`. A subject
+script joining by hand spells any dir it can name — `${BC_SESSION%/*}`, the
+address's own dirname. `BC_JOIN` refuses a relative dir, a label that will
+not name a file, and a label already joined. The words after `DIR` are the
+caller's, kept per label (`__BC__META`, `@Q`-quoted) and announced with every
+attach — a fork's reattach carries its label's words — landing verbatim on
+`Shell::brought`. The protocol itself never self-locates and reserves no word
+in them.
 
 ```bash
 BC_INSTR() {
@@ -56,12 +59,12 @@ BC_INSTR() {
 ## Three files
 
 ```rust
-fn lay(dir: &Path, setup: &Setup) -> Result<String, Failure>;   // returns the address
+fn lay(dir: &Path, bash: &str) -> Result<String, Failure>;   // returns the address
 ```
 
 ```
 <dir>/prelude.bash   generic, shipped verbatim: BC_JOIN, BC_INSTR, the internals
-<dir>/rig.bash       Setup::bash — the rig's words and effects, no join line
+<dir>/rig.bash       Rig::bash — the rig's words, effects and joins
 <dir>/session.bash   generated: the invocation, and the address
 ```
 
@@ -71,18 +74,18 @@ joins:
 
 ```bash
 source '<dir>/prelude.bash'
-BC_JOIN 'LABEL' '<dir>'
-source '<dir>/rig.bash'
+source '<dir>/rig.bash' '<dir>'
 ```
 
-It is self-contained: correct with an empty environment. `lay` validates what
-crosses here — the label by the same predicate `BC_JOIN` applies, the dir as
-one line of UTF-8 text, since the address goes into `BC_SESSION`, onto the
-announce line, and into this file. `dir` must be absolute, which is why the
-session canonicalises it. Re-sourcing the invocation in a child process
-re-runs the whole join, which is how `BASH_ENV` reaches a tree; re-sourcing it
-in a shell already joined is refused by `BC_JOIN` (`already joined`, 125),
-exactly as before.
+It is self-contained — correct with an empty environment — and it passes the
+coordinate as the rig's bash's `$1`: `source file args…` binds positionals
+for the sourced file's duration. `lay` validates the dir as one line of UTF-8
+text, since the address goes into `BC_SESSION`, onto the announce line, and
+into this file; the label is bash's to check, at the join. `dir` must be
+absolute, which is why the session canonicalises it. Re-sourcing the
+invocation in a child process re-runs the joins, which is how `BASH_ENV`
+reaches a tree; re-sourcing it in a shell already joined is refused by
+`BC_JOIN` (`already joined`, 125).
 
 ## Three fifos
 
@@ -173,7 +176,7 @@ and the run knows everything about the shell before it releases it. The
 `[[ -p ]]` check is there because `>` would create a regular file where no
 fifo is; a session that closed unlinked `join`.
 
-**When a process attaches:** at source, from `BC_JOIN` in the invocation. A fork —
+**When a process attaches:** at source, from `BC_JOIN` in the rig's bash. A fork —
 which sourced nothing — attaches on its first `BC_INSTR`: `$BASHPID` is not
 `__BC__OWNER[label]`, so `__bc_reattach` closes the descriptors it inherited
 and runs `__bc_attach`. A silent fork holds its parent's pipe open for as long

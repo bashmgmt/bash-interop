@@ -1,15 +1,64 @@
-//! The run owns its subject: the process group it takes with it however it
-//! ends. Nothing outside that group is signalled.
+//! The run owns its subject: the workspace it lays down, and the process
+//! group it takes with it however it ends. Nothing outside that group is
+//! signalled.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use mb_resolver::bash::rig::{
-    Answer, Driving, Failure, Layout, Message, Reached, Reaching, Reacting, Rig, Setup, Shell,
+    Answer, Driving, Failure, Layout, Message, Reached, Reaching, Reacting, Rig, Shell, Verb,
 };
 
 use crate::support::{bash, Scripts};
-use crate::{behind, gone, report, script, ENTRY, LABEL};
+use crate::{behind, gone, lines, report, script, Keeping, ENTRY, JOIN};
+
+/// A workspace the caller named is left where it was told to, holding the
+/// session's three bash files and none of the fifos: the control fifo goes
+/// when the session closes, and a shell's two when it parts.
+#[tokio::test]
+async fn a_named_workspace_is_left_behind_without_its_fifos() {
+    let temp = tempfile::tempdir().unwrap();
+    let at = temp.path().join("under").join("here");
+    let scripts = Scripts::of(&[
+        (
+            ENTRY,
+            r#"
+            for i in $(seq 1 40); do BC_INSTR KEEP ask step "$i"; done
+            bash "${BASH_SOURCE[0]%/*}/other.bash"
+            ( BC_INSTR KEEP say REC fork )
+            exit 0
+            "#,
+        ),
+        (
+            "other.bash",
+            r#"
+            for i in 1 2 3; do BC_INSTR KEEP ask step "$i"; done
+            exit 0
+            "#,
+        ),
+    ]);
+
+    let ran =
+        Keeping::bash_env().run_at(&at, &bash(scripts.at(ENTRY))).await.unwrap().whole().unwrap();
+
+    assert_eq!(behind(&ran.shells, "REC"), [["fork"]]);
+    assert_eq!(
+        lines(&ran.shells).iter().filter(|message| message.verb == Verb::Ask).count(),
+        43,
+        "two shells asked"
+    );
+
+    let mut left: Vec<String> = std::fs::read_dir(&at)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    left.sort();
+    assert_eq!(
+        left,
+        ["prelude.bash", "rig.bash", "session.bash"],
+        "the bash, and nothing that was a pipe"
+    );
+}
 
 /// A shell asking after the subject exited can never be answered, so the run
 /// takes the whole process group with it.
@@ -76,8 +125,8 @@ struct Boom;
 impl Rig for Exploding {
     type Reaction = Boom;
 
-    fn setup(&self) -> Setup {
-        Setup { label: LABEL.to_string(), bash: String::new() }
+    fn bash(&self) -> String {
+        JOIN.to_string()
     }
 
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Boom, Failure> {

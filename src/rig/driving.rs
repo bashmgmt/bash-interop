@@ -4,6 +4,7 @@
 use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::io;
+use std::path::Path;
 use std::process::{Child, Command};
 use std::sync::Arc;
 
@@ -11,7 +12,7 @@ use tokio::task::LocalSet;
 
 use super::session::Session;
 use super::watch::Watch;
-use super::{Attended, Kept, Layout, Rig, Setup, Shell};
+use super::{Attended, Kept, Layout, Rig, Shell};
 use crate::failure::{Doing, Failure};
 
 /// What a driven run produced.
@@ -68,27 +69,50 @@ pub trait Driving: Rig {
     /// legitimate answer: the shells then join by hand.
     fn environment(&self, at: &Layout) -> Vec<(OsString, OsString)>;
 
+    /// A workspace of the run's own, gone when the run ends.
     async fn run<A: AsRef<OsStr>>(&self, argv: &[A]) -> Result<Run<Kept<Self>>, Failure>
     where
         Self: Sized,
     {
-        LocalSet::new()
-            .run_until(async {
-                let mut session = Session::open(self, None)?;
-
-                // Declared after the session, so it drops before it: leaving
-                // through `?` stops the subject before releasing its files.
-                let environment = self.environment(&session.layout);
-                let mut subject = Subject::spawn(argv, &session.layout, environment)?;
-
-                session.serve(&Watch::process(subject.pid())?).await?;
-                let subject = subject.finish().doing(|| "waiting for bash".into())?;
-                let (shells, failed) = session.close().await;
-
-                Ok(Run { shells, subject: ExitStatus::from(subject), failed })
-            })
-            .await
+        driven(self, None, argv).await
     }
+
+    /// The caller's directory instead — created if missing, left behind: a
+    /// reading taken later may follow source paths into it.
+    async fn run_at<A: AsRef<OsStr>>(
+        &self,
+        at: &Path,
+        argv: &[A],
+    ) -> Result<Run<Kept<Self>>, Failure>
+    where
+        Self: Sized,
+    {
+        driven(self, Some(at), argv).await
+    }
+}
+
+/// The one driven orchestration behind both entries.
+async fn driven<R: Driving, A: AsRef<OsStr>>(
+    rig: &R,
+    at: Option<&Path>,
+    argv: &[A],
+) -> Result<Run<Kept<R>>, Failure> {
+    LocalSet::new()
+        .run_until(async {
+            let mut session = Session::open(rig, at)?;
+
+            // Declared after the session, so it drops before it: leaving
+            // through `?` stops the subject before releasing its files.
+            let environment = rig.environment(&session.layout);
+            let mut subject = Subject::spawn(argv, &session.layout, environment)?;
+
+            session.serve(&Watch::process(subject.pid())?).await?;
+            let subject = subject.finish().doing(|| "waiting for bash".into())?;
+            let (shells, failed) = session.close().await;
+
+            Ok(Run { shells, subject: ExitStatus::from(subject), failed })
+        })
+        .await
 }
 
 /// The two usual answers to [`Driving::environment`], and the enum the
@@ -119,8 +143,8 @@ pub struct Reached<R> {
 impl<R: Rig> Rig for Reached<R> {
     type Reaction = R::Reaction;
 
-    fn setup(&self) -> Setup {
-        self.rig.setup()
+    fn bash(&self) -> String {
+        self.rig.bash()
     }
 
     async fn joined(&self, at: &Layout, shell: Arc<Shell>) -> Result<R::Reaction, Failure> {

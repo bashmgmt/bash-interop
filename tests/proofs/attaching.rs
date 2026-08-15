@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use mb_resolver::bash::rig::{
-    Driving, ExitStatus, Failure, Layout, Message, Reached, Reaching, Rig, Setup, Shell,
+    field, Driving, ExitStatus, Failure, Layout, Message, Reached, Reaching, Rig, Shell,
 };
 
 use crate::support::{bash, Scripts};
@@ -53,17 +53,15 @@ async fn a_fork_that_speaks_is_a_shell_of_its_own_and_parts_on_its_own() {
     assert!(fork_parted < parent.kept[1].stamp.sent_at, "and before the parent's last word");
 }
 
-/// Two labels in one shell are two sessions of one process: a second join
-/// gives it a second pipe, and Rust hears two shells with the same pid. The
-/// second join states its coordinate — the address names the workspace, so
-/// `${BC_SESSION%/*}` is how a script spells it.
+/// Two labels in one shell are two attachments of one process: each join
+/// gives it a pipe of its own, and Rust hears two shells with the same pid.
 struct Twice;
 
 impl Rig for Twice {
     type Reaction = Vec<Message>;
 
-    fn setup(&self) -> Setup {
-        Setup { label: "ONE".to_string(), bash: String::new() }
+    fn bash(&self) -> String {
+        "BC_JOIN ONE \"$1\"\nBC_JOIN TWO \"$1\"\n".to_string()
     }
 
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Vec<Message>, Failure> {
@@ -76,7 +74,6 @@ async fn two_labels_in_one_process_are_two_shells() {
     let scripts = Scripts::of(&[(
         ENTRY,
         r#"
-        BC_JOIN TWO "${BC_SESSION%/*}"
         BC_INSTR ONE say REC one
         BC_INSTR TWO say REC two
         BC_INSTR ONE say REC one-again
@@ -167,5 +164,49 @@ async fn many_shells_announce_at_once() {
         let (i, command) = (&said[1], at.shell.bash.invocation.command.as_deref().unwrap());
 
         assert_eq!(command, format!(": {i} {pad}; BC_INSTR KEEP say REC {i}"), "shell {i}'s own");
+    }
+}
+
+/// Joins with words of its own beside the coordinate.
+struct Bringing;
+
+impl Rig for Bringing {
+    type Reaction = Vec<Message>;
+
+    fn bash(&self) -> String {
+        "BC_JOIN KEEP \"$1\" role worker note 'two words'\n".to_string()
+    }
+
+    async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Vec<Message>, Failure> {
+        Ok(Vec::new())
+    }
+}
+
+/// The words a join brings ride its announcement and land on the shell every
+/// reaction is built with, boundaries intact; a fork, which attaches itself,
+/// announces its label's words too. `key value` pairs are the client's
+/// convention, read with `field` as on any message.
+#[tokio::test]
+async fn the_words_a_join_brings_are_on_the_shell() {
+    let scripts = Scripts::of(&[(
+        ENTRY,
+        r#"
+        BC_INSTR KEEP say REC subject
+        ( BC_INSTR KEEP say REC fork )
+        "#,
+    )]);
+
+    let bringing = Reached { rig: Bringing, reaching: Reaching::BashEnv };
+    let ran = bringing.run(&bash(scripts.at(ENTRY))).await.unwrap().whole().unwrap();
+
+    assert_eq!(ran.shells.len(), 2, "{}", report(&ran.shells));
+    for at in &ran.shells {
+        assert_eq!(
+            at.shell.brought,
+            ["role", "worker", "note", "two words"],
+            "pid {}",
+            at.shell.pid
+        );
+        assert_eq!(field(&at.shell.brought, "role"), Some("worker"));
     }
 }

@@ -7,12 +7,12 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use mb_resolver::bash::rig::{
-    Answer, Driving, ExitStatus, Failure, Layout, Message, Reached, Reaching, Reacting, Rig, Setup, Shell,
+    Answer, Driving, ExitStatus, Failure, Layout, Message, Reached, Reaching, Reacting, Rig, Shell,
     Verb,
 };
 
 use crate::support::{bash, Scripts};
-use crate::{behind, gone, report, script, ENTRY, LABEL};
+use crate::{behind, gone, report, script, ENTRY, JOIN};
 
 /// Fails the first time it is given a message of the kind it breaks on.
 struct Breaking {
@@ -27,8 +27,8 @@ struct Breaks {
 impl Rig for Breaking {
     type Reaction = Breaks;
 
-    fn setup(&self) -> Setup {
-        Setup { label: LABEL.to_string(), bash: String::new() }
+    fn bash(&self) -> String {
+        JOIN.to_string()
     }
 
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Breaks, Failure> {

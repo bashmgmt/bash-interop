@@ -169,6 +169,12 @@ pub struct Shell {
 
     pub bash: Bash,
     pub options: Options,
+
+    /// The words its join carried — `BC_JOIN <label> <dir> word…` — verbatim,
+    /// and empty where the join brought none. An arglist like a message's:
+    /// `key value` pairs are a convention a client reads with
+    /// [`field`].
+    pub brought: Vec<String>,
 }
 
 impl Shell {
@@ -188,6 +194,8 @@ impl Shell {
 
         let flags = word("flags")?;
         let command = word("command")?;
+        let brought = parse_array(&word("brought")?)
+            .map_err(|cause| broken(format!("the brought words: {cause}")))?;
 
         Ok(Self {
             nth,
@@ -210,6 +218,7 @@ impl Shell {
                 bashopts: split("bashopts")?,
                 flags: Flags(flags),
             },
+            brought,
         })
     }
 }

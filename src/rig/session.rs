@@ -38,7 +38,7 @@ impl<'r, R: Rig> Session<'r, R> {
     /// descriptor limit is raised to the hard one, since every attached shell
     /// holds one.
     pub(super) fn open(rig: &'r R, at: Option<&Path>) -> Result<Self, Failure> {
-        let setup = rig.setup();
+        let bash = rig.bash();
         let (at, temporary) = match at {
             Some(at) => (at.to_path_buf(), None),
             None => {
@@ -55,7 +55,7 @@ impl<'r, R: Rig> Session<'r, R> {
 
         raise_descriptor_limit()?;
         let control = Control::open(&dir)?;
-        let address = wire::lay(&dir, &setup)?;
+        let address = wire::lay(&dir, &bash)?;
         let (closing, _) = watch::channel(false);
 
         Ok(Self {
