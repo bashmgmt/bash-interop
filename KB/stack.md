@@ -98,7 +98,7 @@ pub struct Columns<'a> { pub skip: usize, pub pwd: &'a str, pub funcs: &'a str,
 impl<'a> Columns<'a> {
     pub fn of(words: &'a [String]) -> Result<Self, Failure>;
 
-    /// Against the shell the walk was taken in — see `tree.md`.
+    /// Against the shell the walk was taken in — see `shell.md`.
     pub fn frames(&self, shell: &Bash) -> Result<Stack, Failure>;
 }
 ```
@@ -243,8 +243,8 @@ it, and where it is checked without running bash.
 | `BASHCAP` (`src/bashcap/`) | 2 | under `--trace-calls` |
 | `BASHPROF_TIMETHIS` (`tests/examples/bashprof.rs`) | 2 | whatever the shell has |
 
-Both reach it through `bash::STACK`, prepended to their own bash in
-`Rig::bash`.
+Both reach it through `stack::with_walk`, which puts it in front of their own
+bash in `Setup::bash`.
 
 ## See also
 

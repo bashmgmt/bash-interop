@@ -1,39 +1,94 @@
 # Measurements and limits
 
-Numbers measured on this machine, the bash constraints that bound the design,
-and what each proof establishes.
+Numbers measured on this machine (Linux 6.x, bash 5.3.9), the bash and kernel
+constraints that bound the design, and what each proof establishes.
 
-## The `PIPE_BUF` boundary
-
-Eight shells writing to one FIFO, one `printf` per line, 160 lines expected:
-
-| bytes written per line | intact | corrupt |
-|---:|---:|---:|
-| 3901 | 160 | 0 |
-| 4096 | 160 | 0 |
-| 4097 | 114 | **46** |
-| 9001 | 123 | **37** |
-
-`PIPE_BUF` is 4096, and the boundary is sharp: at or below it a write lands
-whole; one byte past it, concurrent writers interleave.
-
-**The boundary is bytes and bash counts characters.** `${#text}` and
-`${text:from:room}` are character operations in a multibyte locale, so a limit
-expressed in characters bounds nothing: 3900 characters of UTF-8 is up to
-15600 bytes. Two widths follow.
+## The kernel, on fifos
 
 | | |
 |---|---|
-| `__BC__narrow` = `(4096 - 24) / 4` = 1018 | characters, safe in any encoding — a character is at most four bytes and the header and delimiter are under 24 |
-| `4096 - ${#head} - 4` | bytes, exact, used inside `__bc_frame` under `LC_ALL=C` |
+| a reader opens `O_RDONLY\|O_NONBLOCK`, **no writer has ever attached** | quiet — *not* `POLLHUP`, not for 300 ms |
+| a writer attaches, no data | still quiet |
+| a writer writes | `POLLIN` |
+| a writer writes and exits | `POLLIN\|POLLHUP`, data intact |
+| all writers gone, having attached | `POLLHUP` |
+| a **non-blocking** reader open | unblocks a **blocking** writer open |
+| parent exits, a subshell still holds the inherited fd | `POLLIN` only — `POLLHUP` waits for the subshell |
+| a reader opens then closes | the blocked writer unblocks, and its next write takes `SIGPIPE` |
 
-The narrow lane exists because taking `LC_ALL` costs about 7 µs per message,
-measured against 3 µs for the same function without it. A message that fits
-1018 characters skips that and is written where it is built.
+> **`POLLHUP` means "a writer attached and all writers are now gone".**
 
-## Cost in bash
+There is no ambiguity between *not yet* and *no longer*, and no state to keep
+beside the pipe. This is why end of input on a shell's pipe is its goodbye, and
+why the blocking `exec {fd}>up.$tok` is the rendezvous.
 
-Per message, inside bash, minimum of seven runs of 4000:
+## tokio, on the same
+
+Verified with a scratch crate on tokio 1.53, current-thread runtime:
+
+| | |
+|---|---|
+| `pipe::OpenOptions::new().read_write(true).open_receiver(join)` | quiet with no writer; a writer that wrote and left leaves it **open** — no end of input |
+| `pipe::OpenOptions::new().open_receiver(up)` — `O_RDONLY\|O_NONBLOCK` | quiet with no writer ever; a bash that attached, wrote three lines and exited yields the three lines then end of input |
+| a bash blocked in `exec 9>up` | released by `open_receiver`, exactly when it was opened |
+| `pipe::OpenOptions::new().open_sender(rep)` with no reader | `ENXIO` immediately |
+| `Sender::write_all` of 100 KB to a bash `read` | completes; bash reads 100 000 bytes |
+| `AsyncFd<pidfd>::readable()` | wakes when the process exits |
+| `AsyncFd<read end>::readable()` when the writer closes | wakes, `is_read_closed` |
+
+The whole descriptor layer is stock tokio and nothing is hand-rolled.
+
+## What things cost from bash
+
+| | µs |
+|---|---|
+| `( : )` — a subshell | 341 |
+| `bash -c ':'` | 1471 |
+| `bash -c ':'` with a 200-line `BASH_ENV` | 1884 |
+| `exec {fd}>fifo` + close, a reader present | 8 |
+| `printf` one message to a fifo | 12 |
+| **`mkfifo` — this box's, which is uutils in Rust** | **2088** |
+| `mkfifo` — GNU coreutils' (`/bin/true` measured 680) or busybox's | ~600 |
+| a static 800 KB `mkfifo` — the floor: fork plus a bare exec | 514 |
+
+**Bash has no builtin that makes a fifo.** `mkfifo`, `mknod`, `mkdir` and `ln`
+are all external commands; the loadable `mkfifo` builtin is not shipped by
+default anywhere; and every fork-free way to *wait* for a fifo the run would
+make instead fails to one wall — a fifo gives one process a non-consuming wait
+only through `open`, and a shared `open` cannot say which shell it releases.
+So a shell that attaches forks once, and that is the one cost of a pipe per
+shell: paid at source by every bash process under `BASH_ENV`, and by every
+fork that speaks. Asks fork for nothing.
+
+## The token
+
+| | unique |
+|---|---|
+| `$BASHPID.${EPOCHREALTIME#*[.,]}` | 2000 / 2000 |
+| the same plus `${SRANDOM:-$RANDOM$RANDOM}` | 2000 / 2000 |
+
+over 2000 tokens from nested subshells, background forks and child processes.
+One process's clock advances between two reads (measured 4 µs apart). `SRANDOM`
+is 5.1+ and fresh per subshell; `RANDOM` is reseeded per subshell in 5.x and
+inherited before 5.0. A duplicate token fails at `mkfifo` in the shell that
+chose it, and Rust keys nothing on it.
+
+## Loopback TCP, measured and rejected
+
+`/dev/tcp/127.0.0.1/<port>` would remove every fifo, the fork and the
+rendezvous: `printf` to it costs 13 µs against a fifo's 12, and a connect 46 µs.
+But bash cannot set `TCP_NODELAY`, and a shell that writes twice and then asks
+hits Nagle against the receiver's delayed ACK:
+
+| write, write, ask, read | µs per round |
+|---|---|
+| over loopback TCP | **41 015** |
+| over loopback TCP with the receiver re-arming `TCP_QUICKACK` on every read | 63 |
+| over two fifos | 33 |
+
+## Cost in bash, per message
+
+Minimum of seven runs of 4000:
 
 | | µs |
 |---|---|
@@ -43,37 +98,10 @@ Per message, inside bash, minimum of seven runs of 4000:
 | sending through one bash function | 28 |
 
 Message assembly dominates either way, and a tool reading real state costs
-far more: a full `bashcap` snapshot is ~480 µs, so the 7 µs difference between
-an inlined send and a function call is under two percent of what an
-instrumented call site actually costs.
-
-Joining — the first `say` in a new shell — opens the pipe and sends one
-message, the shell's account of itself: ~300 bytes, one message per shell and
-never again. A fork costs ~1 ms, so a shell that joins pays under three percent
-of what it cost to exist.
-
-Once per shell rather than once per message, and measured against the
-alternative. Two more header words on every message cost **+5.9 µs** each with
-the version computed at source time and **+9.4 µs** without — where the wide
-lane's locale switch costs ~7 µs and the narrow lane exists to avoid it. The
-version also cannot change while a shell lives, so a per-message copy would be
-pure repetition. What *does* change while a shell runs — `$PWD` — rides with
-the walk instead, which is where it is read.
-
-**Nothing about the shell rides on a message.** `parent`, `$SHLVL` and
-`$BASH_SUBSHELL` moved into the account for the same reason as the version:
-none of them can change while a shell lives, a subshell having a `$BASHPID` of
-its own and so joining as a shell of its own. What is left in front of a
-client's arglist is the kind and one `at=` clock — about 25 bytes and two
-`printf` arguments less per message than carrying them.
-
-### The one-frame lane
-
-`say` is two bash function calls and returns after one write. Over 4000 of
-them, against a floor of 1.8 µs for the bare loop, that measures **32.9
-µs/op**; inlining `__bc_send` into the `say` arm as well measures 31.5, and
-the remaining 1.4 µs costs a second copy of packing and shipping, which `ask`
-and `join` still need.
+far more: a full `bashcap` snapshot is ~480 µs. Nothing about the shell rides
+on a message — its pid, `$SHLVL`, `$BASH_SUBSHELL` and version are in the
+account, said once — and what is left in front of a client's arglist is the
+verb and one `at=` clock.
 
 ## The frame walk
 
@@ -86,8 +114,7 @@ they are. Depth 8, three arguments per frame, 4000 iterations, empty-loop floor
 | rows, with the argument walk in bash | 201 | 522 |
 | six raw `${arr[*]@Q}` expansions | 21 | 314 |
 
-The bytes are the second `@Q`: nesting re-escapes every quote, and the payload
-counts against `__BC__limit`. See [stack.md](stack.md).
+See [stack.md](stack.md).
 
 ## What a function layer costs an instrument
 
@@ -104,60 +131,20 @@ of three, BEGIN payload in bytes by how many measured calls enclose it:
 | 3 | 697 | 2244 |
 | **per level** | **~113** | **~566** |
 
-Four frames per level rather than one, and the bytes are mostly the *sources*
-column: each frame repeats the instrument's own path.
-
 **What costs this is a layer that is still on the stack while the measured call
-runs.** A layer that returns first does not: `__bp_begin` sends the BEGIN and
-returns before `"$@"`, so it stands in its own walk and in nobody else's. Four
-levels of `BASHPROF_TIMETHIS`, deepest first:
-
-```
-funcs: ('__bc_stack' '__bp_begin' 'BASHPROF_TIMETHIS' 'd3' 'BASHPROF_TIMETHIS'
-        'd2' 'BASHPROF_TIMETHIS' 'd1' 'BASHPROF_TIMETHIS' 'main')
-skip : 3
-```
-
-| enclosing measurements | 0 | 1 | 2 | 3 |
-|---|---:|---:|---:|---:|
-| BEGIN payload, bytes | 261 | 342 | 415 | 492 |
-
-~77 bytes and one frame per level, and the two extra calls per measurement cost
-**~1.0 µs each** (200 000 iterations of an empty function against an empty loop
-body, bash 5.3.9) against the ~7 µs the locale switch on the wide lane already
-costs.
-
-At one frame per level, a walk 100 deep is a 17 kB payload in five frames.
+runs.** `__bp_begin` sends the BEGIN and returns before `"$@"`, so it stands in
+its own walk and in nobody else's — ~77 bytes and one frame per level. Two
+extra calls per measurement cost ~1.0 µs each.
 
 ## What a callee's frame gives back
 
-Both measured on bash 5.3.9, and both are why no instrument in the crate saves
-and restores a name by hand.
-
 **`local` restores what was there, including *unset*.** A callee taking
-`local IFS=":"` leaves an unset `IFS` unset and an empty one empty; the
+`local IFS=' '` leaves an unset `IFS` unset and an empty one empty; the
 distinction a manual restore has to make by hand, bash makes itself.
 
-**A command-prefix assignment scopes to the call.** `LC_ALL=C __bc_frame …`
-gives the callee the variable for its own frame, restores the previous state —
-unset included — and reaches expansions inside it, including through a `local
--n` nameref: `IFS=" " walk got` produces `('walk' 'outer')` from
-`"${FUNCNAME[*]@Q}"` while the caller's `IFS` is `:`.
-
-## The split path
-
-One message of 40 kB, ten frames, per message:
-
-| | µs |
-|---|---:|
-| length recomputed each turn, characters | 8793 |
-| length hoisted, characters | 6805 |
-| length hoisted, bytes (`LC_ALL=C`) | **1401** |
-
-Recomputing `${#text}` in the loop condition is quadratic and costs a fifth of
-it. The rest is the slice: `${text:from:room}` counts characters from the
-start of the string, so every chunk rescans everything before it. Under
-`LC_ALL=C` the offset is a byte offset and there is nothing to scan.
+**A command-prefix assignment scopes to the call**, restores the previous
+state — unset included — and reaches expansions inside it, including through a
+`local -n` nameref.
 
 ## Cost of a snapshot
 
@@ -168,23 +155,6 @@ snapshot — the whole path, bash through the wire to the decoded JSON:
 |---|---:|---:|
 | the walk assembled in bash | 572 µs | 737 µs |
 | the walk shipped as columns | 482 µs | 527 µs |
-
-Arguments used to cost 165 µs a snapshot and now cost 45: what is left is the
-two extra expansions and the wider payload, rather than a loop.
-
-## Cost end to end
-
-300 operations each:
-
-| | polling at 200 µs | on `poll` |
-|---|---|---|
-| `say` | 85 µs | 56 µs |
-| `ask` | 333 µs | 98 µs |
-
-Against ~28 µs of bash work, an ask under the polling loop spent the
-remainder waiting on the operator's own timer. The loop polled because it had
-to notice the child exiting as well as read the pipe; a `pidfd` makes the exit
-a readable descriptor, so one `poll` covers both and the interval disappears.
 
 ## Memory
 
@@ -200,86 +170,92 @@ arrives. Resident memory does not track the run:
 ## What the proofs establish
 
 `tests/proofs/`, over the public API only. Each spawns real bash to cover one
-mechanism that cannot be checked by reading the source — everything that can
-be is left to the compiler. One file per subject.
+mechanism that cannot be checked by reading the source. One file per subject.
+
+| `attaching.rs` | establishes |
+|---|---|
+| `a_shell_that_speaks_once_and_leaves_loses_nothing` | a `bash -c` that joins, says one thing and exits within microseconds loses nothing: the blocking open is the rendezvous |
+| `a_fork_that_speaks_is_a_shell_of_its_own_and_parts_on_its_own` | a fork takes a pipe of its own, its `parted` precedes the parent's, and the parent's words stay the parent's |
+| `two_labels_in_one_process_are_two_shells` | `BC_JOIN` twice is two pipes and two shells with one pid |
+| `a_label_nobody_joined_is_an_error_by_absence` | `BC_INSTR NOPE …` names the label and the call site, returns 125, and the run knows nothing |
 
 | `transport.rs` | establishes |
 |---|---|
-| `every_descendant_shell_reaches_the_wire` | subshells, command substitutions and child processes all reach the pipe; five shells, one root, three deep, and `SHLVL` never drops toward a descendant |
-| `concurrent_writers_never_interleave` | 8 writers × 80 messages, half of them 9000 bytes, arrive whole |
-| `nothing_is_lost_at_the_end` | 200 messages written immediately before exit are readable after the subject is gone |
-| `a_newline_inside_a_value_is_escaped_not_framed` | a value containing `\n` arrives as one message, not two frames |
+| `every_descendant_shell_reaches_the_run` | subshells, command substitutions and child processes are all shells; five of them |
+| `many_shells_at_once_arrive_whole_and_apart` | 8 shells × 80 messages, half 9000 bytes, each pipe carries one shell's words |
+| `a_message_of_wide_characters_arrives_whole` | 6000 `€` per message, longer than a pipe's atomic write, character for character |
+| `nothing_is_lost_at_the_end` | 200 messages written immediately before exit are read after the subject is gone |
+| `a_newline_inside_a_value_is_escaped_not_a_line` | a value containing `\n` arrives as one word |
 
 | `transparency.rs` | establishes |
 |---|---|
 | `a_signalled_subject_is_reported_and_loses_nothing` | `Signal(15)`, `.shell_code() == 143`, and what was said before the signal survives |
-| `a_clients_own_trap_and_ifs_are_untouched` | a client's own `EXIT` trap and `IFS` survive a message going out |
+| `a_clients_own_trap_and_ifs_are_untouched` | a client's own `EXIT` trap and `IFS` survive a message going out; the version read back under `IFS=,` |
+| `a_clients_own_locale_is_untouched_by_a_wide_message` | `LC_ALL` before and after a 9000-byte message |
 
 | `answering.rs` | establishes |
 |---|---|
-| `a_session_survives_every_way_of_answering` | 57 asks across two shells, every answer form, one deliberately slow, mixed with a message too wide for one frame |
+| `a_session_survives_every_way_of_answering` | 57 asks across ten shells, every answer form, one deliberately slow, one 100 KB, mixed with a message too wide for one write |
+| `an_answer_may_wait_on_another_shells_word` | an answer awaiting a `Notify` that another shell's `hear` triggers completes — serving is concurrent |
 
 | `starting.rs` | establishes |
 |---|---|
-| `the_rigs_word_reaches_every_shell_and_so_does_the_callers_environment` | `Rig::bash` puts the rig's word in the subject and a child it starts, and a variable the caller put in the command line with `env` is inherited the same way |
+| `the_rigs_word_reaches_every_shell_and_so_does_the_callers_environment` | `Setup::bash` puts the rig's word in the subject and a child it starts; a variable set with `env` is inherited the same way |
 | `the_command_line_is_run_as_asked` | the run starts the program the argv names, with nothing appended |
+| `a_subject_may_join_by_hand_where_it_chooses` | `env -u BASH_ENV`, then `source "$BC_SESSION/prelude.bash"`; children that sourced nothing are not shells |
+
+| `serving.rs` | establishes |
+|---|---|
+| `a_shell_that_joined_is_heard_until_it_lets_go` | a client's words and its subshell's arrive; the session ends with the handle; the client's status is its own |
+| `a_shell_the_session_outlived_is_left_to_its_own_devices` | a client that released the handle while running has `parted: None`, and its next word takes `SIGPIPE` |
+| `a_joined_shell_may_publish_the_address_to_its_children` | exporting `BASH_ENV` to the prelude reaches a child process |
+| `a_shell_says_what_it_is_rather_than_being_guessed_at` | an interactive shell joins by sourcing, and says `-i`, `-s`, no command line |
 
 | `owning.rs` | establishes |
 |---|---|
-| `a_named_workspace_is_left_behind` | `run_in` leaves its prelude and its pipe where it was told to |
-| `every_reply_pipe_goes_with_its_answer` | 43 asks from two shells leave no reply pipe behind |
-| `a_workspace_belongs_to_one_run` | a second run in the same directory stops at the up pipe |
+| `a_named_workspace_is_left_behind_without_its_fifos` | a kept workspace ends with `prelude.bash` and `rig.bash` and nothing that was a pipe |
 | `a_shell_left_asking_does_not_outlive_the_run` | the run does not wait for a straggler, and the straggler does not survive it |
-| `a_panicking_answer_kills_the_subject` | the same guarantee reached by unwinding, naming the blocked pid |
+| `a_shell_outside_the_group_is_heard_and_never_signalled` | a `setsid` shell is heard, has `parted: None`, and is alive after the run |
+| `a_panicking_answer_kills_the_subject` | the panic propagates out of `run`, and the blocked subject is gone |
 
 | `malformed.rs` | establishes |
 |---|---|
-| `an_unfinished_message_is_reported_beside_the_subjects_status` | a message whose last chunk never comes is reported as `Run::failed`, the subject's own status survives it, and the messages around it arrive |
-| `a_message_that_will_not_read_ends_the_run` | a chunk claiming another message's key corrupts it, and the reader refuses it rather than handing on nonsense |
+| `a_line_cut_short_by_a_shell_that_left_ends_the_run` | a fork that exits mid-line ends the run naming the line |
+| `a_line_cut_short_at_the_end_is_reported_beside_the_subjects_status` | the same left by a shell the session outlived is `Run::failed`, beside the subject's status |
+| `a_line_that_will_not_read_ends_the_run` | `(junk` ends the run quoting it |
+| `an_account_out_of_place_ends_the_run` | a second `JOIN` line is not a message |
 
 | `failing.rs` | establishes |
 |---|---|
 | `a_rig_that_cannot_answer_ends_the_run_and_kills_the_subject` | `run` yields the rig's reason, and the shell blocked on the ask does not outlive it |
-| `a_reply_pipe_name_already_taken_is_the_subjects_to_handle` | `mkfifo` is one attempt: a name something else left is refused at the subject's call site rather than adopted |
-| `a_failure_while_hearing_ends_the_run_and_kills_the_subject` | the same for a message nobody was waiting on, without waiting out a subject that would have slept 30 seconds |
+| `a_failure_while_hearing_ends_the_run_and_kills_the_subject` | the same for a message nobody was waiting on, promptly, while another shell asks in a loop |
 | `an_unknown_verb_is_reported_rather_than_ignored` | a verb the protocol does not define is named on stderr and returns 125 |
 
 Bash-level invariants that hold without running anything are asserted against
 the shipped text instead, and live beside it: the protocol's in
 `src/bash/rig/wire/mod.rs`, each tool's in its own tests.
 
-Every assertion reads messages as **words**, not as a joined string: word
-boundaries are what the wire preserves, and comparing joined text would give
-that away.
-
 ## Bash constraints that bound the design
 
-**Traps do not compose.** Bash allows one handler per signal. Contributing an
-`EXIT`/`ERR`/`DEBUG` fragment therefore means adopting whatever handler the
-client already installed, which means capturing its text and replaying it —
-`eval` — and a client that installs one *after* the prelude runs silently
-replaces the result unless the `trap` builtin is shadowed too. This is why
-provenance and exit are carried by messages and `wait()` rather than by a
-handler.
+**Traps do not compose.** Bash allows one handler per signal, so contributing
+an `EXIT`/`ERR`/`DEBUG` fragment means adopting whatever handler the client
+installed. This is why provenance and exit are carried by lines and by the
+kernel rather than by a handler.
 
 **A subshell resets caught traps.** Anything buffered in a `( … )` and flushed
-from `EXIT` is lost. Combined with `kill -9` and with a single unparsable line
-poisoning a batch, this is why a message is written where it is produced
-rather than accumulated: each of those costs one message instead of a run.
+from `EXIT` is lost. This is why a message is written where it is produced
+rather than accumulated.
 
-**`$?` must be read as a frame's first statement.** `local a=$1 b=${x[$a]}`
-does not work: bash expands every right-hand side before assigning any of
-them.
+**`$?` must be read as a frame's first statement.**
 
-**A bash arithmetic *command* is false when its result is 0.** `(( at += n ))`
-returns 1 whenever the running total is still 0, which under the subject's own
-`set -e` ends the script part-way through a snapshot. `x=$(( x + n ))` has no
-such status. This is why no instrument in the crate counts in bash.
+**A bash arithmetic *command* is false when its result is 0.** `x=$(( x + n ))`
+has no such status. This is why no instrument in the crate counts in bash.
 
 **Under `extdebug`, a `DEBUG` handler returning non-zero skips the command it
-fired for.** An instrument propagating `$?` faithfully would skip everything
-after a failure; the handler must return 0, and bash restores `$?` for the
-next command itself.
+fired for.** The handler must return 0.
 
-**A pipe write is atomic only up to `PIPE_BUF`** — see above. This is the one
-constraint that shows through into the wire format, as the `+`/`.` marker.
+**Enabling `extdebug` while `BASH_ENV` is being read starts the debugger.**
+`bashcap`'s trace arms itself from a `DEBUG` trap on the next command, which
+must be the subject's — so its join comes before the trap.
+
+**`mkfifo` is not a builtin.** See above.

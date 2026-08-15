@@ -151,7 +151,7 @@ impl fmt::Display for Frame {
 /// one of them, and a walk that reaches no frame is refused where it is read.
 ///
 /// One array in JSON, and one field wherever an instrument reports where it
-/// was. Which frame is the call site is [`at`](Stack::at), not a second field
+/// was. Which frame is the call site is [`top`](Stack::top), not a second field
 /// beside the rest.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Stack {

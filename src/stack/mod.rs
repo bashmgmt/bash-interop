@@ -11,7 +11,7 @@ pub use columns::{Args, Columns};
 pub use frame::{Frame, Site, Source, Stack};
 
 /// `__bc_stack`, which ships the five arrays. Private: an instrument reaches
-/// it through [`with`], which is what puts it in the right place.
+/// it through [`with_walk`], which is what puts it in the right place.
 const BASH: &str = include_str!("stack.bash");
 
 /// The frame walk, and a tool's own bash after it — the order the shells

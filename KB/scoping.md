@@ -85,7 +85,8 @@ exactly that frame:
 
 ```bash
 __bc_capture() { local IFS=' '; … }     # every join below is [*]@Q
-__bc_join()    { local IFS=' '; … }     # the version is "(${BASH_VERSINFO[*]@Q})"
+__bc_account() { local IFS=' '; … }     # the version is "(${BASH_VERSINFO[*]@Q})"
+__bc_send()    { local IFS=' '; … }     # the line is "(${*@Q})"
 ```
 
 `local IFS=' '` is released on return, **including where the subject had `IFS`
@@ -204,6 +205,6 @@ local __rc=$?
 ## See also
 
 - [measurements.md](measurements.md#bash-constraints-that-bound-the-design) —
-  traps, `PIPE_BUF`, `extdebug`, and the rest of what bounds the bash design
+  traps, `extdebug`, `mkfifo`, and the rest of what bounds the bash design
 - [wire.md](wire.md) — the guards, which are aliases so that `return` acts in
   the frame that failed

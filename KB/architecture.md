@@ -20,7 +20,7 @@ capability is built from what is left.
 
 ```
 value ─┬─ shell ─┬─ stack        bash's five parallel arrays, read back
-       │         └─ rig          the session: a wire, a workspace, reactions
+       │         └─ rig          the session: a workspace, a pipe and a task per shell, reactions
        └─────────────┘
 ```
 
@@ -46,7 +46,7 @@ property of the shell, and the shell is the only thing that knows.
 
 ### 1. A message is an arglist, in both directions
 
-Not a schema, not a struct, not a serialisation format. `BC_INSTR say a b c`
+Not a schema, not a struct, not a serialisation format. `BC_INSTR L say a b c`
 ships three words; a rig gets three words. Any width, zero included, and the
 protocol reads no position of one.
 
@@ -81,36 +81,44 @@ run_bash_env --into out make test` work: every recipe shell `make` starts joins
 by itself.
 
 So the run lays two files into a workspace — the protocol's bash and the rig's
-— and points `BASH_ENV` at the first. Nothing is templated into either: the
-prelude finds its own workspace from `${BASH_SOURCE[0]%/*}`, which means the
-shipped file is real bash that can be read and checked directly.
+— exports `BC_SESSION=<dir>` and `BASH_ENV=<dir>/prelude.bash`, and starts the
+command line. Nothing is templated into either file: the prelude finds its own
+workspace from `${BASH_SOURCE[0]%/*}`, which means the shipped file is real
+bash that can be read and checked directly.
 
 The command line is then free to be exactly what the caller wrote, program
 included: `&["env", "TARGET=staging", "bash", "x.bash"]` needs no support from
-the run.
+the run, and `&["env", "-u", "BASH_ENV", "bash", "x.bash"]` is a subject that
+sources `"$BC_SESSION/prelude.bash"` where it chooses.
 
-### 4. A rig is a description; a reaction is per shell
+### 4. A rig is a description; a reaction is per shell, and a task
 
 ```rust
-trait Rig      { type Reaction: Reacting;  bash();  workspace();  joined(&Layout, Arc<Shell>) }
-trait Reacting { type Kept;  hear(Message);  answer(Message) -> Answer;  finish() -> Kept }
+trait Rig      { type Reaction: Reacting;  setup() -> Setup;  async joined(&Layout, Arc<Shell>) }
+trait Reacting { type Kept;  async hear(Message);  async answer(Message) -> Answer;  async finish() -> Kept }
 ```
 
-A shell's first message is its account of itself: which bash, how it was given
-its code, where it sits, what it had switched on. None of that can change while
-the shell lives — a subshell gets its own `$BASHPID` and joins as a shell of its
-own, and `set` refuses `-i`, `-c` and `-s`. So it is said once, and the reaction
-built from it holds it as a **member from construction** rather than looking it
-up per message.
+Every shell has a pipe of its own, so which shell said something is which pipe
+it came out of, and every pipe has a task of its own: read a line, react,
+maybe answer, until end of input. The first line on a pipe is the shell's
+account of itself: which bash, how it was given its code, where it sits, what
+it had switched on. None of that can change while the shell lives — a subshell
+gets its own `$BASHPID` and joins as a shell of its own, and `set` refuses
+`-i`, `-c` and `-s`. So it is said once, and the reaction built from it holds
+it as a **member from construction**.
 
-Owning a reaction is the proof that its shell announced itself; there is no
-other way to construct one. A message from a pid that never joined therefore
-cannot reach a reaction at all — it is a fault, and the run says so.
+Owning a reaction is the proof that its shell announced itself; a message
+reaches it only down that shell's own pipe.
 
-What comes back is one entry per shell, `Attended { shell, kept }`, and the
-provenance is the *shape*: no second list to cross-reference, nothing that could
-disagree with it. `heard` flattens it back to arrival order when a reading wants
-the run whole.
+The session is **single-threaded and concurrent**: one `current_thread`
+runtime, `spawn_local` per shell, no `Send` bound anywhere. What one shell's
+reaction awaits — a slow answer, a 100 KB reply, a file opened at `joined` —
+holds up nothing but that shell. `Rc<RefCell<_>>` is a share; the borrow is
+never held across an `.await`.
+
+What comes back is one entry per shell, `Attended { shell, kept, parted }`, and
+the provenance is the *shape*. `heard` flattens it back into the order it was
+said — the sending shells' own clocks — when a reading wants the run whole.
 
 **Neither trait has a default body.** A default is a decision an implementor did
 not make and cannot see; `Answer::unknown()` names the one the old default made
@@ -124,7 +132,7 @@ opinion on one.
 
 `Driving` runs a command line and owns its process group. `Serving` hands its
 address to a bash script that started the server and serves while that script
-holds the handle. Both are traits extending `Rig` with one provided method, so
+holds the handle. Both are traits extending `Rig` with one provided `async fn`, so
 a rig declares which orchestrations it supports by implementing them, and its
 reaction is the same code either way.
 
@@ -134,14 +142,15 @@ traits do:
 
 ```
 bashprof run_bash_env --into build.times -- make test
-bashprof serve        --into build.times      # started by BC_JOIN, from a script
+bashprof serve        --into build.times      # started by BC_START, from a script
 ```
 
 One sentence covers both ends: **a session lasts as long as anyone who could
 still speak.** `Watch` is a descriptor — a pidfd, or the handle an initiator
 holds — and it is only ever *watched*. Signalling and reaping belong to whoever
-started the thing being watched, which is never the serving loop. That is what
-lets one loop serve both.
+started the thing being watched, which is never the session. That is what lets
+one session serve both. Under `Driving` the group is killed before the session
+closes, so every task reads what its shell wrote up to the kill.
 
 Nothing inside a rig ends a session. A rig reacts; a `Failure` from it means it
 could not do its work, not that it is finished.
@@ -158,11 +167,11 @@ could not do its work, not that it is finished.
 | no `eval` | nothing of the subject's is re-parsed |
 | its own exit status | a wrapped script is indistinguishable from an unwrapped one |
 
-Two exceptions, both deliberate and both measured. `expand_aliases` is turned
-on and stays on, because the error guards must be aliases — `return` has to act
-in the frame that failed. And `LC_ALL` is taken `local` for the length of one
-wide frame, so framing counts the bytes `PIPE_BUF` counts; it is restored before
-the send returns and the subject runs nothing of its own in between.
+One exception, deliberate: `expand_aliases` is turned on and stays on, because
+the error guards must be aliases — `return` has to act in the frame that
+failed. `IFS` is taken `local` inside two of the protocol's own functions so
+`[*]` joins with a space, and the subject's — unset included — is back on
+return.
 
 Because the protocol may not use `set -e`, every command in it that can fail is
 followed by `|| __BC_BAIL` or `|| __BC_THROW`. A fault of ours is then reported
@@ -172,21 +181,19 @@ mid-message.
 
 ## What the transport gives every tool
 
-Provenance, ordering, the process forest, subshell capture, concurrent-writer
-integrity and a control channel — none of which a tool implements again:
+Provenance, ordering, subshell capture, lifetimes and a control channel — none
+of which a tool implements again:
 
-- **Every shell opens the pipe itself, by name.** Nothing is inherited, so no
-  descriptor has to survive a fork and a client's own use of an fd cannot
-  collide. `$BASHPID != $__BC__owner` detects a fork, so a `( … )` or `$( … )`
-  rejoins with its own descriptor and its own sequence counter.
-- **One frame is one atomic write** under `PIPE_BUF`, so concurrent writers
-  cannot interleave; anything wider is chunked under a shared `(pid, seq)` key
-  and rejoined as bytes.
+- **Every shell has a pipe of its own**, made by the shell, opened by the run:
+  the blocking open is the rendezvous, and end of input is the goodbye. A
+  `( … )` or `$( … )` that speaks takes a pipe of its own on its first word.
+- **A line is a message.** One writer per pipe, so nothing interleaves and no
+  write need be atomic; there is no frame.
 - **Both clocks on every message**: the sending shell's `$EPOCHREALTIME` and the
   run's own. A span is the interval between two of them, which is why nothing is
-  timed in bash.
-- **A run-wide arrival counter**, because a per-shell fold keeps its own order
-  and nothing else.
+  timed in bash; the sender's clock is what orders a run.
+- **A label per session**, in bash, so one process can hold several; Rust is
+  never told it.
 
 ## The tools are compositions, not special cases
 
@@ -206,16 +213,17 @@ and no tool runs unprofiled; the same script under the tool measures itself. See
 | | why |
 |---|---|
 | a session-wide accumulator in the library | what a run produces is the client's; `Vec<Message>` and `()` are the only two shipped |
-| a timer, an interval, a heartbeat | serving ends when nobody who could speak is left, and that is a descriptor |
+| a timer, an interval, a heartbeat | serving ends when nobody who could speak is left, and that is a descriptor; tokio's `time` feature is not enabled |
 | a closing word or reserved payload word | the handle says when it is over, so nothing in the loop intercepts a message |
 | a poisoned or degraded mode | an answer that says no is a command returning non-zero, like any other |
-| parallelism in the serving loop | one pipe, one reader; the cost is bash's `printf`, not ours |
+| parallelism | concurrency is a task per shell on one thread; the cost is bash's `printf`, not ours, and a `Send` bound would tax every implementor for nothing |
+| a fork tree | a fork inherits and then takes its own pipe; that it descends from a shell is not reported |
 | a schema or IDL | an arglist has no shape to agree on |
 
 ## See also
 
 - [`../bash/README.md`](../bash/README.md) — the layer-by-layer reference
 - [`../bash/rig.md`](../bash/rig.md) — `Rig`, `Reacting`, and the two roles
-- [`../bash/wire.md`](../bash/wire.md) — the protocol, frame by frame
+- [`../bash/wire.md`](../bash/wire.md) — the protocol, line by line
 - [`../bash/measurements.md`](../bash/measurements.md) — every number above
 - [`../bash/scoping.md`](../bash/scoping.md) — where a name binds in the shipped bash

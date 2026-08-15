@@ -22,10 +22,10 @@ assets/bashprof.bash      BASHPROF_TIMETHIS                       → __bp_begin
 src/bashprof/effect.bash  __bp_begin, __bp_end
 ```
 
-`assets/joining.bash` is the one file with no second delivery: `BC_JOIN` and
+`assets/joining.bash` is the one file with no second delivery: `BC_START` and
 `BC_LEAVE` run before there is a session to inject anything into, so a client
 vendors them and nothing injects them. It has no guard either — a script that
-calls `BC_JOIN` wants a session, and the tool being absent is a missing command
+calls `BC_START` wants a session, and the tool being absent is a missing command
 rather than a call site to neutralise. See
 [rig.md](rig.md#the-coprocess-convention).
 
@@ -58,7 +58,8 @@ inside a function of the client's own.
 ## The rule that makes a file shippable both ways
 
 **A words file names nothing that only exists once the protocol has been
-sourced** — no `BC_INSTR`, no `__BC_BAIL`, no `__BC_THROW`, no `__bc_stack`.
+sourced** — no `BC_JOIN`, no `BC_INSTR`, no `__BC_BAIL`, no `__BC_THROW`, no
+`__bc_stack`.
 The list is `bash::INJECTED_NAMES`, and each tool's vendoring test asserts its
 words file against it.
 
