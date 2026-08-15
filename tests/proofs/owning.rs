@@ -2,12 +2,13 @@
 //! group it takes with it however it ends. Nothing outside that group is
 //! signalled.
 
+use std::ffi::OsString;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use mb_resolver::bash::rig::{
-    Answer, Driving, ExitStatus, Failure, Layout, Message, Reacting, Rig, Setup, Shell, Verb,
-    Workspace,
+    Answer, Driving, ExitStatus, Failure, Layout, Message, Reaching, Reacting, Rig, Setup, Shell,
+    Verb, Workspace,
 };
 
 use crate::support::{bash, Scripts};
@@ -144,7 +145,11 @@ impl Reacting for Boom {
     }
 }
 
-impl Driving for Exploding {}
+impl Driving for Exploding {
+    fn environment(&self, at: &Layout) -> Vec<(OsString, OsString)> {
+        Reaching::BashEnv.environment(at)
+    }
+}
 
 /// The panic propagates out of the run and the subject is still killed.
 /// Nothing comes back from the run, so the subject writes its own pid to a

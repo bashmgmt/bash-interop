@@ -1,14 +1,15 @@
 //! Every form an answer can take, from two shells at once — and an answer that
 //! waits on another shell's word, which only serving concurrently can give.
 
+use std::ffi::OsString;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
 use mb_resolver::bash::rig::{
-    Answer, Driving, ExitStatus, Failure, Layout, Message, Reacting, Rig, Run, Setup, Shell,
-    Workspace,
+    Answer, Driving, ExitStatus, Failure, Layout, Message, Reaching, Reacting, Rig, Run, Setup,
+    Shell, Workspace,
 };
 use tokio::sync::Notify;
 
@@ -91,7 +92,11 @@ impl Reacting for Soak {
     }
 }
 
-impl Driving for Answering {}
+impl Driving for Answering {
+    fn environment(&self, at: &Layout) -> Vec<(OsString, OsString)> {
+        Reaching::BashEnv.environment(at)
+    }
+}
 
 /// Every answer form in turn — one deliberately slow, one past the pipe's
 /// buffer — mixed with saying and with a message too wide for one write, from
@@ -217,7 +222,11 @@ impl Reacting for Gate {
     }
 }
 
-impl Driving for Gated {}
+impl Driving for Gated {
+    fn environment(&self, at: &Layout) -> Vec<(OsString, OsString)> {
+        Reaching::BashEnv.environment(at)
+    }
+}
 
 /// One shell blocks on an answer that depends on another shell's word. Serving
 /// each shell on a task of its own is what lets the second shell be heard while

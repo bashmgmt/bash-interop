@@ -13,7 +13,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 
 use mb_resolver::bash::rig::{
-    Answer, Attended, Failure, Layout, Message, Rig, Serving, Setup, Shell, Workspace,
+    Attended, Failure, Layout, Message, Rig, Serving, Setup, Shell, Workspace,
 };
 
 use crate::support::Scripts;
@@ -39,20 +39,19 @@ impl Rig for Attaching {
 
 impl Serving for Attaching {}
 
-/// The client's side of joining: run the one command it was handed, then carry
-/// on with its own script. `declare -a` reads the address exactly as the
-/// prelude reads an answer, because it is the same kind of thing. `__join[1]`
-/// is the prelude's path, which the script may publish to its children.
-const JOINING: &str = r#"declare -a __join="$1"; "${__join[@]}"; source "$2""#;
+/// The client's side of joining, as `BC_START` does it: the address into
+/// `BC_SESSION`, exported for the script's children, sourced; then on with its
+/// own script.
+const JOINING: &str = r#"export BC_SESSION="$1"; source "$BC_SESSION"; source "$2""#;
 
 /// A shell of the initiator's own, holding the session's handle on its
 /// standard output — what a client holds when it started the server as a
 /// coprocess. It hangs up when the last shell holding it is gone, or when the
 /// client closes it deliberately.
-fn joining(address: &Answer, script: &Path, handle: OwnedFd) -> Child {
+fn joining(address: &str, script: &Path, handle: OwnedFd) -> Child {
     Command::new("bash")
         .args(["-c", JOINING, "--"])
-        .arg(address.to_string())
+        .arg(address)
         .arg(script)
         .stdout(Stdio::from(handle))
         .spawn()
@@ -131,7 +130,7 @@ async fn a_shell_the_session_outlived_is_left_to_its_own_devices() {
 }
 
 /// How far a joined session reaches is the client's decision. Exporting
-/// `BASH_ENV` to the prelude puts the session in every process the script
+/// `BASH_ENV` to the address puts the session in every process the script
 /// starts, which is what a driven run does for the tree it creates.
 #[tokio::test]
 async fn a_joined_shell_may_publish_the_address_to_its_children() {
@@ -140,7 +139,7 @@ async fn a_joined_shell_may_publish_the_address_to_its_children() {
             ENTRY,
             r#"
             TELL parent "$BASHPID"
-            export BASH_ENV="${__join[1]}"
+            export BASH_ENV="$BC_SESSION"
             bash "${BASH_SOURCE[0]%/*}/child.bash"
             "#,
         ),
@@ -163,7 +162,7 @@ async fn a_joined_shell_may_publish_the_address_to_its_children() {
 /// `BASH_ENV` for non-interactive shells alone, so an interactive one can join
 /// a session only by sourcing the address itself. Its code arrives on standard
 /// input, and standard output is the handle it holds.
-fn interactively(address: &Answer, handle: OwnedFd) -> Child {
+fn interactively(address: &str, handle: OwnedFd) -> Child {
     let mut shell = Command::new("bash")
         .args(["--norc", "--noprofile", "-i"])
         .stdin(Stdio::piped())
@@ -172,7 +171,7 @@ fn interactively(address: &Answer, handle: OwnedFd) -> Child {
         .spawn()
         .expect("an interactive shell");
 
-    let typed = format!("declare -a __join={address}; \"${{__join[@]}}\"\nTELL at-the-prompt\n");
+    let typed = format!("source \"{address}\"\nTELL at-the-prompt\n");
     shell.stdin.take().expect("its input").write_all(typed.as_bytes()).expect("typing at it");
 
     shell

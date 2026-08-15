@@ -33,10 +33,12 @@ mod transport;
 #[path = "../support/mod.rs"]
 mod support;
 
+use std::ffi::OsString;
 use std::sync::Arc;
 
 use mb_resolver::bash::rig::{
-    heard, Attended, Driving, Failure, Layout, Message, Rig, Setup, Shell, Whole, Workspace,
+    heard, Attended, Driving, Failure, Layout, Message, Reaching, Rig, Setup, Shell, Whole,
+    Workspace,
 };
 
 use support::{bash, Scripts};
@@ -48,15 +50,25 @@ pub const ENTRY: &str = "main.bash";
 pub const JOIN: &str = "BC_JOIN KEEP\n";
 
 /// Keeps every message, and answers nothing.
-#[derive(Default)]
 pub struct Keeping {
     workspace: Workspace,
+    reaching: Reaching,
 }
 
 impl Keeping {
+    /// Every shell of the subject's tree joins as it starts.
+    pub fn bash_env() -> Self {
+        Self { workspace: Workspace::Temporary, reaching: Reaching::BashEnv }
+    }
+
+    /// The address alone: a script joins where it says `source "$BC_SESSION"`.
+    pub fn by_hand() -> Self {
+        Self { workspace: Workspace::Temporary, reaching: Reaching::ByHand }
+    }
+
     /// A workspace of the caller's, left behind to read.
     pub fn at(path: &std::path::Path) -> Self {
-        Self { workspace: Workspace::At(path.to_path_buf()) }
+        Self { workspace: Workspace::At(path.to_path_buf()), reaching: Reaching::BashEnv }
     }
 }
 
@@ -73,7 +85,11 @@ impl Rig for Keeping {
     }
 }
 
-impl Driving for Keeping {}
+impl Driving for Keeping {
+    fn environment(&self, at: &Layout) -> Vec<(OsString, OsString)> {
+        self.reaching.environment(at)
+    }
+}
 
 /// A run of that rig, taken whole: every proof that expects a run to go through
 /// takes it that way, since a partial reading proves nothing.
@@ -81,7 +97,7 @@ pub type Ran = Whole<Vec<Message>>;
 
 pub async fn running(files: &[(&str, &str)]) -> Ran {
     let scripts = Scripts::of(files);
-    let ran = Keeping::default()
+    let ran = Keeping::bash_env()
         .run(&bash(scripts.at(ENTRY)))
         .await
         .unwrap_or_else(|error| panic!("{error}"));

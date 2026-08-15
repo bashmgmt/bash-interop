@@ -123,3 +123,53 @@ impl<'a> Frame<'a> {
         Ok(Self { token, last, chunk })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bash::rig::wire::{field, Micros};
+    use crate::bash::value::emit_array;
+
+    fn raw(text: impl AsRef<[u8]>) -> Raw {
+        Raw { bytes: text.as_ref().to_vec(), heard_at: Micros(7) }
+    }
+
+    fn account(zero: &str) -> String {
+        emit_array(&["at=1.000002", "zero", zero].map(String::from))
+    }
+
+    /// Two shells' frames interleave on the fifo; each account comes back
+    /// whole, keyed by its token, and a frame boundary inside a character is
+    /// no boundary at all once the bytes are back together.
+    #[tokio::test]
+    async fn frames_reassemble_per_token_and_in_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut control = Control::open(dir.path()).unwrap();
+
+        let (one, two) = (account("€uro.bash"), account("plain.bash"));
+        let split = one.find('€').unwrap() + 1;
+        let (head, tail) = one.as_bytes().split_at(split);
+
+        let mut frame = |line: Vec<u8>| control.frame(raw(line)).unwrap();
+        assert!(frame([b"A + ".as_slice(), head].concat()).is_none(), "more to come");
+        assert!(frame([b"B + ".as_slice(), &two.as_bytes()[..3]].concat()).is_none());
+        let a = frame([b"A . ".as_slice(), tail].concat()).expect("A is whole");
+        let b = frame([b"B . ".as_slice(), &two.as_bytes()[3..]].concat()).expect("B is whole");
+
+        assert_eq!(a.token, "A");
+        assert_eq!(field(&a.account.words, "zero"), Some("€uro.bash"));
+        assert_eq!(b.token, "B");
+        assert_eq!(field(&b.account.words, "zero"), Some("plain.bash"));
+        assert!(control.partial.is_empty(), "nothing left over");
+    }
+
+    /// The token has to name two files, and the frame has to be one.
+    #[test]
+    fn a_frame_the_protocol_did_not_write_is_refused() {
+        for bad in ["", "A", "A +", "A x chunk", " . chunk", "a/b . chunk", "a\tb . chunk"] {
+            assert!(Frame::read(bad.as_bytes()).is_err(), "{bad:?} should not read as a frame");
+        }
+        let frame = Frame::read(b"A . ").unwrap();
+        assert!(frame.last && frame.chunk.is_empty(), "an empty last chunk is a frame");
+    }
+}

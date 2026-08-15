@@ -1,9 +1,10 @@
 //! What the reader does with a line the protocol did not write.
 //!
 //! These are the one place a proof reaches past the client surface: the
-//! subject writes raw lines to its own pipe, `${__BC__FD[KEEP]}`, because
-//! producing a cut or unreadable one is the whole point. Everything else about
-//! the run is ordinary.
+//! subject writes raw lines to its own pipe, `${__BC__FD[KEEP]}`, or to the
+//! control fifo under `${__BC__DIR[KEEP]}`, because producing a cut or
+//! unreadable one is the whole point. Everything else about the run is
+//! ordinary.
 
 use mb_resolver::bash::rig::{Driving, ExitStatus};
 
@@ -23,7 +24,7 @@ async fn a_line_cut_short_by_a_shell_that_left_ends_the_run() {
         "#,
     )]);
 
-    let failure = Keeping::default()
+    let failure = Keeping::bash_env()
         .run(&bash(scripts.at(ENTRY)))
         .await
         .err()
@@ -36,7 +37,7 @@ async fn a_line_cut_short_by_a_shell_that_left_ends_the_run() {
 /// run closes up — beside the subject's own status, which is news of its own.
 #[tokio::test]
 async fn a_line_cut_short_at_the_end_is_reported_beside_the_subjects_status() {
-    let ran = Keeping::default()
+    let ran = Keeping::bash_env()
         .run(&bash(
             Scripts::of(&[(
                 ENTRY,
@@ -73,7 +74,7 @@ async fn a_line_that_will_not_read_ends_the_run() {
         "#,
     )]);
 
-    let failure = Keeping::default()
+    let failure = Keeping::bash_env()
         .run(&bash(scripts.at(ENTRY)))
         .await
         .err()
@@ -82,24 +83,26 @@ async fn a_line_that_will_not_read_ends_the_run() {
     assert!(failure.to_string().contains("(junk"), "it quotes what it could not read: {failure}");
 }
 
-/// A second account on a pipe is not a message.
+/// A line on the control fifo that is not a frame ends the run, naming what
+/// it could not read: the fifo is the session's, made by the run, and a shell
+/// writes it only through the protocol.
 #[tokio::test]
-async fn an_account_out_of_place_ends_the_run() {
+async fn a_frame_the_protocol_did_not_write_ends_the_run() {
     let scripts = Scripts::of(&[(
         ENTRY,
         r#"
         BC_INSTR KEEP say REC first
-        printf "('JOIN' 'at=1.000000' 'pid' '1')\n" >&"${__BC__FD[KEEP]}"
+        printf 'nonsense\n' >"${__BC__DIR[KEEP]}/join"
         sleep 5
         "#,
     )]);
 
-    let failure = Keeping::default()
+    let failure = Keeping::bash_env()
         .run(&bash(scripts.at(ENTRY)))
         .await
         .err()
-        .expect("a second account must end the run");
-    assert!(failure.to_string().contains("JOIN is not a message"), "{failure}");
+        .expect("a line that is not a frame must end the run");
+    assert!(failure.to_string().contains("\"nonsense\" is not a frame"), "{failure}");
 }
 
 /// The lines around a fault arrive untouched: a shell's pipe is its own.

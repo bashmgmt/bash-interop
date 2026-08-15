@@ -3,12 +3,13 @@
 //! killed rather than told something and left to interpret it. What the
 //! subject gets wrong stays the subject's.
 
+use std::ffi::OsString;
 use std::sync::Arc;
 use std::time::Instant;
 
 use mb_resolver::bash::rig::{
-    Answer, Driving, ExitStatus, Failure, Layout, Message, Reacting, Rig, Setup, Shell, Verb,
-    Workspace,
+    Answer, Driving, ExitStatus, Failure, Layout, Message, Reaching, Reacting, Rig, Setup, Shell,
+    Verb, Workspace,
 };
 
 use crate::support::{bash, Scripts};
@@ -60,7 +61,11 @@ impl Reacting for Breaks {
     }
 }
 
-impl Driving for Breaking {}
+impl Driving for Breaking {
+    fn environment(&self, at: &Layout) -> Vec<(OsString, OsString)> {
+        Reaching::BashEnv.environment(at)
+    }
+}
 
 /// The subject reports its own pid before the message that breaks the rig, so
 /// a proof can ask whether it outlived the run.
