@@ -7,11 +7,11 @@ what they share.
 ```
 rig/  mod.rs       the doc; `Rig`, `Reacting`, the two templates; the re-export list; `JOINING`
       joining.txt  how a script joins, in every way there is — `JOINING`'s text
-      attended.rs  `Setup`, `Workspace`, `Layout`, `Reaching`, `Attended`, `Kept`, `Said`, `heard`
+      attended.rs  `Setup`, `Layout`, `Attended`, `Kept`, `Said`, `heard`
       session.rs   `Session` — open, serve, announced, close
       attend.rs    `attend` — one shell's task, start to finish
       watch.rs     `Watch` — what a session ends on
-      driving.rs   `Driving`, `Run`, `Whole`, `Subject`, `ExitStatus`
+      driving.rs   `Driving`, `Reaching`, `Reached`, `Run`, `Whole`, `Subject`, `ExitStatus`
       serving.rs   `Serving`, `Served`
       wire/        the protocol
 ```
@@ -37,10 +37,13 @@ pub trait Rig {
 }
 
 pub struct Setup {
-    /// The rig's own bash, laid beside the protocol's and sourced by it.
-    /// States `BC_JOIN <LABEL>`.
+    /// The name the rig's words speak under: `BC_INSTR <label> …`. The session
+    /// writes the join into the invocation it generates, and refuses at open a
+    /// label that will not name a file.
+    pub label: String,
+    /// The rig's own bash — words and effects, no join line. Sourced after the
+    /// join.
     pub bash: String,
-    pub workspace: Workspace,
 }
 
 pub trait Reacting: Sized + 'static {
@@ -80,7 +83,7 @@ What shells share is the caller's own, handed in through `Rig::joined`:
 ```rust
 type Sink = Rc<RefCell<BufWriter<File>>>;
 
-struct BashCap { into: PathBuf, sink: Sink, reaching: Reaching, tracing: Tracing }
+struct BashCap { into: PathBuf, sink: Sink, tracing: Tracing }
 struct Capturing { shell: Arc<Shell>, into: PathBuf, sink: Sink, written: usize }
 ```
 
@@ -110,9 +113,11 @@ Owning a reaction is the whole proof that its shell announced itself. A
 message reaches a reaction only down that shell's own pipe, so no path through
 the session can hold a message whose shell is unknown.
 
-`Layout { dir, prelude }` is where the session's files ended up — the
-workspace, and the address a shell sources to join. `Layout::bash_env()` is
-that address spelled as the `("BASH_ENV", <prelude>)` pair.
+`Layout { dir, address }` is where the session's files ended up — the
+workspace, and the address: `<dir>/session.bash`, the generated invocation a
+shell sources to join, held as text because it crosses into bash and onto the
+announce line (validated whole at open). `Layout::bash_env()` is that address
+spelled as the `("BASH_ENV", <address>)` pair.
 
 **Nothing in a rig ends a session.** A rig reacts; when the conversation is
 over is decided by whoever started the shells. A `Failure` is the only thing a
@@ -163,19 +168,28 @@ pub trait Driving: Rig {
 pub struct Run<K> { pub shells: Vec<Attended<K>>, pub subject: ExitStatus, pub failed: Option<Failure> }
 pub struct Whole<K> { pub shells: Vec<Attended<K>>, pub subject: ExitStatus }   // Run::whole()
 
-/// The two usual answers. The core consults neither.
+/// The two usual answers, and the enum the tools' `--reach` parses. The core
+/// consults neither: what carries them is `Reached`.
 pub enum Reaching { BashEnv, ByHand }
-impl Reaching { pub fn environment(self, at: &Layout) -> Vec<(OsString, OsString)> }  // [at.bash_env()] | []
+
+/// A rig driven with one of them. The rig describes; how a driven subject's
+/// shells find it is the run's question, so it is stated where the run is
+/// made rather than kept on the rig — a rig that serves never carries it.
+pub struct Reached<R> { pub rig: R, pub reaching: Reaching }
+impl<R: Rig> Rig for Reached<R>     { /* delegates to rig */ }
+impl<R: Rig> Driving for Reached<R> { /* environment: [at.bash_env()] | [] */ }
 ```
 
 **The command line is run as it is given, and carries its own program.**
 `rig.run(&["bash", "x.bash"])`, and a caller wanting a launcher writes one
 into the argv: `&["env", "TARGET=staging", "bash", "x.bash"]`. The run exports
-the address into it, `BC_SESSION=<prelude path>`, and then whatever the rig's
-`environment` returned — `Reaching::BashEnv.environment(at)` is
-`BASH_ENV=<the same path>`, which reaches every non-interactive bash in the
-tree; `Reaching::ByHand` is nothing, and a script joins where it says
-`source "$BC_SESSION"`. A rig with an environment of its own lists it there.
+the address into it, `BC_SESSION=<the address>`, and then whatever
+`environment` returned — under `Reached` with `Reaching::BashEnv` that is
+`BASH_ENV=<the same address>`, which reaches every non-interactive bash in the
+tree; with `Reaching::ByHand` nothing, and a script joins where it says
+`source "$BC_SESSION"`. A rig with an environment of its own implements
+`Driving` directly and lists it there — `tests/proofs/starting.rs`'s
+`Deploying` is the worked example.
 
 **Reaching a `Run` means bash got to its own end**, so `subject` is always the
 subject's own status. `failed` is what went wrong closing up. A `Failure` in
@@ -191,20 +205,32 @@ sees end of input. `Drop` does the same if `run` left by any other path.
 
 ```rust
 pub trait Serving: Rig {
-    async fn serve<A>(&self, held: OwnedFd, announce: A) -> Result<Served<Kept<Self>>, Failure>
+    async fn serve<A>(&self, at: &Path, held: OwnedFd, announce: A)
+        -> Result<Served<Kept<Self>>, Failure>
     where A: FnOnce(&str) -> Result<(), Failure>;
 
-    async fn serve_coprocess(&self) -> Result<Served<Kept<Self>>, Failure>;
+    async fn serve_coprocess(&self, at: &Path) -> Result<Served<Kept<Self>>, Failure>;
 }
 
 pub struct Served<K> { pub shells: Vec<Attended<K>>, pub failed: Option<Failure> }
 ```
 
-A script that is already running starts the server, takes the address it is
-handed, and lets go when it is done. Nothing on this side starts a process or
-ends one. `announce` is called once, before anything is served, with the
-address — the prelude's path, one line of text; the client puts it where a
-driven shell would find it and sources it:
+A script that is already running names the workspace, starts the server, and
+lets go when it is done. Nothing on this side starts a process or ends one.
+`at` is required with no fallback: the client prescribed the directory, so it
+knows the address — `<at>/session.bash` — before the server has done anything.
+The directory is created if missing and left behind; a reading taken later may
+follow source paths into it, and removing it is the client's, like everything
+else it initiated.
+
+What remains of the announcement is the rendezvous: `coproc` returns before
+the server has parsed its argv or written a file, so the client must not
+source before the session is laid. `announce` is called once, after
+`Session::open` returned and before anything is served, with the address as
+one line — a value the client's own choice already fixed. The blocking read on
+the client's side is the barrier, and end of input is how a server that died
+before ready (unwritable `--at`, bad flag) is told apart from a slow one. The
+client puts the line where a driven shell would find it and sources it:
 
 ```bash
 export BC_SESSION="$line"; source "$BC_SESSION"
@@ -227,7 +253,7 @@ address on its standard output.**
 ```bash
 source lib/joining.bash
 
-BC_START bashprof serve --into build.times   # start it, take the address, run it
+BC_START bashprof serve --at prof.d --into build.times   # start it, sync, join
 BC_INSTR BASHPROF say STEP compile
 BC_LEAVE                                     # release, wait, return its status
 ```

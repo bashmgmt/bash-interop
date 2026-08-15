@@ -1,6 +1,6 @@
 //! A shell's pipe: made by the shell, announced with its account, opened by
-//! the run, held for the shell's life. Every process that sources the prelude
-//! attaches; a fork attaches on its first word.
+//! the run, held for the shell's life. Every process that joins attaches;
+//! a fork attaches on its first word.
 
 use std::sync::Arc;
 

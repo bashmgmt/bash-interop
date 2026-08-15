@@ -185,7 +185,7 @@ mechanism that cannot be checked by reading the source. One file per subject.
 |---|---|
 | `a_shell_that_speaks_once_and_leaves_loses_nothing` | a `bash -c` that joins, says one thing and exits within microseconds loses nothing: the blocking open is the rendezvous |
 | `a_fork_that_speaks_is_a_shell_of_its_own_and_parts_on_its_own` | a fork takes a pipe of its own, its `parted` precedes the parent's, and the parent's words stay the parent's |
-| `two_labels_in_one_process_are_two_shells` | `BC_JOIN` twice is two pipes and two shells with one pid |
+| `two_labels_in_one_process_are_two_shells` | a second `BC_JOIN`, coordinate spelled as `${BC_SESSION%/*}`, is a second pipe and a second shell with the same pid |
 | `a_label_nobody_joined_is_an_error_by_absence` | `BC_INSTR NOPE …` names the label and the call site, returns 125, and the run knows nothing |
 | `an_account_of_any_size_arrives_whole` | a `bash -c` with a 21 KB command of `€` — six frames, cut inside characters — reads back byte for byte as `Invocation::command` |
 | `many_shells_announce_at_once` | 16 shells with 6 KB commands announce together; every account whole and its own |
@@ -218,13 +218,13 @@ mechanism that cannot be checked by reading the source. One file per subject.
 | `serving.rs` | establishes |
 |---|---|
 | `a_shell_that_joined_is_heard_until_it_lets_go` | a client's words and its subshell's arrive; the session ends with the handle; the client's status is its own |
+| `the_prescribed_workspace_is_left_behind_without_its_fifos` | the session is laid where the client said, the address is `<at>/session.bash`, and what remains is the three bash files and nothing that was a pipe |
 | `a_shell_the_session_outlived_is_left_to_its_own_devices` | a client that released the handle while running has `parted: None`, and its next word takes `SIGPIPE` |
 | `a_joined_shell_may_publish_the_address_to_its_children` | `export BASH_ENV="$BC_SESSION"` reaches a child process |
 | `a_shell_says_what_it_is_rather_than_being_guessed_at` | an interactive shell joins by sourcing, and says `-i`, `-s`, no command line |
 
 | `owning.rs` | establishes |
 |---|---|
-| `a_named_workspace_is_left_behind_without_its_fifos` | a kept workspace ends with `prelude.bash` and `rig.bash` and nothing that was a pipe |
 | `a_shell_left_asking_does_not_outlive_the_run` | the run does not wait for a straggler, and the straggler does not survive it |
 | `a_shell_outside_the_group_is_heard_and_never_signalled` | a `setsid` shell is heard, has `parted: None`, and is alive after the run |
 | `a_panicking_answer_kills_the_subject` | the panic propagates out of `run`, and the blocked subject is gone |

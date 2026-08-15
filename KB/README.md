@@ -34,8 +34,8 @@ Every module under `src/bash/rig/` is private; `mod.rs` carries `Rig` and
 `Reacting` and one re-export list that is the rest of the API:
 
 ```rust
-pub use attended::{heard, Attended, Kept, Layout, Reaching, Said, Setup, Workspace};
-pub use driving::{Driving, ExitStatus, Run, Whole};
+pub use attended::{heard, Attended, Kept, Layout, Said, Setup};
+pub use driving::{Driving, ExitStatus, Reached, Reaching, Run, Whole};
 pub use serving::{Served, Serving};
 pub use wire::{field, Answer, Message, Micros, Pid, Stamp, Verb};
 pub use crate::bash::shell::Shell;
@@ -52,20 +52,26 @@ but that shell. The library ships two reactions — `Vec<Message>` keeps every
 message, `()` keeps nothing — and no rig implementation.
 
 **Who started what is a second question.** `Driving` runs a command line of
-its own and owns its process group; `Serving` hands its address to a bash
-script that started the server and serves while that script holds the handle.
-Both are traits extending `Rig` with one provided `async fn`, so a rig declares
-which orchestrations it supports by implementing them. A session lasts as long
-as anyone who could still speak, and nothing inside a rig ends one.
+its own and owns its process group; `Serving` lays the session in a workspace
+the client prescribed and serves while that client holds the handle. Both are
+traits extending `Rig` with one provided `async fn`, so a rig declares which
+orchestrations it supports by implementing them. A session lasts as long as
+anyone who could still speak, and nothing inside a rig ends one.
 
-**The address is one file, and the core exports it and decides nothing else.**
-The address is the prelude's path — the file a shell sources to join. A driven
-subject finds it as `BC_SESSION` in its environment; a served client is handed
-it once and puts it there itself (`BC_START`). Whether `BASH_ENV` also names
-it — so every non-interactive bash in the tree joins as it starts — is the
-rig's answer, given through `Driving::environment`; `Reaching` spells the two
-usual ones. `JOINING` is every way a script joins, in bash, and both binaries
-print it under `--help`.
+**One coordinate, passed.** The workspace directory is the session's only
+coordinate — every fifo and file is `<dir>/…`, and the address is
+`<dir>/session.bash`: the generated invocation a shell sources to join, which
+sources the generic prelude, joins with the label and the dir spelled
+literally, and sources the rig's bash. Nothing self-locates: `BC_JOIN` takes
+the dir as an argument, and the address names the workspace
+(`${BC_SESSION%/*}`). A driven subject finds the address as `BC_SESSION` in
+its environment; a serving client chose the dir (`--at`, required), so the
+line it reads back is a value its own choice fixed — the read is what says the
+session is laid. Whether `BASH_ENV` also names the address is the run's
+question, not the rig's: `Reached { rig, reaching }` drives a rig with one of
+the two usual answers, and a rig with an environment of its own implements
+`Driving::environment` itself. `JOINING` is every way a script joins, in bash,
+and both binaries print it under `--help`.
 
 Every instrument that reports a walk is composed by `stack::with_walk(&[…])`,
 which puts `stack.bash` first: `__bc_stack` has to be defined before anything
@@ -75,7 +81,7 @@ calls it, and that rule lives there rather than at each tool.
 
 | moment | started by | effect |
 |---|---|---|
-| join | `rig.bash`, at source — `BC_JOIN <LABEL>` | the shell makes its pipe, announces it on the control fifo with its account, and blocks until the run has opened it. A fork does the same on its first word |
+| join | the invocation, at source — `BC_JOIN <LABEL> '<dir>'` | the shell makes its pipe, announces it on the control fifo with its account, and blocks until the run has opened it. A fork does the same on its first word |
 | say | the subject | `BC_INSTR <LABEL> say …` ships an arglist and returns |
 | ask | the subject | `BC_INSTR <LABEL> ask …` ships one, blocks, and runs what comes back |
 
@@ -118,10 +124,12 @@ An **answer** is an arglist too, and it is a command the shell runs:
 ## Building on it
 
 Implement `Rig` — `setup`, `joined` — and a `Reacting` for what it builds,
-unless `Vec<Message>` or `()` is what you want; then implement `Driving`
-(`environment`: how the shells are reached), `Serving`, or both. `Setup::bash`
-states `BC_JOIN <LABEL>`. What several shells share is yours, held by the rig
-and handed to each reaction it builds — an `Rc<RefCell<_>>` is enough, and its
+unless `Vec<Message>` or `()` is what you want. `Setup` states the label and
+the rig's bash; the session writes the join. To drive it, wrap it —
+`Reached { rig, reaching }` — or implement `Driving` where the rig has an
+environment of its own; to serve it, `impl Serving` and pass the workspace the
+client prescribed. What several shells share is yours, held by the rig and
+handed to each reaction it builds — an `Rc<RefCell<_>>` is enough, and its
 borrow is never held across an `.await`.
 
 Nothing on either trait defaults, so an `impl` block is the whole contract.

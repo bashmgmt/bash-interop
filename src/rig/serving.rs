@@ -1,5 +1,6 @@
-//! bash orchestrates: a script that is already running started the server,
-//! takes the address it is handed, and lets go when it is done.
+//! bash orchestrates: a script that is already running names the workspace,
+//! starts the server, joins at the address its own choice fixed, and lets go
+//! when it is done.
 //!
 //! Nothing here starts a process or ends one. What the client started, the
 //! client cleans up, which is why the only thing this side watches is the

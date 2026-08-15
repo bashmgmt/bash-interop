@@ -78,7 +78,7 @@
 //! | | who started the shells | how they find the address | what the session lasts for | what comes back |
 //! |---|---|---|---|---|
 //! | [`Driving`] | the run, in a process group of its own | `BC_SESSION` in the environment, plus what [`Driving::environment`] adds | that process group | [`Run`], with the subject's [`ExitStatus`] |
-//! | [`Serving`] | a bash script, which started the server | it is handed the address, once | whoever holds the handle | [`Served`] |
+//! | [`Serving`] | a bash script, which named the workspace and started the server | its own choice: `<dir>/session.bash`, echoed back once the session is laid | whoever holds the handle | [`Served`] |
 //!
 //! Either way, the address is the file a shell sources to join, and
 //! [`JOINING`] shows every way a script does that.

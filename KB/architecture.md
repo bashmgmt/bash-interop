@@ -73,29 +73,43 @@ dependency on either side's idea of encoding.
 `value` therefore stands on nothing and is usable on its own — see
 [values.md](../bash/values.md).
 
-### 3. One address; the core exports it and decides nothing else
+### 3. One coordinate, passed; the core exports the address and decides nothing else
 
-A session has one address: the prelude's path, the file a shell sources to
-join. The run lays two files into a workspace — the protocol's bash and the
-rig's — and nothing is templated into either: the prelude finds its own
-workspace from `${BASH_SOURCE[0]%/*}`, which means the shipped file is real
-bash that can be read and checked directly.
+The workspace directory is the session's only coordinate: every fifo and file
+is `<dir>/…`, and the address is `<dir>/session.bash` — the generated
+invocation a shell sources to join. The session lays three files: the generic
+prelude (shipped verbatim, reading neither its own location nor the
+environment), the rig's bash, and the invocation, which is the one generated
+file and the one place the coordinate is spelled — `source` the prelude,
+`BC_JOIN <label> '<dir>'`, `source` the rig's bash. `BC_JOIN` takes the dir
+as an argument and binds it to the label in the LUTs; nothing self-locates,
+and the address names the workspace: `${BC_SESSION%/*}`.
 
-A driven run exports the address, `BC_SESSION=<prelude path>`, into the
-subject and starts the command line. **How the shells reach it is the rig's
-answer**, given through `Driving::environment` — the pairs the environment
-gets beyond the address. `Reaching` spells the two usual ones: `BashEnv` is
-`("BASH_ENV", <the same path>)`, which reaches every non-interactive bash in
-the tree the subject creates — what makes `bashcap run --into out make test`
-work, every recipe shell `make` starts joining by itself; `ByHand` is nothing,
-and a script joins where it says `source "$BC_SESSION"`. The core consults
-neither; the tools default to the first and take `--reach by-hand`.
+A driven run exports the address, `BC_SESSION=<the address>`, into the
+subject and starts the command line; its workspace is a temporary directory of
+the run's own, so nothing external can prescribe or collide with it. **How the
+shells reach the address is the run's question, not the rig's**: `Reached {
+rig, reaching }` drives any rig with one of the two usual answers — `BashEnv`
+is `("BASH_ENV", <the same address>)`, which reaches every non-interactive
+bash in the tree the subject creates and is what makes `bashcap run --into out
+make test` work, every recipe shell `make` starts joining by itself; `ByHand`
+is nothing, and a script joins where it says `source "$BC_SESSION"`. A rig
+with an environment of its own implements `Driving::environment`, whose
+precondition is the settled `Layout`. The core consults neither; the tools
+default to the first and take `--reach by-hand`.
 
-A served client is handed the same address once, on the channel its initiator
-gave it, and does the same thing itself: `BC_START` reads it into
-`BC_SESSION`, exports it, and sources it. So the join line is one line in
-every role, and `JOINING` — one text, printed by both binaries under `--help`
-— is every way a script writes it.
+A serving run requires the workspace from outside — `--at`, no fallback — so
+the client that starts the server knows the address before the server has done
+anything. What remains of the announcement is the rendezvous: the server
+writes the address as one line once the session is laid, and the client's
+blocking read is the barrier (end of input tells a dead server apart from a
+slow one). `BC_START` reads the line into `BC_SESSION`, exports it, and
+sources it — a value the client's own `--at` already fixed. So the join line
+is one line in every role, and `JOINING` — one text, printed by both binaries
+under `--help` — is every way a script writes it. What one variable cannot do
+remains stated rather than implied away: `BASH_ENV` is one variable, and two
+driving runs both reaching through it shadow each other for the inner subtree
+— the escape is `--reach by-hand`, and it is the client's.
 
 The command line is free to be exactly what the caller wrote, program
 included: `&["env", "TARGET=staging", "bash", "x.bash"]` needs no support from
@@ -141,8 +155,8 @@ opinion on one.
 
 ### 5. Who started the shells is a second question
 
-`Driving` runs a command line and owns its process group. `Serving` hands its
-address to a bash script that started the server and serves while that script
+`Driving` runs a command line and owns its process group. `Serving` lays the
+session in the workspace the client prescribed and serves while that client
 holds the handle. Both are traits extending `Rig` with one provided `async fn`, so
 a rig declares which orchestrations it supports by implementing them, and its
 reaction is the same code either way.
@@ -153,7 +167,7 @@ do:
 
 ```
 bashprof run   [--reach bash-env|by-hand] --into build.times -- make test
-bashprof serve --into build.times      # started by BC_START, from a script
+bashprof serve --at prof.d --into build.times   # started by BC_START, from a script
 ```
 
 One sentence covers both ends: **a session lasts as long as anyone who could
@@ -229,7 +243,7 @@ and no tool runs unprofiled; the same script under the tool measures itself. See
 | a session-wide accumulator in the library | what a run produces is the client's; `Vec<Message>` and `()` are the only two shipped |
 | a timer, an interval, a heartbeat | serving ends when nobody who could speak is left, and that is a descriptor; tokio's `time` feature is not enabled |
 | a closing word or reserved payload word | the handle says when it is over, so nothing in the loop intercepts a message |
-| a way in the core prefers | the core exports the address; `BASH_ENV` or by hand is a rig's `environment`, and a tool's default |
+| a way in the core prefers | the core exports the address; `BASH_ENV` or by hand is the run's choice (`Reached`), and a tool's default |
 | a poisoned or degraded mode | an answer that says no is a command returning non-zero, like any other |
 | parallelism | concurrency is a task per shell on one thread; the cost is bash's `printf`, not ours, and a `Send` bound would tax every implementor for nothing |
 | a fork tree | a fork inherits and then takes its own pipe; that it descends from a shell is not reported |
