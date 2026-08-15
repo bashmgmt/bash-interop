@@ -8,14 +8,14 @@
 //! subject cares to name that way.
 //!
 //! [`Bash`] and what it holds are description alone. [`Shell`] pairs that with
-//! where the shell sits in the run, which is the wire's to say.
+//! where the shell sits in the run.
 
 use std::fmt;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use super::rig::wire::{field, Pid, Stamp};
+use super::rig::wire::{field, Account, Pid, Stamp};
 use super::value::parse_array;
 use crate::failure::Failure;
 
@@ -158,10 +158,6 @@ pub struct Shell {
 
     pub pid: Pid,
 
-    /// The shell that emitted before this one forked. Not `$PPID`, which names
-    /// the grandparent inside a subshell.
-    pub parent: Pid,
-
     pub shlvl: u32,
 
     /// `$BASH_SUBSHELL`. A subshell has a `$BASHPID` of its own and so joins as
@@ -177,14 +173,10 @@ pub struct Shell {
 
 impl Shell {
     /// Read off the words a shell wrote about itself.
-    pub(crate) fn of(
-        nth: usize,
-        pid: Pid,
-        joined: Stamp,
-        account: &[String],
-    ) -> Result<Self, Failure> {
+    pub(crate) fn of(nth: usize, account: Account) -> Result<Self, Failure> {
+        let Account { stamp: joined, words } = account;
         let word = |key: &str| {
-            field(account, key).ok_or_else(|| broken(format!("no {key:?}"))).map(str::to_string)
+            field(&words, key).ok_or_else(|| broken(format!("no {key:?}"))).map(str::to_string)
         };
         let count = |key: &str| -> Result<u32, Failure> {
             let text = word(key)?;
@@ -199,8 +191,7 @@ impl Shell {
 
         Ok(Self {
             nth,
-            pid,
-            parent: Pid(count("parent")?),
+            pid: Pid(count("pid")?),
             shlvl: count("shlvl")?,
             subshell: count("subshell")?,
             joined,

@@ -4,37 +4,34 @@
 use std::ffi::OsStr;
 use std::fmt;
 use std::io;
-use std::path::Path;
 use std::process::{Child, Command};
+
+use tokio::task::LocalSet;
 
 use super::session::Session;
 use super::watch::Watch;
-use super::{Attended, Kept, Rig};
+use super::{Attended, Kept, Layout, Rig};
 use crate::failure::{Doing, Failure};
 
 /// What a driven run produced.
 ///
-/// Reaching one of these means bash was started and seen out. A `Failure`
-/// instead means the run never got that far: it could not be set up, or a
-/// reaction could not do its work and the subject was killed — and then how the
-/// subject would have ended is not something anyone can say.
+/// Reaching one means bash was started and seen out. A `Failure` instead means
+/// the run never got that far: it could not be set up, or a reaction could not
+/// do its work and the subject was killed.
 pub struct Run<K> {
-    /// Every shell that joined, in the order they did, with what its reaction
-    /// left behind.
+    /// Every shell that joined, in the order they did.
     pub shells: Vec<Attended<K>>,
 
-    /// How bash ended. Always its own: the run serves until the subject leaves
-    /// of its own accord, whether or not anything went wrong.
+    /// How bash ended — its own, whether or not anything else went wrong.
     pub subject: ExitStatus,
 
-    /// What went wrong closing up, if anything. It happens after the subject
-    /// reached its own end, so `subject` is news of its own either way.
+    /// What went wrong closing up, if anything. After the subject reached its
+    /// own end.
     pub failed: Option<Failure>,
 }
 
 impl<K> Run<K> {
-    /// The run with its closing-up discharged. Reaching a [`Whole`] means
-    /// nothing is left to report.
+    /// The run with its closing-up discharged.
     pub fn whole(self) -> Result<Whole<K>, Failure> {
         match self.failed {
             Some(why) => Err(why),
@@ -51,33 +48,40 @@ pub struct Whole<K> {
 
 /// A rig whose run Rust orchestrates.
 ///
-/// The command line is run as it is given and carries its own program, so a run
-/// is not bound to bash at the top, and a caller wanting a launcher or an
-/// environment puts one there — `env VAR=v -- cmd` is the whole story.
-/// Instrumentation travels by `BASH_ENV` instead, which is what reaches the
-/// shells a command line never could.
+/// The command line is run as it is given and carries its own program, so a
+/// caller wanting a launcher or an environment puts one there — `env VAR=v --
+/// cmd` is the whole story, and `env -u BASH_ENV -- cmd` is a subject that
+/// sources `"$BC_SESSION/prelude.bash"` where it chooses.
 ///
 /// | | |
 /// |---|---|
-/// | what ends it | a pidfd on the subject, watched and never signalled |
-/// | what comes back | [`Run`] — every [`Attended`] shell, the subject's [`ExitStatus`], and what went wrong closing up |
-/// | with that discharged | [`Run::whole`] → [`Whole`] |
+/// | what reaches the shells | `BC_SESSION=<dir>` and `BASH_ENV=<dir>/prelude.bash` |
+/// | what ends it | a pidfd on the subject, watched and never signalled; then the group is killed |
+/// | what comes back | [`Run`], and [`Run::whole`] → [`Whole`] |
+///
+/// The future is not `Send`: it runs on a `LocalSet` of its own, and is awaited
+/// from a current-thread runtime or `block_on`.
+#[expect(async_fn_in_trait, reason = "single-threaded by design: no Send bound")]
 pub trait Driving: Rig {
-    fn run<A: AsRef<OsStr>>(&self, argv: &[A]) -> Result<Run<Kept<Self>>, Failure>
+    async fn run<A: AsRef<OsStr>>(&self, argv: &[A]) -> Result<Run<Kept<Self>>, Failure>
     where
         Self: Sized,
     {
-        let mut session = Session::open(self)?;
+        LocalSet::new()
+            .run_until(async {
+                let mut session = Session::open(self)?;
 
-        // Declared after the session, so it drops before it: leaving through
-        // `?` below stops the subject before releasing what it was feeding.
-        let mut subject = Subject::spawn(argv, &session.layout.prelude)?;
+                // Declared after the session, so it drops before it: leaving
+                // through `?` stops the subject before releasing its files.
+                let mut subject = Subject::spawn(argv, &session.layout)?;
 
-        session.drive(&Watch::process(subject.pid())?)?;
-        let subject = ExitStatus::from(subject.finish().doing(|| "waiting for bash".into())?);
-        let (shells, failed) = session.finish();
+                session.serve(&Watch::process(subject.pid())?).await?;
+                let subject = subject.finish().doing(|| "waiting for bash".into())?;
+                let (shells, failed) = session.close().await;
 
-        Ok(Run { shells, subject, failed })
+                Ok(Run { shells, subject: ExitStatus::from(subject), failed })
+            })
+            .await
     }
 }
 
@@ -88,9 +92,7 @@ struct Subject {
 }
 
 impl Subject {
-    /// Instrumentation travels by `BASH_ENV`, which any bash the subject starts
-    /// will read, whether or not the subject is one itself.
-    fn spawn<A: AsRef<OsStr>>(argv: &[A], prelude: &Path) -> Result<Self, Failure> {
+    fn spawn<A: AsRef<OsStr>>(argv: &[A], layout: &Layout) -> Result<Self, Failure> {
         use std::os::unix::process::CommandExt;
 
         let said =
@@ -100,7 +102,11 @@ impl Subject {
             .ok_or_else(|| Failure::new("starting the subject", "the command line is empty"))?;
 
         let mut command = Command::new(program);
-        command.args(rest).env("BASH_ENV", prelude).process_group(0);
+        command
+            .args(rest)
+            .env("BC_SESSION", &layout.dir)
+            .env("BASH_ENV", &layout.prelude)
+            .process_group(0);
 
         let child = command.spawn().doing(|| format!("spawning {}", said()))?;
         let group = child.id() as libc::pid_t;
@@ -113,9 +119,7 @@ impl Subject {
     }
 
     /// Kill the group, then reap — in that order, because while the subject is
-    /// unreaped its group cannot have been recycled. The kill is what collects
-    /// anything that outlived the leader, and what ends the subject where a
-    /// reaction cut the run short.
+    /// unreaped its group cannot have been recycled.
     fn finish(&mut self) -> io::Result<std::process::ExitStatus> {
         self.release();
         self.child.wait()
@@ -137,8 +141,7 @@ impl Drop for Subject {
     }
 }
 
-/// How bash ended. `wait(2)` yields exactly one of these, and both fields are
-/// the width the kernel gives them.
+/// How bash ended. `wait(2)` yields exactly one of these.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum ExitStatus {
     Code(u8),
@@ -165,10 +168,8 @@ impl fmt::Display for ExitStatus {
 }
 
 impl From<std::process::ExitStatus> for ExitStatus {
-    /// After `wait(2)` a process has either exited or been signalled, so
-    /// reading the two fields out of the raw status is total: `WTERMSIG` is the
-    /// low seven bits, `WEXITSTATUS` the second byte, and there is no third
-    /// outcome to default to.
+    /// `WTERMSIG` is the low seven bits, `WEXITSTATUS` the second byte, and
+    /// after `wait(2)` there is no third outcome.
     fn from(status: std::process::ExitStatus) -> Self {
         use std::os::unix::process::ExitStatusExt;
 

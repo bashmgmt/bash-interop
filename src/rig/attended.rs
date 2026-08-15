@@ -1,21 +1,25 @@
-//! Where a session puts its files, and what a run hands back.
-//!
-//! One entry per shell, in the order they joined. The provenance is the shape
-//! rather than a field: there is no second list to cross-reference and nothing
-//! that could disagree with one.
+//! What a rig states about itself, where a session puts its files, and what a
+//! run hands back.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde::Serialize;
 
-use super::{Message, Reacting, Rig, Shell};
+use super::{Message, Micros, Reacting, Rig, Shell};
 
-/// Where a session lays its bash and its pipes, and how long that outlives it.
-///
-/// A frame's source path is only as readable as the file it names, and the
-/// instrument's own frames name a file in here — so anything that reads a walk
-/// afterwards has to say where the run put it.
+/// Everything a rig states up front, in one literal.
+#[derive(Clone, Debug)]
+pub struct Setup {
+    /// The rig's own bash, laid beside the protocol's and sourced by it. Ends
+    /// with `BC_JOIN <LABEL>`, which is where the label a client's words use
+    /// comes from.
+    pub bash: String,
+
+    pub workspace: Workspace,
+}
+
+/// Where a session lays its bash and its fifos, and how long that outlives it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum Workspace {
     /// A directory of the session's own, removed when it ends.
@@ -27,8 +31,7 @@ pub enum Workspace {
 }
 
 /// Where the session's files ended up. Handed to every reaction at
-/// construction, so one that resolves paths afterwards knows where the
-/// instrument's own frames point without being told twice.
+/// construction, since the instrument's own frames name a file in here.
 #[derive(Clone, Debug)]
 pub struct Layout {
     pub dir: PathBuf,
@@ -40,35 +43,32 @@ pub struct Layout {
 /// What one shell's reaction leaves behind, for a given rig.
 pub type Kept<R> = <<R as Rig>::Reaction as Reacting>::Kept;
 
-/// One shell, and what its reaction left behind.
+/// One shell, what its reaction left behind, and when it went.
 #[derive(Debug)]
 pub struct Attended<K> {
     pub shell: Arc<Shell>,
     pub kept: K,
+
+    /// When nobody could write on its pipe any more. `None` for a shell the
+    /// session outlived — still running when the watch fired.
+    pub parted: Option<Micros>,
 }
 
 /// One message, and the shell that sent it.
-///
-/// A reaction has both by construction. Anything reading a run afterwards needs
-/// them together too, since a frame walk means nothing without the shell it was
-/// taken in.
 #[derive(Copy, Clone, Debug, Serialize)]
 pub struct Said<'a> {
     pub shell: &'a Arc<Shell>,
     pub message: &'a Message,
 }
 
-/// Everything the shells said, in the order the run heard it.
-///
-/// A run folds per shell, so each shell's own order is kept and nothing else.
-/// [`Stamp::nth`](super::Stamp::nth) counts messages over the whole run and is
-/// what puts them back together.
+/// Everything the shells said, in the order it was said: by the sending
+/// shell's own clock, stably over join order and each shell's own order.
 pub fn heard<K: AsRef<[Message]>>(shells: &[Attended<K>]) -> Vec<Said<'_>> {
     let mut said: Vec<Said<'_>> = shells
         .iter()
         .flat_map(|at| at.kept.as_ref().iter().map(|message| Said { shell: &at.shell, message }))
         .collect();
 
-    said.sort_by_key(|said| said.message.stamp.nth);
+    said.sort_by_key(|said| said.message.stamp.sent_at);
     said
 }

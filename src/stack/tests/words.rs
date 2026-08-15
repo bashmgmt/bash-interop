@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use crate::bash::rig::{
-    Answer, Driving, Failure, Layout, Message, Reacting, Rig, Shell, Workspace,
+    Answer, Driving, Failure, Layout, Message, Reacting, Rig, Setup, Shell, Workspace,
 };
 use crate::bash::stack::{self, Columns, Site, Source, Stack};
 use crate::tests::scripts::{bash, Scripts};
@@ -19,8 +19,9 @@ const BASH: &str = r#"
 WALK() {
     local -a __w=()
     __bc_stack __w 2
-    BC_INSTR say WALK "${__w[@]}"
+    BC_INSTR WALK say WALK "${__w[@]}"
 }
+BC_JOIN WALK
 "#;
 
 struct Walking;
@@ -35,15 +36,11 @@ struct Walks {
 impl Rig for Walking {
     type Reaction = Walks;
 
-    fn workspace(&self) -> Workspace {
-        Workspace::Temporary
+    fn setup(&self) -> Setup {
+        Setup { bash: stack::with_walk(&[BASH]), workspace: Workspace::Temporary }
     }
 
-    fn bash(&self) -> String {
-        stack::with_walk(&[BASH])
-    }
-
-    fn joined(&self, _at: &Layout, shell: Arc<Shell>) -> Result<Walks, Failure> {
+    async fn joined(&self, _at: &Layout, shell: Arc<Shell>) -> Result<Walks, Failure> {
         Ok(Walks { shell, seen: Vec::new() })
     }
 }
@@ -51,7 +48,7 @@ impl Rig for Walking {
 impl Reacting for Walks {
     type Kept = Vec<Stack>;
 
-    fn hear(&mut self, said: Message) -> Result<(), Failure> {
+    async fn hear(&mut self, said: Message) -> Result<(), Failure> {
         let Some(words) = said.behind("WALK") else { return Ok(()) };
 
         self.seen.push(Columns::of(words)?.frames(&self.shell)?);
@@ -59,14 +56,13 @@ impl Reacting for Walks {
         Ok(())
     }
 
-    /// It only listens, so a question is heard and the word reported unknown.
-    fn answer(&mut self, asked: Message) -> Result<Answer, Failure> {
-        self.hear(asked)?;
+    async fn answer(&mut self, asked: Message) -> Result<Answer, Failure> {
+        self.hear(asked).await?;
 
         Ok(Answer::unknown())
     }
 
-    fn finish(self) -> Result<Vec<Stack>, Failure> {
+    async fn finish(self) -> Result<Vec<Stack>, Failure> {
         Ok(self.seen)
     }
 }
@@ -74,17 +70,17 @@ impl Reacting for Walks {
 impl Driving for Walking {}
 
 /// Every walk a command line produced, shell by shell in the order they joined.
-fn walks_in<A: AsRef<std::ffi::OsStr>>(argv: &[A]) -> Vec<Stack> {
-    let ran = Walking.run(argv).unwrap_or_else(|e| panic!("{e}"));
+async fn walks_in<A: AsRef<std::ffi::OsStr>>(argv: &[A]) -> Vec<Stack> {
+    let ran = Walking.run(argv).await.unwrap_or_else(|e| panic!("{e}"));
 
     ran.whole().unwrap().shells.into_iter().flat_map(|at| at.kept).collect()
 }
 
 /// The same over a script — and the scripts, which stay alive: a source path
 /// is only as readable as the file it names.
-fn walks(files: &[(&str, &str)]) -> (Scripts, Vec<Stack>) {
+async fn walks(files: &[(&str, &str)]) -> (Scripts, Vec<Stack>) {
     let scripts = Scripts::of(files);
-    let seen = walks_in(&bash(scripts.at("main.bash")));
+    let seen = walks_in(&bash(scripts.at("main.bash"))).await;
 
     (scripts, seen)
 }
@@ -92,12 +88,13 @@ fn walks(files: &[(&str, &str)]) -> (Scripts, Vec<Stack>) {
 /// `main` is the top level of the script bash was given and `source` the top
 /// level of a file it sourced. Neither is a function, and the reader says so
 /// rather than handing on a name that is not one.
-#[test]
-fn bashs_own_words_for_a_frame_come_back_as_what_they_are() {
+#[tokio::test]
+async fn bashs_own_words_for_a_frame_come_back_as_what_they_are() {
     let (_scripts, seen) = walks(&[
         ("lib.bash", "WALK\n"),
         ("main.bash", "source \"$(dirname \"${BASH_SOURCE[0]}\")/lib.bash\"\nWALK\n"),
-    ]);
+    ])
+    .await;
 
     let sites = |at: usize| -> Vec<Site> {
         seen[at].frames().map(|frame| frame.site.clone()).collect()
@@ -112,13 +109,13 @@ fn bashs_own_words_for_a_frame_come_back_as_what_they_are() {
 /// else. Where it pushed none, the walk still ends where it was entered: the
 /// line is the cell the shift leaves over, and `$0` — which bash writes into
 /// `BASH_SOURCE` for code it was given rather than read — is not a path.
-#[test]
-fn a_shell_given_no_script_file_ends_at_the_frame_bash_never_pushed() {
+#[tokio::test]
+async fn a_shell_given_no_script_file_ends_at_the_frame_bash_never_pushed() {
     let inline = "outer() { WALK; }; outer";
     let on_stdin = format!("bash -s <<< {inline:?}");
 
     for (form, code) in [("a command line", inline), ("standard input", on_stdin.as_str())] {
-        let seen = walks_in(&["bash", "-c", code]);
+        let seen = walks_in(&["bash", "-c", code]).await;
         assert_eq!(seen.len(), 1, "{form}");
 
         let sites: Vec<Site> = seen[0].frames().map(|frame| frame.site.clone()).collect();
@@ -134,9 +131,9 @@ fn a_shell_given_no_script_file_ends_at_the_frame_bash_never_pushed() {
 /// The same shape with nothing of the subject's left: every frame bash reported
 /// belongs to the instrument, and the walk is the shell it was entered from.
 /// This is the form a `make` recipe takes, and the one that used to be refused.
-#[test]
-fn a_word_said_at_that_top_level_walks_to_the_shell_alone() {
-    let seen = walks_in(&["bash", "-c", "WALK"]);
+#[tokio::test]
+async fn a_word_said_at_that_top_level_walks_to_the_shell_alone() {
+    let seen = walks_in(&["bash", "-c", "WALK"]).await;
 
     assert_eq!(seen.len(), 1);
     assert_eq!(seen[0].frames().count(), 1);
@@ -147,8 +144,8 @@ fn a_word_said_at_that_top_level_walks_to_the_shell_alone() {
 /// A source path comes back absolute however the subject wrote it, by joining
 /// the walk's own `$PWD`. Nothing is resolved: no symlink is followed and no
 /// `..` collapsed, so the path is bash's own text under a known root.
-#[test]
-fn a_relative_source_comes_back_absolute() {
+#[tokio::test]
+async fn a_relative_source_comes_back_absolute() {
     let (_scripts, seen) = walks(&[
         ("lib.bash", "where() { WALK; }\n"),
         (
@@ -158,7 +155,8 @@ fn a_relative_source_comes_back_absolute() {
              source ./sub/../lib.bash\n\
              where\n",
         ),
-    ]);
+    ])
+    .await;
 
     let Source::File(path) = &seen[0].top().source else {
         panic!("a sourced file is a file, not one of bash's own words")
@@ -176,8 +174,8 @@ fn a_relative_source_comes_back_absolute() {
 /// Bash keeps the path as it was written, so a shell that changes directory
 /// after sourcing leaves a relative one pointing nowhere. That is reported as
 /// a path the run names and does not have, rather than silently guessed right.
-#[test]
-fn a_subject_that_moved_leaves_a_source_that_is_not_there() {
+#[tokio::test]
+async fn a_subject_that_moved_leaves_a_source_that_is_not_there() {
     let (_scripts, seen) = walks(&[
         ("lib.bash", "where() { WALK; }\n"),
         (
@@ -187,7 +185,8 @@ fn a_subject_that_moved_leaves_a_source_that_is_not_there() {
              cd /\n\
              where\n",
         ),
-    ]);
+    ])
+    .await;
 
     let source = &seen[0].top().source;
 

@@ -1,145 +1,105 @@
-# The client half of the protocol, sourced through BASH_ENV by every shell in
-# the subject's process tree. It is shipped verbatim into the run's workspace
-# and finds everything it needs from its own path, so nothing is templated in.
-
-__BC__DIR="${BASH_SOURCE[0]%/*}"
-__BC__UP="$__BC__DIR/up"
-
-# One frame is one atomic write, so it has to fit PIPE_BUF whole, header and
-# delimiter included. Bash measures and slices text in characters and PIPE_BUF
-# counts bytes: `__BC__narrow` is the width at which that cannot matter, a
-# character being at most four bytes in every locale glibc ships and the
-# header and delimiter under 24. Anything wider goes through `__bc_frame`,
-# which works in bytes and fills the frame.
-__BC__PIPE_BUF=4096
-__BC__narrow=$(( (__BC__PIPE_BUF - 24) / 4 ))
+# The client half of the protocol. Sourced through BASH_ENV by every shell in a
+# driven subject's process tree, or by hand. Shipped verbatim into the run's
+# workspace; everything it needs it finds from its own path.
+#
+# One entry per label. `declare -gA` on an array that exists keeps it, so a
+# second session's prelude sourced into the same shell adds a label and takes
+# nothing away.
+declare -gA __BC__DIR __BC__FD __BC__REP __BC__OWNER
 
 # `BC_INSTR` could not do its job — as distinct from an answer that ran and
-# returned non-zero, which is the subject's own business. 125 is what `env`
-# and `timeout` return when the wrapper rather than the payload failed.
+# returned non-zero, which is the subject's business. 125 is what `env` and
+# `timeout` return when the wrapper rather than the payload failed.
 __BC__FAILED=125
-
-__BC__owner=""
-__BC__parent=""
-__BC__fd=""
-__BC__seq=0
 __BC__at=""
 
-# Every command whose failure is a fault is followed by `|| __BC_BAIL` or
-# `|| __BC_THROW`. A `||` list suppresses errexit for everything it calls, so
-# unguarded a function runs on past its own first failure and one fault
-# becomes two. The guards are what make it stop there.
-#
-# Aliases rather than functions because `return` must act in the frame that
-# failed; `expand_aliases` is therefore on before anything using them is
-# parsed. `$?` is read in the first command of each, which is the only place
-# it survives, and every one of them fires from inside a function.
+# `return` must act in the frame that failed, so the guards are aliases and
+# `expand_aliases` is on before anything using them is parsed. `$?` is read in
+# the first command of each, the only place it survives.
 shopt -s expand_aliases
 
 alias __BC_BAIL='return $?'
 alias __BC_THROW='{ __bc_complain "${FUNCNAME[0]} ($?)"; return "$__BC__FAILED"; }'
 
-# One line per fault, naming the call site in the subject rather than a line
-# of ours, which is what a reader can act on.
+# One line per fault, naming the subject's call site.
 __bc_complain() {
     printf 'BC_INSTR: %s at %s\n' "$1" "${__BC__at:-?}" >&2
 }
 
+# $1 the label. Registers it for this shell and attaches this process. Called
+# once, by the rig's own bash, at source; a fork inherits the entry and
+# attaches itself on its first word.
+#
+# `BASH_SOURCE[0]` inside a function is the file the function was defined in,
+# which is the session whose prelude this is.
+BC_JOIN() {
+    __BC__at="${BASH_SOURCE[1]:-?}:${BASH_LINENO[0]:-?}"
+
+    [[ -n ${1-} && $1 != */* && $1 != *[[:space:]]* ]] \
+        || { __bc_complain "label ${1-} will not name a file"; return "$__BC__FAILED"; }
+    [[ -z ${__BC__DIR[$1]-} ]] \
+        || { __bc_complain "label $1 is already joined from ${__BC__DIR[$1]}"; return "$__BC__FAILED"; }
+
+    __BC__DIR[$1]="${BASH_SOURCE[0]%/*}"
+    __bc_attach "$1"
+}
+
+# $1 the label, $2 the verb, the rest the client's words.
 BC_INSTR() {
     __BC__at="${BASH_SOURCE[1]:-?}:${BASH_LINENO[0]:-?}"
 
-    case "${1-}" in
-        say) shift
-             { [[ $BASHPID == "$__BC__owner" ]] || __bc_join; } || __BC_BAIL
-             __bc_send SAY "$@" || __BC_BAIL ;;
-        ask) shift; __bc_ask "$@" ;;
-        *)   __bc_complain "unknown verb ${1-}"
-             return "$__BC__FAILED" ;;
+    [[ -n ${__BC__DIR[${1-}]-} ]] \
+        || { __bc_complain "label ${1-} is not joined"; return "$__BC__FAILED"; }
+    [[ $BASHPID == "${__BC__OWNER[$1]}" ]] || __bc_reattach "$1" || __BC_BAIL
+
+    case "${2-}" in
+        say) __bc_send "$1" SAY "${@:3}" ;;
+        ask) __bc_ask "$1" "${@:3}" ;;
+        *)   __bc_complain "unknown verb ${2-}"; return "$__BC__FAILED" ;;
     esac
 }
 
-# The shell's reply pipe, made for one question and removed by the run as it
-# answers — a shell is blocked while it asks, so the name is free again before
-# the next one. Read-write, so the read waits for an answer rather than seeing
-# end of input.
+# $1 the label. This process's pipe: make it, announce it, open it — the open
+# completes when the run has it in hand, and the run makes the reply pipe
+# before that, so both exist by the time this returns.
 #
-# The array assignment is unguarded because it cannot fail: text bash cannot
-# read as a literal becomes one element, and running that is a command not
-# found. So is the answer's own status, which is the result the caller wants.
-__bc_ask() {
-    { [[ $BASHPID == "$__BC__owner" ]] || __bc_join; } || __BC_BAIL
+# `>` would create a regular file where no fifo is, so the control fifo is
+# checked before it is written: a session that closed unlinked it.
+__bc_attach() {
+    local __bc_dir=${__BC__DIR[$1]}
+    local __bc_tok="$1::$BASHPID.${EPOCHREALTIME#*[.,]}.${SRANDOM:-$RANDOM$RANDOM}"
+    local __bc_fd __bc_rep
 
-    local __bc_reply="$__BC__DIR/rep.$BASHPID"
-    local __bc_fd
-    mkfifo "$__bc_reply" || __BC_THROW
-    exec {__bc_fd}<>"$__bc_reply" || __BC_THROW
+    [[ -p "$__bc_dir/join" ]] || { __bc_complain "no session at $__bc_dir"; return "$__BC__FAILED"; }
+    mkfifo "$__bc_dir/up.$__bc_tok"                 || __BC_THROW
+    printf '%s\n' "$__bc_tok" >"$__bc_dir/join"     || __BC_THROW
+    exec {__bc_fd}>"$__bc_dir/up.$__bc_tok"         || __BC_THROW
+    exec {__bc_rep}<>"$__bc_dir/rep.$__bc_tok"      || __BC_THROW
 
-    __bc_send ASK "$@" || __BC_BAIL
+    __BC__FD[$1]=$__bc_fd
+    __BC__REP[$1]=$__bc_rep
+    __BC__OWNER[$1]=$BASHPID
 
-    local __bc_line
-    IFS= read -r __bc_line <&"$__bc_fd" || __BC_THROW
-    exec {__bc_fd}>&- || __BC_THROW
-
-    local -a __bc_answer="$__bc_line"
-
-    "${__bc_answer[@]}"
+    __bc_account "$1" || __BC_BAIL
 }
 
-# $1 is the kind, the rest what the shell is saying. The protocol's own words
-# go in front of it, and the reader shifts exactly those back off.
-#
-# Only the clock rides here. A shell's pid, its parent and its $SHLVL do not
-# change while it lives, so they are in the account it gives on joining, and
-# every message after that is two words shorter for it. The frame header
-# already carries the pid, which is what routes a message to its shell.
-__bc_send() {
-    local __bc_seq=$(( __BC__seq++ ))
-    set -- "$1" "at=$EPOCHREALTIME" "${@:2}"
-
-    local __bc_msg
-    printf -v __bc_msg '%s ' "${@@Q}"
-    __bc_msg="(${__bc_msg% })"
-
-    if (( ${#__bc_msg} <= __BC__narrow )); then
-        printf '. %s %s %s\n' \
-            "$BASHPID" "$__bc_seq" "$__bc_msg" >&"$__BC__fd" || __BC_THROW
-        return 0
-    fi
-
-    LC_ALL=C __bc_frame "$__bc_seq" "$__bc_msg" || __BC_BAIL
+# $1 the label. A fork inherited its parent's descriptors; it drops them and
+# takes its own, so a parent's pipe is held only by processes that could write
+# on it.
+__bc_reattach() {
+    local __bc_fd=${__BC__FD[$1]} __bc_rep=${__BC__REP[$1]}
+    exec {__bc_fd}>&- {__bc_rep}>&- || __BC_THROW
+    __bc_attach "$1"
 }
 
-# A shell's first message is its account of itself, and it carries seq 0.
-#
-# Everything below is passed as bash reports it, and nothing here decides what
-# any of it means: `$-` mixes the invocation letters with the options a subject
-# can change, `$0` is a path only where bash was handed a file, and which bash
-# behaves how is a question about $BASH_VERSINFO. All of that is read on the
-# other side, where it can be checked without running a shell.
-#
-# $BASH_EXECUTION_STRING exists only under `-c`, so it is read through `-` for
-# the same reason every other name here is not: an unset one is an error under
-# `set -u`, and a client that joins a session of its own has that on before any
-# of this is sourced.
-#
-# This is the first moment a shell can speak. Under a driven run the address
-# came in through BASH_ENV before the shell's first line; a shell that joined of
-# its own accord sourced it by hand. Neither is knowable from here, and neither
-# needs to be.
-__bc_join() {
-    # `IFS` for this frame alone: the version below is joined with `[*]`, which
-    # uses the subject's, and a subject with one of its own would corrupt it.
-    # Returning gives the subject's back, including one that was unset.
+# $1 the label. The first line on the pipe, and the only line of its kind.
+# Every value is passed as bash reports it; what any of it means is read on
+# the other side. `IFS` is local so `[*]` joins with a space whatever the
+# subject's is, and the subject's — unset included — is back on return.
+__bc_account() {
     local IFS=' '
-
-    __BC__parent=${__BC__owner:-$PPID}
-
-    exec {__BC__fd}>"$__BC__UP" || __BC_THROW
-    __BC__owner=$BASHPID
-    __BC__seq=0
-
-    __bc_send JOIN \
-        parent    "$__BC__parent" \
+    __bc_send "$1" JOIN \
+        pid       "$BASHPID" \
         shlvl     "$SHLVL" \
         subshell  "$BASH_SUBSHELL" \
         versinfo  "(${BASH_VERSINFO[*]@Q})" \
@@ -148,47 +108,31 @@ __bc_join() {
         flags     "$-" \
         shellopts "$SHELLOPTS" \
         bashopts  "$BASHOPTS" \
-        command   "${BASH_EXECUTION_STRING-}" \
-        || __BC_BAIL
+        command   "${BASH_EXECUTION_STRING-}"
 }
 
-# $1 the sequence number, $2 a message the narrow lane would not take. Every
-# chunk repeats `pid seq`, the key the reader rejoins them by.
-#
-# `LC_ALL=C` rides on the call, which scopes it to this frame and gives the
-# subject's back — including one that was unset — without a name to restore. It
-# is what makes `${#…}` and `${…:from:room}` count the bytes PIPE_BUF counts;
-# the message itself was quoted by the caller, in the subject's own locale, so
-# what goes on the wire is unchanged. Taking it costs about 7 µs, which is why
-# the narrow lane exists and why it is measured in characters.
-#
-# A cut may fall inside a character. The reader joins chunks as bytes and
-# decodes the message once, for the same reason it buffers reads as bytes.
-#
-# The cursor moves by assignment: `(( x += n ))` is a command, and its status
-# is false when the result is 0.
-__bc_frame() {
-    local __bc_head="$BASHPID $1"
-    local __bc_msg="$2"
-    local __bc_size=${#__bc_msg}
-    local __bc_room=$(( __BC__PIPE_BUF - ${#__bc_head} - 4 ))
-
-    if (( __bc_size <= __bc_room )); then
-        printf '. %s %s\n' "$__bc_head" "$__bc_msg" >&"$__BC__fd" || __BC_THROW
-        return 0
-    fi
-
-    local __bc_from=0
-    while (( __bc_from + __bc_room < __bc_size )); do
-        printf '+ %s %s\n' \
-            "$__bc_head" "${__bc_msg:__bc_from:__bc_room}" >&"$__BC__fd" || __BC_THROW
-        __bc_from=$(( __bc_from + __bc_room ))
-    done
-
-    printf '. %s %s\n' "$__bc_head" "${__bc_msg:__bc_from}" >&"$__BC__fd" || __BC_THROW
+# $1 the label, $2 the verb, the rest the words. One line, one printf: the
+# pipe has one writer, so the size of the line does not matter.
+__bc_send() {
+    local IFS=' ' __bc_fd=${__BC__FD[$1]}
+    set -- "$2" "at=$EPOCHREALTIME" "${@:3}"
+    printf '(%s)\n' "${*@Q}" >&"$__bc_fd" || __BC_THROW
 }
 
-# The rig's own bash, laid down beside this file by the run. Unguarded: a
-# `BASH_ENV` file's status is discarded by bash and errexit does not reach
-# here, so nothing a guard returned could be read by anyone.
-source "$__BC__DIR/rig.bash"
+# $1 the label, the rest the question. The reply pipe was opened at attach and
+# is read-write, so the read waits for an answer rather than seeing end of
+# input. The answer is one command, as a bash array literal; running it is the
+# result the caller gets.
+__bc_ask() {
+    __bc_send "$1" ASK "${@:2}" || __BC_BAIL
+
+    local __bc_line
+    IFS= read -r __bc_line <&"${__BC__REP[$1]}" || __BC_THROW
+
+    local -a __bc_answer="$__bc_line"
+    "${__bc_answer[@]}"
+}
+
+# The rig's own bash, laid beside this file by the run. It ends with
+# `BC_JOIN <LABEL>`.
+source "${BASH_SOURCE[0]%/*}/rig.bash"

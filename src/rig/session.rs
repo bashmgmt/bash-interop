@@ -1,53 +1,41 @@
-//! The conversation itself: a workspace with a wire in it, one reaction per
-//! shell, and the loop that serves until nobody can speak any more.
-//!
-//! What "nobody can speak any more" means is a [`Watch`] — a descriptor the
-//! role built. Which shells it stands for, and whether anything is owed to them
-//! afterwards, belongs to the role and not here.
+//! The conversation: a workspace with the control fifo in it, one task per
+//! shell, and the loop that admits shells until the watch fires.
 
-use std::collections::HashMap;
 use std::fs;
 use std::sync::Arc;
 
 use tempfile::TempDir;
+use tokio::sync::watch;
+use tokio::task::JoinSet;
 
-use super::watch::{wait_for, Ready, Watch};
-use super::wire::{prelude, Arrived, Pid, Verb, Wire};
-use super::{Attended, Kept, Layout, Reacting, Rig, Shell, Workspace};
+use super::attend::attend;
+use super::watch::Watch;
+use super::wire::{self, prelude, Account, Control, Pipe};
+use super::{Attended, Kept, Layout, Rig, Shell, Workspace};
 use crate::failure::{Doing, Failure};
 
-/// One shell and the reaction built for it. Having one is the whole proof that
-/// the shell announced itself: there is no other way to make one.
-struct Attending<A> {
-    shell: Arc<Shell>,
-    reacting: A,
-}
-
-/// An open conversation: the workspace is written and the pipe is open. What
-/// is missing is who speaks and what ends it.
 pub(super) struct Session<'r, R: Rig> {
     rig: &'r R,
     pub(super) layout: Layout,
-    wire: Wire,
+    control: Control,
+    attending: JoinSet<Result<Attended<Kept<R>>, Failure>>,
+    closing: watch::Sender<bool>,
 
-    shells: Vec<Attending<R::Reaction>>,
+    /// The next shell's `nth`.
+    joined: usize,
+    done: Vec<Attended<Kept<R>>>,
 
-    /// The newest shell carrying each pid, which is what a later message from
-    /// that pid belongs to. A pid reused across a long run opens a new shell
-    /// rather than reopening the first.
-    newest: HashMap<Pid, usize>,
-
-    /// Held only to be dropped: it takes the workspace with it, and it goes
-    /// last so nothing is reading the files when it does.
+    /// Held only to be dropped: it takes the workspace with it, last.
     _temporary: Option<TempDir>,
 }
 
 impl<'r, R: Rig> Session<'r, R> {
     /// The workspace is canonicalised: every shell reads its own location from
-    /// the path it was sourced from, so a relative one would move with the
-    /// subject.
+    /// the path it was sourced from. The session's soft descriptor limit is
+    /// raised to the hard one, since every attached shell holds one.
     pub(super) fn open(rig: &'r R) -> Result<Self, Failure> {
-        let (at, temporary) = match rig.workspace() {
+        let setup = rig.setup();
+        let (at, temporary) = match setup.workspace {
             Workspace::At(at) => (at, None),
             Workspace::Temporary => {
                 let temp =
@@ -61,87 +49,93 @@ impl<'r, R: Rig> Session<'r, R> {
         fs::create_dir_all(&at).doing(opening)?;
         let dir = fs::canonicalize(&at).doing(opening)?;
 
-        let wire = Wire::create(&dir)?;
-        let prelude = prelude(&dir, &rig.bash())?;
+        raise_descriptor_limit()?;
+        let control = Control::open(&dir)?;
+        let prelude = prelude(&dir, &setup.bash)?;
+        let (closing, _) = watch::channel(false);
 
         Ok(Self {
             rig,
             layout: Layout { dir, prelude },
-            wire,
-            shells: Vec::new(),
-            newest: HashMap::new(),
+            control,
+            attending: JoinSet::new(),
+            closing,
+            joined: 0,
+            done: Vec::new(),
             _temporary: temporary,
         })
     }
 
-    /// Every message the pipe holds, handed to the shell that sent it. An
-    /// account of itself makes that shell; everything else needs one to already
-    /// exist, and a message from a pid that never announced itself is a fault.
-    ///
-    /// A shell that asked is blocked until its answer is written, so writing it
-    /// is part of delivering rather than something a caller does afterwards.
-    fn deliver(&mut self) -> Result<(), Failure> {
-        for arrived in self.wire.drain()? {
-            match arrived {
-                Arrived::Account { pid, stamp, words } => {
-                    let shell = Arc::new(Shell::of(self.shells.len(), pid, stamp, &words)?);
-                    let reacting = self.rig.joined(&self.layout, shell.clone())?;
-
-                    self.newest.insert(pid, self.shells.len());
-                    self.shells.push(Attending { shell, reacting });
-                }
-
-                Arrived::Message { pid, message } => {
-                    let at = *self.newest.get(&pid).ok_or_else(|| {
-                        Failure::new(
-                            "placing a message",
-                            format!("pid {pid} spoke without ever joining"),
-                        )
-                    })?;
-                    let reacting = &mut self.shells[at].reacting;
-
-                    match message.verb {
-                        Verb::Say => reacting.hear(message)?,
-                        Verb::Ask => {
-                            let answer = reacting.answer(message)?;
-
-                            self.wire.answer(pid, answer)?;
-                        }
-                    }
-                }
+    /// Serve until the watch fires. Everything a shell says is heard by its
+    /// own task; this loop admits shells and notices a task that failed.
+    pub(super) async fn serve(&mut self, watch: &Watch) -> Result<(), Failure> {
+        loop {
+            tokio::select! {
+                biased;
+                token = self.control.next() => self.announced(token?).await?,
+                Some(done) = self.attending.join_next() => self.done.push(finished(done)?),
+                fired = watch.fired() => return fired,
             }
         }
+    }
+
+    /// A token on the control fifo. The reply pipe is made before the shell's
+    /// pipe is opened, so it exists before the shell can be released; the
+    /// shell's first line is its account, and only then is there a shell.
+    async fn announced(&mut self, token: String) -> Result<(), Failure> {
+        let (up, rep) = (wire::up(&self.layout.dir, &token), wire::rep(&self.layout.dir, &token));
+        wire::mkfifo(&rep)?;
+        let mut pipe = Pipe::open(up, rep)?;
+
+        let Some(first) = pipe.lines.next().await? else { return pipe.close() };
+        let account = Account::read(first)?;
+        let shell = Arc::new(Shell::of(self.joined, account)?);
+        self.joined += 1;
+        let reaction = self.rig.joined(&self.layout, Arc::clone(&shell)).await?;
+
+        self.attending.spawn_local(attend(shell, pipe, reaction, self.closing.subscribe()));
+
         Ok(())
     }
 
-    /// Serve until nobody can speak any more. There is no interval and no
-    /// timer.
-    ///
-    /// The pipe is polled first, so a message already waiting is read before
-    /// the end is noticed, and the delivery behind the loop takes what arrived
-    /// with it.
-    pub(super) fn drive(&mut self, watch: &Watch) -> Result<(), Failure> {
-        while let Ready::Spoke = wait_for(&self.wire, watch)? {
-            self.deliver()?;
-        }
+    /// The watch has fired. Everything not yet a shell is released and let go;
+    /// every shell reads what its pipe already holds and finishes.
+    pub(super) async fn close(mut self) -> (Vec<Attended<Kept<R>>>, Option<Failure>) {
+        let mut failed = self.control.close().err();
+        let _ = self.closing.send(true);
 
-        self.deliver()
-    }
-
-    /// Release what the session holds. A message left half-read is reported
-    /// before any reaction is asked to finish, since it is the earlier fault.
-    pub(super) fn finish(self) -> (Vec<Attended<Kept<R>>>, Option<Failure>) {
-        let Self { shells, wire, .. } = self;
-        let mut failed = wire.finish().err();
-        let mut done = Vec::with_capacity(shells.len());
-
-        for Attending { shell, reacting } in shells {
-            match reacting.finish() {
-                Ok(kept) => done.push(Attended { shell, kept }),
+        while let Some(done) = self.attending.join_next().await {
+            match finished(done) {
+                Ok(at) => self.done.push(at),
                 Err(why) => failed = failed.or(Some(why)),
             }
         }
+        self.done.sort_by_key(|at| at.shell.nth);
 
-        (done, failed)
+        (self.done, failed)
     }
+}
+
+/// A task's outcome. A panic in a reaction is a defect and stays one.
+fn finished<K>(
+    done: Result<Result<Attended<K>, Failure>, tokio::task::JoinError>,
+) -> Result<Attended<K>, Failure> {
+    match done {
+        Ok(outcome) => outcome,
+        Err(join) => std::panic::resume_unwind(join.into_panic()),
+    }
+}
+
+fn raise_descriptor_limit() -> Result<(), Failure> {
+    let raising = || "raising the descriptor limit".to_string();
+    let mut limit = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+
+    if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut limit) } < 0 {
+        return Err(std::io::Error::last_os_error()).doing(raising);
+    }
+    limit.rlim_cur = limit.rlim_max;
+    if unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &limit) } < 0 {
+        return Err(std::io::Error::last_os_error()).doing(raising);
+    }
+    Ok(())
 }

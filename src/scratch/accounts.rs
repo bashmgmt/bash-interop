@@ -7,18 +7,20 @@
 
 use std::sync::Arc;
 
-use crate::bash::rig::{Micros, Pid, Shell, Stamp};
+use crate::bash::rig::wire::Account;
+use crate::bash::rig::{Micros, Shell, Stamp};
 use crate::bash::value::emit_array;
 
-/// The words a `JOIN` message carries. `zero` is the shell's `$0` and `flags`
-/// its `$-`, which between them decide how a walk taken in it reads.
-pub fn account(zero: &str, flags: &str) -> Vec<String> {
+/// The words a `JOIN` line carries. `zero` is the shell's `$0` and `flags` its
+/// `$-`, which between them decide how a walk taken in it reads.
+pub fn account(pid: u32, zero: &str, flags: &str) -> Vec<String> {
     let versinfo =
         emit_array(&["5", "3", "9", "1", "release", "x86_64-pc-linux-gnu"].map(String::from));
     let command = if flags.contains('c') { "true" } else { "" };
+    let pid = pid.to_string();
 
     [
-        "parent", "1",
+        "pid", pid.as_str(),
         "shlvl", "5",
         "subshell", "0",
         "versinfo", versinfo.as_str(),
@@ -36,9 +38,9 @@ pub fn account(zero: &str, flags: &str) -> Vec<String> {
 
 /// A shell, as one would arrive.
 pub fn shell(nth: usize, pid: u32, zero: &str, flags: &str) -> Arc<Shell> {
-    let joined = Stamp { nth: 0, seq: 0, sent_at: Micros(100), heard_at: Micros(101) };
+    let stamp = Stamp { sent_at: Micros(100), heard_at: Micros(101) };
 
-    Arc::new(Shell::of(nth, Pid(pid), joined, &account(zero, flags)).expect("an account"))
+    Arc::new(Shell::of(nth, Account { stamp, words: account(pid, zero, flags) }).expect("an account"))
 }
 
 /// A shell bash was handed a file to read.

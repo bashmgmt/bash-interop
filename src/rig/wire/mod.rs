@@ -1,40 +1,47 @@
-//! The protocol: the bash that speaks it, where its files sit, the pipe it
-//! travels on, the frame around a message, and the answer that goes back.
+//! The protocol: the bash that speaks it, where its files sit, the fifos it
+//! travels on, and the lines on them.
 
-mod framing;
+mod control;
+mod lines;
 mod message;
-mod pipes;
+mod pipe;
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::failure::{Doing, Failure};
 
-pub(super) use message::Arrived;
-pub use message::{field, Answer, Verb, Message, Micros, Pid, Stamp};
-pub use pipes::Wire;
+pub(crate) use control::Control;
+pub(crate) use message::{Account, Line};
+pub(crate) use pipe::Pipe;
+pub use message::{field, Answer, Message, Micros, Pid, Stamp, Verb};
 
-/// The client half, shipped verbatim. It locates the workspace from its own
-/// path, so there is nothing to substitute into it.
+/// The client half, shipped verbatim.
 const PRELUDE: &str = include_str!("prelude.bash");
 
-/// The one FIFO every shell joins. `Wire` makes it and the bash names it, so it
-/// is derived here and nowhere else.
-pub(crate) fn up(dir: &Path) -> PathBuf {
-    dir.join("up")
+/// The control fifo, made and held by the run; the bash names it the same way.
+pub(crate) fn join(dir: &Path) -> PathBuf {
+    dir.join("join")
 }
 
-/// Where a shell blocked on an ask is listening. Made for one question and
-/// removed with its answer, so a run holds no descriptor and leaves no file per
-/// ask. The bash builds the same path from `__BC__DIR`, which is why the run
-/// tells it the directory and not this.
-pub(crate) fn reply(dir: &Path, pid: Pid) -> PathBuf {
-    dir.join(format!("rep.{pid}"))
+/// One shell's pipe, made by the shell.
+pub(crate) fn up(dir: &Path, token: &str) -> PathBuf {
+    dir.join(format!("up.{token}"))
+}
+
+/// One shell's reply pipe, made by the run before the shell can ask.
+pub(crate) fn rep(dir: &Path, token: &str) -> PathBuf {
+    dir.join(format!("rep.{token}"))
+}
+
+pub(crate) fn mkfifo(path: &Path) -> Result<(), Failure> {
+    nix::unistd::mkfifo(path, nix::sys::stat::Mode::S_IRWXU)
+        .doing(|| format!("making the fifo {}", path.display()))
 }
 
 /// Lays the protocol's bash into `dir` with the rig's beside it, and returns
-/// the file `BASH_ENV` must name. Both are written as they are: `dir` must be
-/// absolute, since that path is what every shell reads its own location from.
+/// the file `BASH_ENV` names. `dir` must be absolute: every shell reads its
+/// own location from that path.
 pub fn prelude(dir: &Path, bash: &str) -> Result<PathBuf, Failure> {
     let entry = dir.join("prelude.bash");
 
@@ -49,26 +56,21 @@ pub fn prelude(dir: &Path, bash: &str) -> Result<PathBuf, Failure> {
 mod tests {
     use super::*;
 
-    /// The namespace. Everything the protocol brings is called `__BC_…`, so
-    /// nothing it does can collide with a name the subject chose.
-    const OURS: &str = "__BC_";
+    /// The namespace: everything the protocol brings is called `__BC_…` or
+    /// `BC_…`, so nothing it does can collide with a name the subject chose.
+    const OURS: &str = "BC_";
 
-    /// What the subject's shell keeps. Every one of these is a property of
-    /// the file, so none of them needs bash to run — and every one of them is
-    /// about names and options the subject owns, never about ours.
+    /// What the subject's shell keeps. Every one of these is a property of the
+    /// file, so none needs bash to run.
     ///
     /// `expand_aliases` is the one option the protocol turns on, and it stays
     /// on: the guards have to be aliases, because `return` must act in the
-    /// frame that failed. A subject's own aliases therefore expand where they
-    /// otherwise would not — the single change this makes, made once and
-    /// written down rather than asserted away.
+    /// frame that failed.
     #[test]
     fn the_protocol_half_touches_little_of_the_subject_s() {
         let code: Vec<&str> =
             PRELUDE.lines().filter(|line| !line.trim_start().starts_with('#')).collect();
 
-        // Only what reaches past the namespace counts: a word of ours may be
-        // spelled however it likes.
         let theirs: Vec<String> = code
             .iter()
             .map(|line| {
@@ -99,7 +101,7 @@ mod tests {
                 && name.chars().all(|c| c.is_alphanumeric() || c == '_')
                 && rest.split_whitespace().count() <= 1;
 
-            assert!(!global || name.starts_with(OURS), "a name outside {OURS}: {line}");
+            assert!(!global || name.contains(OURS), "a name outside {OURS}: {line}");
         }
     }
 }
