@@ -85,7 +85,7 @@ impl Source {
         match source {
             "environment" => Self::Environment,
             "main" => Self::Prompt,
-            word if word == shell.bash.zero && !shell.bash.started.from_a_file() => Self::Shell,
+            word if word == shell.bash.zero && !shell.bash.invocation.from_a_file() => Self::Shell,
             // An absolute path replaces the base; a relative one joins it.
             path => Self::File(pwd.join(path)),
         }
@@ -168,12 +168,12 @@ impl Stack {
     }
 
     /// The frame the walk was taken in.
-    pub fn at(&self) -> &Frame {
+    pub fn top(&self) -> &Frame {
         &self.at
     }
 
     /// The frames above it, outermost last.
-    pub fn outer(&self) -> &[Frame] {
+    pub fn below(&self) -> &[Frame] {
         &self.outer
     }
 

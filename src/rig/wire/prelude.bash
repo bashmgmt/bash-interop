@@ -21,7 +21,7 @@ __BC__FAILED=125
 
 __BC__owner=""
 __BC__parent=""
-__BC__up=""
+__BC__fd=""
 __BC__seq=0
 __BC__at=""
 
@@ -102,7 +102,7 @@ __bc_send() {
 
     if (( ${#__bc_msg} <= __BC__narrow )); then
         printf '. %s %s %s\n' \
-            "$BASHPID" "$__bc_seq" "$__bc_msg" >&"$__BC__up" || __BC_THROW
+            "$BASHPID" "$__bc_seq" "$__bc_msg" >&"$__BC__fd" || __BC_THROW
         return 0
     fi
 
@@ -134,7 +134,7 @@ __bc_join() {
 
     __BC__parent=${__BC__owner:-$PPID}
 
-    exec {__BC__up}>"$__BC__UP" || __BC_THROW
+    exec {__BC__fd}>"$__BC__UP" || __BC_THROW
     __BC__owner=$BASHPID
     __BC__seq=0
 
@@ -174,18 +174,18 @@ __bc_frame() {
     local __bc_room=$(( __BC__PIPE_BUF - ${#__bc_head} - 4 ))
 
     if (( __bc_size <= __bc_room )); then
-        printf '. %s %s\n' "$__bc_head" "$__bc_msg" >&"$__BC__up" || __BC_THROW
+        printf '. %s %s\n' "$__bc_head" "$__bc_msg" >&"$__BC__fd" || __BC_THROW
         return 0
     fi
 
     local __bc_from=0
     while (( __bc_from + __bc_room < __bc_size )); do
         printf '+ %s %s\n' \
-            "$__bc_head" "${__bc_msg:__bc_from:__bc_room}" >&"$__BC__up" || __BC_THROW
+            "$__bc_head" "${__bc_msg:__bc_from:__bc_room}" >&"$__BC__fd" || __BC_THROW
         __bc_from=$(( __bc_from + __bc_room ))
     done
 
-    printf '. %s %s\n' "$__bc_head" "${__bc_msg:__bc_from}" >&"$__BC__up" || __BC_THROW
+    printf '. %s %s\n' "$__bc_head" "${__bc_msg:__bc_from}" >&"$__BC__fd" || __BC_THROW
 }
 
 # The rig's own bash, laid down beside this file by the run. Unguarded: a

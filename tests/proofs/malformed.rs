@@ -1,11 +1,11 @@
 //! What the reader does with a stream that is not what the protocol writes.
 //!
 //! These are the one place a proof reaches past the client surface: the
-//! subject writes raw frames to `$__BC__up` itself, because producing a
+//! subject writes raw frames to `$__BC__fd` itself, because producing a
 //! truncated or colliding one is the whole point. Everything else about the
 //! run is ordinary.
 
-use mb_resolver::bash::rig::{ExitStatus, Master};
+use mb_resolver::bash::rig::{Driving, ExitStatus};
 
 use crate::support::{bash, Scripts};
 use crate::{behind, report, Keeping, ENTRY};
@@ -19,7 +19,7 @@ fn an_unfinished_message_is_reported_beside_the_subjects_status() {
         ENTRY,
         r#"
         BC_INSTR say REC first
-        printf '+ %s 99 (never finished\n' "$BASHPID" >&"$__BC__up"
+        printf '+ %s 99 (never finished\n' "$BASHPID" >&"$__BC__fd"
         BC_INSTR say REC second
         exit 3
         "#,
@@ -47,7 +47,7 @@ fn a_message_that_will_not_read_ends_the_run() {
         ENTRY,
         r#"
         BC_INSTR say REC first
-        printf '+ %s %s (junk\n' "$BASHPID" "$__BC__seq" >&"$__BC__up"
+        printf '+ %s %s (junk\n' "$BASHPID" "$__BC__seq" >&"$__BC__fd"
         BC_INSTR say REC second
         "#,
     )]);

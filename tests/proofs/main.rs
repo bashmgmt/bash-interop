@@ -34,7 +34,7 @@ mod support;
 use std::sync::Arc;
 
 use mb_resolver::bash::rig::{
-    heard, Attended, Failure, Laid, Line, Master, Rig, Shell, Whole, Workspace,
+    heard, Attended, Driving, Failure, Layout, Message, Rig, Shell, Whole, Workspace,
 };
 
 use support::{bash, Scripts};
@@ -57,22 +57,27 @@ impl Keeping {
 }
 
 impl Rig for Keeping {
-    type Attending = Vec<Line>;
+    type Reaction = Vec<Message>;
+
+    /// No words of its own in the subject's shells.
+    fn bash(&self) -> String {
+        String::new()
+    }
 
     fn workspace(&self) -> Workspace {
         self.workspace.clone()
     }
 
-    fn joined(&self, _at: &Laid, _shell: Arc<Shell>) -> Result<Vec<Line>, Failure> {
+    fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Vec<Message>, Failure> {
         Ok(Vec::new())
     }
 }
 
-impl Master for Keeping {}
+impl Driving for Keeping {}
 
 /// A run of that rig, taken whole: every proof that expects a run to go through
 /// takes it that way, since a partial reading proves nothing.
-pub type Ran = Whole<Vec<Line>>;
+pub type Ran = Whole<Vec<Message>>;
 
 pub fn running(files: &[(&str, &str)]) -> Ran {
     let scripts = Scripts::of(files);
@@ -88,14 +93,14 @@ pub fn script(body: &str) -> Ran {
 }
 
 /// Every message the run heard, whichever shell said it, in arrival order.
-pub fn lines<K: AsRef<[Line]>>(shells: &[Attended<K>]) -> Vec<&Line> {
-    heard(shells).into_iter().map(|said| said.line).collect()
+pub fn lines<K: AsRef<[Message]>>(shells: &[Attended<K>]) -> Vec<&Message> {
+    heard(shells).into_iter().map(|said| said.message).collect()
 }
 
 /// Every message that begins with `lead`, as the words behind it. Words, not
 /// a joined string: the boundaries are what the wire is for.
-pub fn behind<'a, K: AsRef<[Line]>>(shells: &'a [Attended<K>], lead: &str) -> Vec<&'a [String]> {
-    lines(shells).into_iter().filter_map(|line| line.behind(lead)).collect()
+pub fn behind<'a, K: AsRef<[Message]>>(shells: &'a [Attended<K>], lead: &str) -> Vec<&'a [String]> {
+    lines(shells).into_iter().filter_map(|message| message.behind(lead)).collect()
 }
 
 /// How many of those begin with `word`.
@@ -116,10 +121,10 @@ pub fn gone(pid: i32) -> bool {
 }
 
 /// Everything that happened, for an assertion message.
-pub fn report<K: AsRef<[Line]>>(shells: &[Attended<K>]) -> String {
+pub fn report<K: AsRef<[Message]>>(shells: &[Attended<K>]) -> String {
     let lines: Vec<String> = heard(shells)
         .iter()
-        .map(|said| format!("  pid {:>7} | {}", said.shell.pid, said.line.words.join(" ")))
+        .map(|said| format!("  pid {:>7} | {}", said.shell.pid, said.message.words.join(" ")))
         .collect();
 
     format!("\ncapture:\n{}", lines.join("\n"))

@@ -6,7 +6,7 @@
 //! first and is `framing`'s concern.
 //!
 //! What a shell wrote is one of two things and they do not mix: an account of
-//! itself, which it gives once, or an arglist of its client's. [`Line`] is only
+//! itself, which it gives once, or an arglist of its client's. [`Message`] is only
 //! ever the second.
 
 use std::fmt;
@@ -57,7 +57,7 @@ impl fmt::Display for Pid {
 /// payload word, and the protocol never reads one.
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize)]
 #[serde(rename_all = "UPPERCASE")]
-pub enum Kind {
+pub enum Verb {
     Say,
     Ask,
 }
@@ -68,7 +68,7 @@ pub enum Kind {
 /// not change while it lives, so they are what it said once, on joining, and
 /// are reached through the shell a reaction was handed.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Sent {
+pub struct Stamp {
     /// Counted over the whole run, in the order the run read messages. What
     /// puts per-shell foldings back into arrival order.
     pub nth: u64,
@@ -86,15 +86,15 @@ pub struct Sent {
 
 /// What one shell's client said, once.
 #[derive(Debug, Clone, Serialize)]
-pub struct Line {
-    pub kind: Kind,
-    pub sent: Sent,
+pub struct Message {
+    pub verb: Verb,
+    pub stamp: Stamp,
 
     /// The client's arglist, and nothing of the protocol's.
     pub words: Vec<String>,
 }
 
-impl Line {
+impl Message {
     /// The words after `lead`, if this message begins with it — how a decoder
     /// claims one family of messages and declines the rest.
     pub fn behind(&self, lead: &str) -> Option<&[String]> {
@@ -108,7 +108,7 @@ impl Line {
 /// What the frame around a message said, and when the run read it. The sending
 /// shell's own clock is a word inside the message and is read there.
 #[derive(Copy, Clone, Debug)]
-pub(super) struct Framed {
+pub(super) struct Envelope {
     pub pid: Pid,
 
     /// Counted over the whole run, in the order the frames completed.
@@ -118,40 +118,47 @@ pub(super) struct Framed {
     pub heard_at: Micros,
 }
 
-/// What came off the wire. A shell's account of itself is not a [`Line`] and
-/// cannot become one: it is what makes a shell, and a `Line` presupposes one.
+/// What came off the wire. A shell's account of itself is not a [`Message`] and
+/// cannot become one: it is what makes a shell, and a `Message` presupposes one.
 ///
 /// `pid` is routing and stops here. What a reaction sees of the sending shell
 /// is the shell it was built with.
 #[derive(Debug)]
 pub(crate) enum Arrived {
-    Joined { pid: Pid, sent: Sent, account: Vec<String> },
-    Spoke { pid: Pid, line: Line },
+    /// A shell's account of itself, which is what makes a shell.
+    Account { pid: Pid, stamp: Stamp, words: Vec<String> },
+
+    /// Anything else it said, which presupposes one.
+    Message { pid: Pid, message: Message },
 }
 
 impl Arrived {
-    pub(super) fn read(framed: Framed, literal: &str) -> Result<Self, Failure> {
+    pub(super) fn read(envelope: Envelope, literal: &str) -> Result<Self, Failure> {
         let at = || format!("reading the message {literal:?}");
 
         let words = parse_array(literal).doing(at)?;
 
-        Self::shifted(framed, words).doing(at)
+        Self::shifted(envelope, words).doing(at)
     }
 
-    fn shifted(framed: Framed, words: Vec<String>) -> Result<Self, &'static str> {
-        let Framed { pid, nth, seq, heard_at } = framed;
+    fn shifted(envelope: Envelope, words: Vec<String>) -> Result<Self, &'static str> {
+        let Envelope { pid, nth, seq, heard_at } = envelope;
         let mut ahead = Ahead(words.into_iter());
 
-        let kind = ahead.word()?;
+        let verb = ahead.word()?;
         let sent_at = Micros::parse_epoch(&ahead.header("at")?).ok_or("bad at")?;
-        let sent = Sent { nth, seq, sent_at, heard_at };
+        let stamp = Stamp { nth, seq, sent_at, heard_at };
 
-        Ok(match kind.as_str() {
-            "JOIN" => Self::Joined { pid, sent, account: ahead.rest() },
-            "SAY" => Self::Spoke { pid, line: Line { kind: Kind::Say, sent, words: ahead.rest() } },
-            "ASK" => Self::Spoke { pid, line: Line { kind: Kind::Ask, sent, words: ahead.rest() } },
-            _ => return Err("unknown kind"),
+        Ok(match verb.as_str() {
+            "JOIN" => Self::Account { pid, stamp, words: ahead.rest() },
+            "SAY" => Self::spoke(pid, Verb::Say, stamp, ahead),
+            "ASK" => Self::spoke(pid, Verb::Ask, stamp, ahead),
+            _ => return Err("unknown verb"),
         })
+    }
+
+    fn spoke(pid: Pid, verb: Verb, stamp: Stamp, ahead: Ahead) -> Self {
+        Self::Message { pid, message: Message { verb, stamp, words: ahead.rest() } }
     }
 }
 
@@ -207,6 +214,17 @@ impl Answer {
     pub fn status(code: u8) -> Self {
         Self::of("return", [code.to_string()])
     }
+
+    /// A word this rig has no answer for. 127 is bash's own "command not
+    /// found", which is the claim being made.
+    pub fn unknown() -> Self {
+        Self::status(127)
+    }
+
+    /// Ran, and nothing to say about it.
+    pub fn ok() -> Self {
+        Self::status(0)
+    }
 }
 
 /// One line, whatever it carries: the bash array literal a shell reads back
@@ -226,53 +244,53 @@ mod tests {
         items.iter().map(|item| item.to_string()).collect()
     }
 
-    fn framed() -> Framed {
-        Framed { pid: Pid(9), nth: 3, seq: 7, heard_at: Micros(50) }
+    fn envelope() -> Envelope {
+        Envelope { pid: Pid(9), nth: 3, seq: 7, heard_at: Micros(50) }
     }
 
     fn read(kind: &str, payload: &[&str]) -> Result<Arrived, Failure> {
         let mut all = words(&[kind, "at=1.000002"]);
         all.extend(words(payload));
 
-        Arrived::read(framed(), &emit_array(&all))
+        Arrived::read(envelope(), &emit_array(&all))
     }
 
-    fn spoke(payload: &[&str]) -> Line {
+    fn spoke(payload: &[&str]) -> Message {
         match read("SAY", payload).expect("a message") {
-            Arrived::Spoke { line, .. } => line,
-            other => panic!("not a line: {other:?}"),
+            Arrived::Message { message, .. } => message,
+            other => panic!("not a message: {other:?}"),
         }
     }
 
     #[test]
     fn the_protocols_words_come_off_and_the_clients_remain() {
-        let line = spoke(&["REC", "a space", ""]);
+        let message = spoke(&["REC", "a space", ""]);
 
-        assert_eq!(line.kind, Kind::Say);
-        assert_eq!(line.sent.sent_at, Micros(1_000_002));
-        assert_eq!(line.sent.heard_at, Micros(50), "the run's clock, not the wire's");
-        assert_eq!((line.sent.nth, line.sent.seq), (3, 7));
-        assert_eq!(line.words, words(&["REC", "a space", ""]), "the payload alone");
-        assert_eq!(line.behind("REC"), Some(words(&["a space", ""]).as_slice()));
+        assert_eq!(message.verb, Verb::Say);
+        assert_eq!(message.stamp.sent_at, Micros(1_000_002));
+        assert_eq!(message.stamp.heard_at, Micros(50), "the run's clock, not the wire's");
+        assert_eq!((message.stamp.nth, message.stamp.seq), (3, 7));
+        assert_eq!(message.words, words(&["REC", "a space", ""]), "the payload alone");
+        assert_eq!(message.behind("REC"), Some(words(&["a space", ""]).as_slice()));
     }
 
     #[test]
     fn a_message_may_carry_nothing_of_its_own() {
-        let line = spoke(&[]);
+        let message = spoke(&[]);
 
-        assert!(line.words.is_empty());
-        assert_eq!(line.behind("REC"), None);
+        assert!(message.words.is_empty());
+        assert_eq!(message.behind("REC"), None);
     }
 
-    /// An account is not a line, and the reader says which it read rather than
-    /// handing on a `Line` whose words are the protocol's.
+    /// An account is not a message, and the reader says which it read rather than
+    /// handing on a `Message` whose words are the protocol's.
     #[test]
     fn an_account_of_a_shell_is_not_a_line() {
         let read = read("JOIN", &["zero", "x.bash", "flags", "hB"]).expect("an account");
 
-        let Arrived::Joined { pid, account, .. } = read else { panic!("read as a line: {read:?}") };
+        let Arrived::Account { pid, words, .. } = read else { panic!("read as a message: {read:?}") };
         assert_eq!(pid, Pid(9));
-        assert_eq!(field(&account, "zero"), Some("x.bash"));
+        assert_eq!(field(&words, "zero"), Some("x.bash"));
     }
 
     #[test]
@@ -285,11 +303,11 @@ mod tests {
             "(unquoted".to_string(),
         ];
         for literal in bad {
-            assert!(Arrived::read(framed(), &literal).is_err(), "{literal} should not read");
+            assert!(Arrived::read(envelope(), &literal).is_err(), "{literal} should not read");
         }
     }
 
-    /// An answer is one line, and the shell reads it with `read -r` — which
+    /// An answer is one message, and the shell reads it with `read -r` — which
     /// stops at a newline. So a word carrying one has to arrive escaped, and
     /// the delimiter the run appends is the only newline on that pipe.
     #[test]
@@ -308,9 +326,9 @@ mod tests {
     #[test]
     fn messages_round_trip() {
         let nested = emit_array(&words(&["INNER", "x y"]));
-        let line = spoke(&["TAG", "quote'inside", "two\nlines", &nested]);
+        let message = spoke(&["TAG", "quote'inside", "two\nlines", &nested]);
 
-        assert_eq!(line.words, words(&["TAG", "quote'inside", "two\nlines", &nested]));
+        assert_eq!(message.words, words(&["TAG", "quote'inside", "two\nlines", &nested]));
         assert_eq!(parse_array(&nested).unwrap(), words(&["INNER", "x y"]));
     }
 }

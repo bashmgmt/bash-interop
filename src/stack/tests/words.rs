@@ -6,7 +6,9 @@
 
 use std::sync::Arc;
 
-use crate::bash::rig::{Failure, Laid, Line, Master, Reacting, Rig, Shell};
+use crate::bash::rig::{
+    Answer, Driving, Failure, Layout, Message, Reacting, Rig, Shell, Workspace,
+};
 use crate::bash::stack::{self, Columns, Site, Source, Stack};
 use crate::tests::scripts::{bash, Scripts};
 
@@ -31,13 +33,17 @@ struct Walks {
 }
 
 impl Rig for Walking {
-    type Attending = Walks;
+    type Reaction = Walks;
 
-    fn bash(&self) -> String {
-        stack::with(&[BASH])
+    fn workspace(&self) -> Workspace {
+        Workspace::Temporary
     }
 
-    fn joined(&self, _at: &Laid, shell: Arc<Shell>) -> Result<Walks, Failure> {
+    fn bash(&self) -> String {
+        stack::with_walk(&[BASH])
+    }
+
+    fn joined(&self, _at: &Layout, shell: Arc<Shell>) -> Result<Walks, Failure> {
         Ok(Walks { shell, seen: Vec::new() })
     }
 }
@@ -45,7 +51,7 @@ impl Rig for Walking {
 impl Reacting for Walks {
     type Kept = Vec<Stack>;
 
-    fn hear(&mut self, said: Line) -> Result<(), Failure> {
+    fn hear(&mut self, said: Message) -> Result<(), Failure> {
         let Some(words) = said.behind("WALK") else { return Ok(()) };
 
         self.seen.push(Columns::of(words)?.frames(&self.shell)?);
@@ -53,12 +59,19 @@ impl Reacting for Walks {
         Ok(())
     }
 
+    /// It only listens, so a question is heard and the word reported unknown.
+    fn answer(&mut self, asked: Message) -> Result<Answer, Failure> {
+        self.hear(asked)?;
+
+        Ok(Answer::unknown())
+    }
+
     fn finish(self) -> Result<Vec<Stack>, Failure> {
         Ok(self.seen)
     }
 }
 
-impl Master for Walking {}
+impl Driving for Walking {}
 
 /// Every walk a command line produced, shell by shell in the order they joined.
 fn walks_in<A: AsRef<std::ffi::OsStr>>(argv: &[A]) -> Vec<Stack> {
@@ -111,7 +124,7 @@ fn a_shell_given_no_script_file_ends_at_the_frame_bash_never_pushed() {
         let sites: Vec<Site> = seen[0].frames().map(|frame| frame.site.clone()).collect();
         assert_eq!(sites, [Site::Function("outer".into()), Site::Shell], "{form}");
 
-        let entered = &seen[0].outer()[0];
+        let entered = &seen[0].below()[0];
         assert_eq!(entered.source, Source::Shell, "{form}");
         assert!(entered.lineno > 0, "the line the walk was entered from: {form}");
         assert!(entered.args.is_none(), "bash keeps no argument group for it: {form}");
@@ -127,8 +140,8 @@ fn a_word_said_at_that_top_level_walks_to_the_shell_alone() {
 
     assert_eq!(seen.len(), 1);
     assert_eq!(seen[0].frames().count(), 1);
-    assert_eq!(seen[0].at().site, Site::Shell);
-    assert_eq!(seen[0].at().source, Source::Shell);
+    assert_eq!(seen[0].top().site, Site::Shell);
+    assert_eq!(seen[0].top().source, Source::Shell);
 }
 
 /// A source path comes back absolute however the subject wrote it, by joining
@@ -147,14 +160,14 @@ fn a_relative_source_comes_back_absolute() {
         ),
     ]);
 
-    let Source::File(path) = &seen[0].at().source else {
+    let Source::File(path) = &seen[0].top().source else {
         panic!("a sourced file is a file, not one of bash's own words")
     };
 
     assert!(path.is_absolute(), "{}", path.display());
     assert!(path.ends_with("sub/../lib.bash"), "bash's own text, uncollapsed: {}", path.display());
     assert_eq!(
-        seen[0].at().source.found(),
+        seen[0].top().source.found(),
         Some(path.as_path()),
         "and `..` and all, it is there"
     );
@@ -176,7 +189,7 @@ fn a_subject_that_moved_leaves_a_source_that_is_not_there() {
         ),
     ]);
 
-    let source = &seen[0].at().source;
+    let source = &seen[0].top().source;
 
     assert_eq!(source, &Source::File("/lib.bash".into()), "joined onto the $PWD it now has");
     assert!(source.found().is_none(), "and there is nothing there");

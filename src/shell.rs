@@ -15,7 +15,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use super::rig::wire::{field, Micros, Pid, Sent};
+use super::rig::wire::{field, Pid, Stamp};
 use super::value::parse_array;
 use crate::failure::Failure;
 
@@ -73,7 +73,7 @@ impl fmt::Display for Version {
 /// all three are settled when the shell starts and cannot have changed by the
 /// time anything reads them.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Started {
+pub struct Invocation {
     /// `-c`, with the text bash was given. Absent for any other invocation.
     pub command: Option<String>,
 
@@ -85,7 +85,7 @@ pub struct Started {
     pub interactive: bool,
 }
 
-impl Started {
+impl Invocation {
     /// Whether bash was handed a file to read, which is what makes
     /// [`Bash::zero`] a path rather than a word standing in for code bash was
     /// given directly.
@@ -96,7 +96,7 @@ impl Started {
 
 /// `$-`, as bash wrote it.
 ///
-/// The string, not the reading: how bash was started is [`Started`], asked
+/// The string, not the reading: how bash was started is [`Invocation`], asked
 /// once, and what is left here are the options a subject turns on and off while
 /// it runs.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -105,18 +105,6 @@ pub struct Flags(String);
 impl Flags {
     pub fn has(&self, flag: char) -> bool {
         self.0.contains(flag)
-    }
-
-    pub fn errexit(&self) -> bool {
-        self.has('e')
-    }
-
-    pub fn nounset(&self) -> bool {
-        self.has('u')
-    }
-
-    pub fn xtrace(&self) -> bool {
-        self.has('x')
     }
 }
 
@@ -129,7 +117,7 @@ impl fmt::Display for Flags {
 /// What a shell had switched on at the moment it said so. A snapshot: a subject
 /// may `set -e` at any point.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct State {
+pub struct Options {
     pub flags: Flags,
 
     /// `$SHELLOPTS`, split — the `set -o` options that were on.
@@ -151,10 +139,10 @@ pub struct Bash {
 
     /// `$0`. A path where bash was handed a file, and otherwise the word bash
     /// also writes into `BASH_SOURCE` for the code it was given —
-    /// [`Started::from_a_file`] is which.
+    /// [`Invocation::from_a_file`] is which.
     pub zero: String,
 
-    pub started: Started,
+    pub invocation: Invocation,
 }
 
 /// A shell in a run: which bash it is, where it sits, and what it had switched
@@ -181,10 +169,10 @@ pub struct Shell {
     pub subshell: u32,
 
     /// When it joined, on both clocks.
-    pub joined: Sent,
+    pub joined: Stamp,
 
     pub bash: Bash,
-    pub state: State,
+    pub options: Options,
 }
 
 impl Shell {
@@ -192,7 +180,7 @@ impl Shell {
     pub(crate) fn of(
         nth: usize,
         pid: Pid,
-        joined: Sent,
+        joined: Stamp,
         account: &[String],
     ) -> Result<Self, Failure> {
         let word = |key: &str| {
@@ -220,23 +208,18 @@ impl Shell {
                 version: Version::of(&word("versinfo")?)?,
                 binary: PathBuf::from(word("bash")?),
                 zero: word("zero")?,
-                started: Started {
+                invocation: Invocation {
                     command: flags.contains('c').then_some(command),
                     standard_input: flags.contains('s'),
                     interactive: flags.contains('i'),
                 },
             },
-            state: State {
+            options: Options {
                 shellopts: split("shellopts")?,
                 bashopts: split("bashopts")?,
                 flags: Flags(flags),
             },
         })
-    }
-
-    /// When it joined, on its own clock — what the fork relation is ordered by.
-    pub(crate) fn opened_at(&self) -> Micros {
-        self.joined.sent_at
     }
 }
 

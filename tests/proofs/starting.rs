@@ -2,7 +2,9 @@
 
 use std::sync::Arc;
 
-use mb_resolver::bash::rig::{ExitStatus, Failure, Laid, Line, Master, Rig, Shell};
+use mb_resolver::bash::rig::{
+    Driving, ExitStatus, Failure, Layout, Message, Rig, Shell, Workspace,
+};
 
 use crate::support::{bash, Scripts};
 use crate::{behind, report, ENTRY};
@@ -11,18 +13,22 @@ use crate::{behind, report, ENTRY};
 struct Deploying;
 
 impl Rig for Deploying {
-    type Attending = Vec<Line>;
+    type Reaction = Vec<Message>;
+
+    fn workspace(&self) -> Workspace {
+        Workspace::Temporary
+    }
 
     fn bash(&self) -> String {
         "TELL() { BC_INSTR say TELL \"$@\"; }".to_string()
     }
 
-    fn joined(&self, _at: &Laid, _shell: Arc<Shell>) -> Result<Vec<Line>, Failure> {
+    fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Vec<Message>, Failure> {
         Ok(Vec::new())
     }
 }
 
-impl Master for Deploying {}
+impl Driving for Deploying {}
 
 /// A rig's word reaches the subject and a child it starts, because `BASH_ENV`
 /// reaches both. A variable is not the run's business: the command line

@@ -70,7 +70,7 @@ fn parent_of(
 ) -> Option<usize> {
     let shell = shells[index];
     let candidates = generations.get(&shell.parent)?;
-    let upto = candidates.partition_point(|&at| shells[at].opened_at() <= shell.opened_at());
+    let upto = candidates.partition_point(|&at| shells[at].joined.sent_at <= shell.joined.sent_at);
 
     candidates[..upto].iter().rev().find(|&&at| at < index).copied()
 }

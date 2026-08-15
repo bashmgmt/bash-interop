@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use mb_resolver::bash::rig::{
-    Answer, ExitStatus, Failure, Laid, Line, Master, Reacting, Rig, Run, Shell,
+    Answer, Driving, ExitStatus, Failure, Layout, Message, Reacting, Rig, Run, Shell, Workspace,
 };
 
 use crate::support::{bash, sourcing, Scripts};
@@ -25,26 +25,30 @@ struct Answering {
 /// changes.
 struct Soak {
     steps: PathBuf,
-    heard: Vec<Line>,
+    heard: Vec<Message>,
     answered: usize,
 }
 
 /// What makes the run's messages reachable through `heard` and `behind`.
-impl AsRef<[Line]> for Soak {
-    fn as_ref(&self) -> &[Line] {
+impl AsRef<[Message]> for Soak {
+    fn as_ref(&self) -> &[Message] {
         &self.heard
     }
 }
 
 impl Rig for Answering {
-    type Attending = Soak;
+    type Reaction = Soak;
+
+    fn workspace(&self) -> Workspace {
+        Workspace::Temporary
+    }
 
     /// `NOTE` is this rig's own word, called back by several of the answers.
     fn bash(&self) -> String {
         SOAK_BASH.to_string()
     }
 
-    fn joined(&self, _at: &Laid, _shell: Arc<Shell>) -> Result<Soak, Failure> {
+    fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Soak, Failure> {
         Ok(Soak { steps: self.steps.clone(), heard: Vec::new(), answered: 0 })
     }
 }
@@ -52,13 +56,13 @@ impl Rig for Answering {
 impl Reacting for Soak {
     type Kept = Self;
 
-    fn hear(&mut self, said: Line) -> Result<(), Failure> {
+    fn hear(&mut self, said: Message) -> Result<(), Failure> {
         self.heard.push(said);
 
         Ok(())
     }
 
-    fn answer(&mut self, asked: Line) -> Result<Answer, Failure> {
+    fn answer(&mut self, asked: Message) -> Result<Answer, Failure> {
         let step: usize = asked.words.last().and_then(|word| word.parse().ok()).unwrap_or(0);
 
         self.answered += 1;
@@ -86,7 +90,7 @@ impl Reacting for Soak {
     }
 }
 
-impl Master for Answering {}
+impl Driving for Answering {}
 
 /// Every answer form in turn, one deliberately slow, mixed with saying and
 /// with a message too wide for one frame, from two shells asking

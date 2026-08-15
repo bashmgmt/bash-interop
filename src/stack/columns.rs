@@ -39,7 +39,7 @@
 use std::path::Path;
 
 use crate::bash::rig::field;
-use crate::bash::shell::Shell as InShell;
+use crate::bash::shell::Shell;
 use crate::bash::value::parse_array;
 use crate::failure::{Doing, Failure};
 
@@ -96,7 +96,7 @@ impl<'a> Columns<'a> {
     /// `shell` is what that shell said of itself when it joined, and it is
     /// needed because `BASH_SOURCE` alone cannot say what its own words mean:
     /// `$0` is a path in one shell and a stand-in for code in another.
-    pub fn frames(&self, shell: &InShell) -> Result<Stack, Failure> {
+    pub fn frames(&self, shell: &Shell) -> Result<Stack, Failure> {
         let column = |name: &str, text: &str| {
             parse_array(text).doing(|| format!("reading the {name:?} column"))
         };

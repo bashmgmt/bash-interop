@@ -19,8 +19,8 @@ walk can say on its own which word that is. A tool composes them.
 KB/mb_resolver/bash/                              src/bash/
   values.md         quoted forms, BashVal, codecs   value/
   wire.md           the bash, the pipe, the frame   rig/wire/
-  rig.md            Rig, Reacting, Master, Slave    rig/{mod,master,slave,serving}.rs
-  tree.md           what a shell is, and who forked it  shell.rs, rig/tree.rs
+  rig.md            Rig, Reacting, Driving, Serving    rig/{mod,driving,serving,session,watch}.rs
+  tree.md           what a shell is, and who forked it  shell.rs, rig/forest.rs
   stack.md          the call stack, both halves     stack/
   measurements.md   numbers, limits, proofs
   scoping.md        where a name binds              every *.bash we ship
@@ -29,21 +29,21 @@ KB/mb_resolver/bash/                              src/bash/
   bashprof.md       a call tree that travels        bashprof/
 ```
 
-Every module under `src/bash/rig/` is private; `mod.rs` carries `Rig`,
-`Reacting`, `Workspace`, `Laid`, `Attended`, `Said`, `heard` and one re-export
-list that is the rest of the API:
+Every module under `src/bash/rig/` is private; `mod.rs` carries `Rig` and
+`Reacting` and one re-export list that is the rest of the API:
 
 ```rust
-pub use master::{ExitStatus, Master, Run, Whole};
-pub use slave::{Served, Slave};
-pub use tree::{forest, ShellNode};
-pub use wire::{field, Answer, Kind, Line, Micros, Pid, Sent};
+pub use attended::{heard, Attended, Kept, Layout, Said, Workspace};
+pub use driving::{Driving, ExitStatus, Run, Whole};
+pub use forest::{forest, ShellNode};
+pub use serving::{Served, Serving};
+pub use wire::{field, Answer, Message, Micros, Pid, Stamp, Verb};
 pub use crate::bash::shell::Shell;
 pub use crate::failure::{Doing, Failure};
 ```
 
-**A rig is the reaction; who started what is a second question.** `Master` runs
-a command line of its own and owns its process group; `Slave` hands its address
+**A rig is the reaction; who started what is a second question.** `Driving` runs
+a command line of its own and owns its process group; `Serving` hands its address
 to a bash script that started the server and serves while that script holds the
 handle. Both are traits extending `Rig` with one provided method, so a rig
 declares which orchestrations it supports by implementing them. A session lasts
@@ -52,12 +52,12 @@ as long as anyone who could still speak, and nothing inside a rig ends one.
 **A rig is a description; the reaction is per shell.** `Rig::joined` builds one
 the moment a shell announces itself, so which bash it is, how it was started
 and what it had switched on are members from construction rather than something
-looked up per message. The library ships two reactions — `Vec<Line>` keeps
+looked up per message. The library ships two reactions — `Vec<Message>` keeps
 every message, `()` keeps nothing — and no rig implementation. What a run
 produces beyond that is the client's; see
 [rig.md](rig.md#what-a-reaction-is-for).
 
-Every instrument that reports a walk is composed by `stack::with(&[…])`, which
+Every instrument that reports a walk is composed by `stack::with_walk(&[…])`, which
 puts `stack.bash` first: `__bc_stack` has to be defined before anything calls
 it, and that rule lives there rather than at each tool.
 
@@ -103,7 +103,7 @@ let words = line.behind("TIMEIT")?;   // None: some other tool's message
 The protocol reserves no word in the payload. Its own — the `SAY`/`ASK` kind
 and the `at=` clock — sit in front of the client's arglist and are shifted off
 before a rig sees one, the way bash `shift`s past its own arguments.
-`Line::words` is the client's alone. What a shell *is* is not on a message at
+`Message::words` is the client's alone. What a shell *is* is not on a message at
 all: it is said once, on joining, and reached through the shell a reaction was
 built with.
 
@@ -117,10 +117,14 @@ Provenance, ordering, the process forest,
 subshell capture, concurrent-writer integrity and the control channel come
 with the transport.
 
-Implement `Rig::joined` — and a `Reacting` for it, unless `Vec<Line>` or `()`
-is what you want; add `bash` if the subject needs a word of your own; then
-implement `Master`, `Slave`, or both. What several shells share is yours, held
-by the rig and handed to each reaction it builds.
+Implement `Rig` — `bash`, `workspace`, `joined`, none of which has a default —
+and a `Reacting` for what it builds, unless `Vec<Message>` or `()` is what you
+want; then implement `Driving`, `Serving`, or both. What several shells share is
+yours, held by the rig and handed to each reaction it builds.
+
+Nothing on either trait defaults, so an `impl` block is the whole contract. What
+a default used to decide is a named value instead: `Answer::unknown()` is the
+`return 127` for a word a rig has no answer for, `Answer::ok()` the quiet yes.
 
 `tests/examples/` is worked rigs against the public API alone, meant to be read
 top to bottom, and `tests/joined/` is the same from bash's side: a fixture

@@ -125,7 +125,7 @@ subject that asked a question wants what came back.
 | created by | the run, in `Wire::create` | the asking shell, per ask |
 | removed by | the workspace going | the run, with the answer |
 | the run holds | `O_RDWR`, `O_NONBLOCK` | `O_WRONLY`, opened and closed per answer |
-| the shell holds | `exec {__BC__up}>"$__BC__UP"` | `exec {__bc_fd}<>"$__bc_reply"`, closed on receipt |
+| the shell holds | `exec {__BC__fd}>"$__BC__UP"` | `exec {__bc_fd}<>"$__bc_reply"`, closed on receipt |
 
 **A reply pipe is made for one question and removed with its answer.** A shell
 is blocked from the moment it asks until the moment it reads, so the name is
@@ -156,7 +156,7 @@ impl Wire {
     pub fn reader(&self) -> RawFd;
 
     /// Everything the pipe currently holds.
-    pub fn drain(&mut self) -> Result<Vec<Line>, Failure>;
+    pub fn drain(&mut self) -> Result<Vec<Message>, Failure>;
 
     /// Answer the shell blocked on a question, and remove its pipe.
     pub fn answer(&self, pid: Pid, answer: Answer) -> Result<(), Failure>;
@@ -176,7 +176,7 @@ __bc_join() {
     local IFS=' '
     __BC__parent=${__BC__owner:-$PPID}
 
-    exec {__BC__up}>"$__BC__UP"
+    exec {__BC__fd}>"$__BC__UP"
     __BC__owner=$BASHPID
     __BC__seq=0
 
@@ -252,14 +252,26 @@ and they do not mix:
 
 ```rust
 pub(crate) enum Arrived {
-    Joined { pid: Pid, sent: Sent, account: Vec<String> },
-    Spoke  { pid: Pid, line: Line },
+    /// A shell's account of itself, which is what makes a shell.
+    Account { pid: Pid, stamp: Stamp, words: Vec<String> },
+
+    /// Anything else it said, which presupposes one.
+    Message { pid: Pid, message: Message },
 }
 ```
 
-An account is not a `Line`: it is what makes a shell, and a `Line` presupposes
-one. `pid` is routing and stops at the serving — what a reaction sees of the
-sending shell is the shell it was built with.
+An account is not a `Message`: it is what makes a shell, and a `Message`
+presupposes one. `pid` is routing and stops at the serving — what a reaction
+sees of the sending shell is the shell it was built with.
+
+The frame header and the arrival clock reach the reader as one value, so no
+message ever holds a placeholder:
+
+```rust
+pub(super) struct Envelope { pid: Pid, nth: u64, seq: u32, heard_at: Micros }
+
+impl Arrived { fn read(envelope: Envelope, literal: &str) -> Result<Self, Failure>; }
+```
 
 An answer carries **no header**: the shell that asked is its only reader, so
 `pipes` writes the message and a delimiter and nothing else.
@@ -305,7 +317,7 @@ impl Reassembly {
 ```
 
 `read` counts the messages the run has completed, and that count is what a
-message carries as `Sent::nth`. The run folds per shell, so each fold keeps its
+message carries as `Stamp::nth`. The run folds per shell, so each fold keeps its
 own order and nothing else; this is what puts them back together.
 
 The buffer is **bytes**, not text: a read boundary falls anywhere, including
@@ -330,14 +342,14 @@ One bash array literal — `declare -a x="$msg"` on the bash side,
 
 ```rust
 /// What one shell's client said, once.
-pub struct Line {
-    pub kind: Kind,        // Say or Ask
-    pub sent: Sent,
+pub struct Message {
+    pub verb: Verb,        // Say or Ask
+    pub stamp: Stamp,
     pub words: Vec<String>,
 }
 
 /// When one message was written and when it arrived.
-pub struct Sent {
+pub struct Stamp {
     pub nth: u64,          // counted over the whole run, in arrival order
     pub seq: u32,          // counted per shell, from its account at 0
     pub sent_at: Micros,   // the sending shell's $EPOCHREALTIME
@@ -424,6 +436,13 @@ impl Answer {
 
     /// Return `code` and nothing else. `u8` is what bash's `return` carries.
     pub fn status(code: u8) -> Self;
+
+    /// A word this rig has no answer for: `return 127`, bash's own "command
+    /// not found". What a `Reacting` that only listens writes in `answer`.
+    pub fn unknown() -> Self;
+
+    /// Ran, and nothing to say about it: `return 0`.
+    pub fn ok() -> Self;
 }
 ```
 

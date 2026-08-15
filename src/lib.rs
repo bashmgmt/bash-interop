@@ -9,7 +9,7 @@
 //!
 //! `stack` and `rig` are siblings: neither knows the other. A tool composes
 //! them — the walk goes into the bash a rig injects, through
-//! [`stack::with`] — which is what [`bashcap`](crate::bashcap) and
+//! [`stack::with_walk`] — which is what [`bashcap`](crate::bashcap) and
 //! [`bashprof`](crate::bashprof) are.
 //!
 //! Both read a walk against the shell it was taken in, which is why `shell`

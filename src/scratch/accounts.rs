@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use crate::bash::rig::{Micros, Pid, Sent, Shell};
+use crate::bash::rig::{Micros, Pid, Shell, Stamp};
 use crate::bash::value::emit_array;
 
 /// The words a `JOIN` message carries. `zero` is the shell's `$0` and `flags`
@@ -36,7 +36,7 @@ pub fn account(zero: &str, flags: &str) -> Vec<String> {
 
 /// A shell, as one would arrive.
 pub fn shell(nth: usize, pid: u32, zero: &str, flags: &str) -> Arc<Shell> {
-    let joined = Sent { nth: 0, seq: 0, sent_at: Micros(100), heard_at: Micros(101) };
+    let joined = Stamp { nth: 0, seq: 0, sent_at: Micros(100), heard_at: Micros(101) };
 
     Arc::new(Shell::of(nth, Pid(pid), joined, &account(zero, flags)).expect("an account"))
 }

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use mb_resolver::bash::rig::{
-    Answer, ExitStatus, Failure, Kind, Laid, Line, Master, Reacting, Rig, Shell,
+    Answer, Driving, ExitStatus, Failure, Layout, Message, Reacting, Rig, Shell, Verb, Workspace,
 };
 
 use crate::support::{bash, Scripts};
@@ -14,27 +14,36 @@ use crate::{behind, gone, report, script, Keeping, ENTRY};
 
 /// Fails the first time it is given a message of the kind it breaks on.
 struct Breaking {
-    on: Kind,
+    on: Verb,
 }
 
 struct Breaks {
-    on: Kind,
-    heard: Vec<Line>,
+    on: Verb,
+    heard: Vec<Message>,
 }
 
 impl Rig for Breaking {
-    type Attending = Breaks;
+    type Reaction = Breaks;
 
-    fn joined(&self, _at: &Laid, _shell: Arc<Shell>) -> Result<Breaks, Failure> {
+    /// No words of its own in the subject's shells.
+    fn bash(&self) -> String {
+        String::new()
+    }
+
+    fn workspace(&self) -> Workspace {
+        Workspace::Temporary
+    }
+
+    fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Breaks, Failure> {
         Ok(Breaks { on: self.on, heard: Vec::new() })
     }
 }
 
 impl Reacting for Breaks {
-    type Kept = Vec<Line>;
+    type Kept = Vec<Message>;
 
-    fn hear(&mut self, said: Line) -> Result<(), Failure> {
-        if self.on == Kind::Say {
+    fn hear(&mut self, said: Message) -> Result<(), Failure> {
+        if self.on == Verb::Say {
             return Err(Failure::new("keeping what was said", "the sink is on fire"));
         }
         self.heard.push(said);
@@ -42,16 +51,16 @@ impl Reacting for Breaks {
         Ok(())
     }
 
-    fn answer(&mut self, _: Line) -> Result<Answer, Failure> {
+    fn answer(&mut self, _: Message) -> Result<Answer, Failure> {
         Err(Failure::new("deciding an answer", "the operator is on fire"))
     }
 
-    fn finish(self) -> Result<Vec<Line>, Failure> {
+    fn finish(self) -> Result<Vec<Message>, Failure> {
         Ok(self.heard)
     }
 }
 
-impl Master for Breaking {}
+impl Driving for Breaking {}
 
 /// The subject reports its own pid before the message that breaks the rig, so
 /// a proof can ask whether it outlived the run.
@@ -73,7 +82,7 @@ fn blocked(scripts: &Scripts) -> i32 {
 fn a_rig_that_cannot_answer_ends_the_run_and_kills_the_subject() {
     let scripts = Scripts::of(&[(ENTRY, &format!("{REPORTING}BC_INSTR ask anything"))]);
 
-    let failure = Breaking { on: Kind::Ask }.run(&bash(scripts.at(ENTRY)))
+    let failure = Breaking { on: Verb::Ask }.run(&bash(scripts.at(ENTRY)))
         .err()
         .expect("the run must end in the rig's failure");
 
@@ -97,7 +106,7 @@ fn a_failure_while_hearing_ends_the_run_and_kills_the_subject() {
     )]);
 
     let started = Instant::now();
-    let failure = Breaking { on: Kind::Say }.run(&bash(scripts.at(ENTRY)))
+    let failure = Breaking { on: Verb::Say }.run(&bash(scripts.at(ENTRY)))
         .err()
         .expect("the run must end in the rig's failure");
 

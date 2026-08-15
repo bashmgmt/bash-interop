@@ -79,7 +79,7 @@ fn a_walk_comes_back_as_the_calls_that_were_written() {
     let frames: Vec<&Frame> = walk.frames().collect();
 
     assert_eq!(frames.len(), 4, "probe's own frame is the instrument's");
-    assert_eq!(walk.at().to_string(), "inner@x.bash:9 ('i1' 'i2')", "where the walk was taken");
+    assert_eq!(walk.top().to_string(), "inner@x.bash:9 ('i1' 'i2')", "where the walk was taken");
     assert_eq!(frames[1].to_string(), "outer@x.bash:10 ('o1' 'o2' 'o3')");
     assert_eq!(frames[2].to_string(), "top@x.bash:11 ('t1')");
     assert_eq!(frames[3].args.as_deref(), Some([].as_slice()), "called with none");
@@ -108,7 +108,7 @@ fn an_unrecorded_argument_stack_is_absent_not_empty() {
     let raw = real();
 
     assert!(columns(&raw, 1, false).frames(&reading()).unwrap().frames().all(|f| f.args.is_none()));
-    assert_eq!(columns(&raw, 1, false).frames(&reading()).unwrap().at().to_string(), "inner@x.bash:9");
+    assert_eq!(columns(&raw, 1, false).frames(&reading()).unwrap().top().to_string(), "inner@x.bash:9");
 }
 
 /// `extdebug` turned on part-way leaves `BASH_ARGC` short, and short means
@@ -159,7 +159,7 @@ fn a_shell_given_no_script_file_ends_at_the_frame_bash_never_pushed() {
     let frames: Vec<&Frame> = walk.frames().collect();
 
     assert_eq!(frames.len(), 3, "inner, outer, and the shell above them");
-    assert_eq!(walk.at().to_string(), "inner@-:9 ('i1' 'i2')", "and $0 is not read as a path");
+    assert_eq!(walk.top().to_string(), "inner@-:9 ('i1' 'i2')", "and $0 is not read as a path");
     assert_eq!(frames[1].to_string(), "outer@-:10 ('o1' 'o2' 'o3')");
     assert_eq!(frames[2].to_string(), "shell@-:3", "where the walk was entered, args unrecorded");
 
@@ -167,7 +167,7 @@ fn a_shell_given_no_script_file_ends_at_the_frame_bash_never_pushed() {
     // instrument's, and what is left is the shell itself.
     let bare = columns(&raw, 3, true).frames(&accounts::given("bash")).unwrap();
     assert_eq!(bare.frames().count(), 1);
-    assert_eq!(bare.at().to_string(), "shell@-:3");
+    assert_eq!(bare.top().to_string(), "shell@-:3");
 }
 
 /// Bash's own words for a frame that is not a function call, and for a

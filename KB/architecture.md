@@ -32,7 +32,7 @@ value ─┬─ shell ─┬─ stack        bash's five parallel arrays, read b
 | `rig` | `value`, `shell` | the stack, any tool |
 
 **`stack` and `rig` are siblings and neither calls the other.** A tool composes
-them: the frame walk goes into the bash a rig injects, through `stack::with`.
+them: the frame walk goes into the bash a rig injects, through `stack::with_walk`.
 That is what `bashcap` and `bashprof` are, and a third tool would be the same
 composition with different words.
 
@@ -51,7 +51,7 @@ ships three words; a rig gets three words. Any width, zero included, and the
 protocol reads no position of one.
 
 This is what lets several tools share one wire: a leading discriminator —
-`TIME_CPS`, `__BASHCAP__` — is the sender's own choice, and a decoder opts in
+`TIMETHIS`, `__BASHCAP__` — is the sender's own choice, and a decoder opts in
 with `line.behind(TAG)`, getting `None` for somebody else's message. There is
 no registry and nothing to coordinate.
 
@@ -92,8 +92,8 @@ the run.
 ### 4. A rig is a description; a reaction is per shell
 
 ```rust
-trait Rig     { type Attending: Reacting;  fn bash(&self);  fn joined(&self, at, shell); }
-trait Reacting { type Kept;  fn hear(&mut self);  fn answer(&mut self);  fn finish(self); }
+trait Rig      { type Reaction: Reacting;  bash();  workspace();  joined(&Layout, Arc<Shell>) }
+trait Reacting { type Kept;  hear(Message);  answer(Message) -> Answer;  finish() -> Kept }
 ```
 
 A shell's first message is its account of itself: which bash, how it was given
@@ -112,13 +112,17 @@ provenance is the *shape*: no second list to cross-reference, nothing that could
 disagree with it. `heard` flattens it back to arrival order when a reading wants
 the run whole.
 
+**Neither trait has a default body.** A default is a decision an implementor did
+not make and cannot see; `Answer::unknown()` names the one the old default made
+(`return 127`, bash's own "command not found") and puts it where it applies.
+
 What several shells share — a sink, a merged view — belongs to the rig, which
 hands each reaction a share. The core names no sharing discipline and has no
 opinion on one.
 
 ### 5. Who started the shells is a second question
 
-`Master` runs a command line and owns its process group. `Slave` hands its
+`Driving` runs a command line and owns its process group. `Serving` hands its
 address to a bash script that started the server and serves while that script
 holds the handle. Both are traits extending `Rig` with one provided method, so
 a rig declares which orchestrations it supports by implementing them, and its
@@ -134,7 +138,7 @@ bashprof serve        --into build.times      # started by BC_JOIN, from a scrip
 ```
 
 One sentence covers both ends: **a session lasts as long as anyone who could
-still speak.** `Until` is a descriptor — a pidfd, or the handle an initiator
+still speak.** `Watch` is a descriptor — a pidfd, or the handle an initiator
 holds — and it is only ever *watched*. Signalling and reaping belong to whoever
 started the thing being watched, which is never the serving loop. That is what
 lets one loop serve both.
@@ -189,7 +193,7 @@ integrity and a control channel — none of which a tool implements again:
 | | its bash | its reading |
 |---|---|---|
 | `bashcap` | the walk, plus `BASHCAP`'s effect | one JSON object per snapshot, streamed |
-| `bashprof` | the walk, plus `BASHPROF_TIME_CPS`'s effect | three passes: records, tree, timings |
+| `bashprof` | the walk, plus `BASHPROF_TIMETHIS`'s effect | three passes: records, tree, timings |
 
 Neither is privileged. Both ship the words a call site says as a file that is
 *both* injected and vendored, so a client's copy and the tool's cannot drift —
@@ -201,7 +205,7 @@ and no tool runs unprofiled; the same script under the tool measures itself. See
 
 | | why |
 |---|---|
-| a session-wide accumulator in the library | what a run produces is the client's; `Vec<Line>` and `()` are the only two shipped |
+| a session-wide accumulator in the library | what a run produces is the client's; `Vec<Message>` and `()` are the only two shipped |
 | a timer, an interval, a heartbeat | serving ends when nobody who could speak is left, and that is a descriptor |
 | a closing word or reserved payload word | the handle says when it is over, so nothing in the loop intercepts a message |
 | a poisoned or degraded mode | an answer that says no is a command returning non-zero, like any other |

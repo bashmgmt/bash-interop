@@ -10,7 +10,7 @@
 
 use std::collections::HashMap;
 
-use super::message::{Arrived, Framed, Micros, Pid};
+use super::message::{Arrived, Envelope, Micros, Pid};
 use crate::failure::{Doing, Failure};
 
 pub const DELIMITER: u8 = b'\n';
@@ -106,7 +106,7 @@ impl Reassembly {
         let nth = self.read;
         self.read += 1;
 
-        Arrived::read(Framed { pid, nth, seq, heard_at }, &text).map(Some)
+        Arrived::read(Envelope { pid, nth, seq, heard_at }, &text).map(Some)
     }
 }
 
@@ -144,7 +144,7 @@ impl<'a> Frame<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bash::rig::Sent;
+    use crate::bash::rig::Stamp;
     use crate::bash::value::emit_array;
 
     const AT: Micros = Micros(9);
@@ -163,13 +163,13 @@ mod tests {
     }
 
     /// What one message carried, and which shell wrote it.
-    fn said(arrived: &Arrived) -> (Pid, Sent, Vec<&str>) {
+    fn said(arrived: &Arrived) -> (Pid, Stamp, Vec<&str>) {
         match arrived {
-            Arrived::Spoke { pid, line } => {
-                (*pid, line.sent, line.words.iter().map(String::as_str).collect())
+            Arrived::Message { pid, message } => {
+                (*pid, message.stamp, message.words.iter().map(String::as_str).collect())
             }
-            Arrived::Joined { pid, sent, account } => {
-                (*pid, *sent, account.iter().map(String::as_str).collect())
+            Arrived::Account { pid, stamp, words } => {
+                (*pid, *stamp, words.iter().map(String::as_str).collect())
             }
         }
     }

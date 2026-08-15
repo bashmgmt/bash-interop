@@ -64,7 +64,7 @@ Which forms are safe is not guessable, and these were measured on 5.3.9:
 | `"$1"` with no argument | **fatal** |
 | `${!PREFIX@}` with no matches, `"${BASH_REMATCH[@]}"` unset | fine |
 
-`local x` leaves `x` unset; `local x=` sets it empty. `BASHPROF_TIME_CPS`
+`local x` leaves `x` unset; `local x=` sets it empty. `BASHPROF_TIMETHIS`
 depends on the second: after an empty hook has run, `$__BP_id` has to be empty
 rather than unbound.
 

@@ -13,22 +13,26 @@
 //!
 //! ```no_run
 //! use std::sync::Arc;
-//! use mb_resolver::bash::rig::{Answer, Failure, Laid, Line, Master, Reacting, Rig, Shell};
+//! use mb_resolver::bash::rig::{
+//!     Answer, Driving, Failure, Layout, Message, Reacting, Rig, Shell, Workspace,
+//! };
 //!
 //! /// Keeps what one shell said, and tells it to use staging.
 //! struct Deploying;
 //!
-//! struct Told { shell: Arc<Shell>, heard: Vec<Line> }
+//! struct Told { shell: Arc<Shell>, heard: Vec<Message> }
 //!
 //! impl Rig for Deploying {
-//!     type Attending = Told;
+//!     type Reaction = Told;
 //!
 //!     /// A word the subject's scripts can call, in every shell.
 //!     fn bash(&self) -> String {
 //!         "STAGE() { BC_INSTR say STAGE \"$@\"; }".to_string()
 //!     }
 //!
-//!     fn joined(&self, _at: &Laid, shell: Arc<Shell>) -> Result<Told, Failure> {
+//!     fn workspace(&self) -> Workspace { Workspace::Temporary }
+//!
+//!     fn joined(&self, _at: &Layout, shell: Arc<Shell>) -> Result<Told, Failure> {
 //!         Ok(Told { shell, heard: Vec::new() })
 //!     }
 //! }
@@ -36,22 +40,22 @@
 //! impl Reacting for Told {
 //!     type Kept = Self;
 //!
-//!     fn hear(&mut self, said: Line) -> Result<(), Failure> {
+//!     fn hear(&mut self, said: Message) -> Result<(), Failure> {
 //!         self.heard.push(said);
 //!         Ok(())
 //!     }
 //!
-//!     fn answer(&mut self, asked: Line) -> Result<Answer, Failure> {
+//!     fn answer(&mut self, asked: Message) -> Result<Answer, Failure> {
 //!         Ok(match asked.words.first().map(String::as_str) {
 //!             Some("target") => Answer::of("declare", ["-g", "target=staging"]),
-//!             _ => Answer::status(1),
+//!             _ => Answer::unknown(),
 //!         })
 //!     }
 //!
 //!     fn finish(self) -> Result<Self, Failure> { Ok(self) }
 //! }
 //!
-//! impl Master for Deploying {}
+//! impl Driving for Deploying {}
 //!
 //! for shell in Deploying.run(&["bash", "deploy.bash"])?.whole()?.shells {
 //!     println!("pid {} said {} things", shell.shell.pid, shell.kept.heard.len());
@@ -64,8 +68,8 @@
 //!
 //! | | who started the shells | what the session lasts for | what comes back |
 //! |---|---|---|---|
-//! | [`Master`] | the run — `BASH_ENV`, own process group | that process group | [`Run`], with the subject's [`ExitStatus`] |
-//! | [`Slave`] | a bash script, which took the address | whoever holds the handle | [`Served`] |
+//! | [`Driving`] | the run — `BASH_ENV`, own process group | that process group | [`Run`], with the subject's [`ExitStatus`] |
+//! | [`Serving`] | a bash script, which took the address | whoever holds the handle | [`Served`] |
 //!
 //! One sentence covers both: **a session lasts as long as anyone who could
 //! still speak.** Nothing inside a rig ends one.
@@ -75,85 +79,32 @@
 //! what it was handed, and a shell that wants in for its own reasons — an
 //! interactive child, say — sources either. However it got there, the first
 //! thing it says is its account of itself, and that is what makes a [`Shell`].
+//!
+//! | | |
+//! |---|---|
+//! | `attended` | [`Workspace`], [`Layout`], [`Attended`], [`Kept`], [`Said`], [`heard`] |
+//! | `forest` | [`ShellNode`] and [`forest`] — who started whom |
+//! | `session` | the conversation: the workspace, the wire, one reaction per shell |
+//! | `watch` | the descriptor a session ends on |
+//! | `driving`, `serving` | the two roles, and what each hands back |
+//! | `wire` | [`Message`], [`Answer`], and the protocol that carries them |
 
-mod master;
+mod attended;
+mod driving;
+mod forest;
 mod serving;
-mod slave;
-mod tree;
+mod session;
+mod watch;
 pub(crate) mod wire;
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
-use serde::Serialize;
+pub use attended::{heard, Attended, Kept, Layout, Said, Workspace};
+pub use driving::{Driving, ExitStatus, Run, Whole};
+pub use forest::{forest, ShellNode};
+pub use serving::{Served, Serving};
 
-/// Where a session lays its bash and its pipes, and how long that outlives it.
-///
-/// A frame's source path is only as readable as the file it names, and the
-/// instrument's own frames name a file in here — so anything that reads a walk
-/// afterwards has to say where the run put it.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub enum Workspace {
-    /// A directory of the session's own, removed when it ends.
-    #[default]
-    Temporary,
-
-    /// One of the caller's, created if it is not there and left behind.
-    At(PathBuf),
-}
-
-/// Where the session's files ended up. Handed to every reaction at
-/// construction, so one that resolves paths afterwards knows where the
-/// instrument's own frames point without being told twice.
-#[derive(Clone, Debug)]
-pub struct Laid {
-    pub dir: PathBuf,
-
-    /// The file a shell sources to join — the session's only address.
-    pub prelude: PathBuf,
-}
-
-/// What one shell's reaction leaves behind, for a given rig.
-pub type Kept<R> = <<R as Rig>::Attending as Reacting>::Kept;
-
-/// One shell, and what its reaction left behind.
-#[derive(Debug)]
-pub struct Attended<K> {
-    pub shell: Arc<Shell>,
-    pub kept: K,
-}
-
-/// One message, and the shell that sent it.
-///
-/// A reaction has both by construction. Anything reading a run afterwards needs
-/// them together too, since a frame walk means nothing without the shell it was
-/// taken in.
-#[derive(Copy, Clone, Debug, Serialize)]
-pub struct Said<'a> {
-    pub shell: &'a Arc<Shell>,
-    pub line: &'a Line,
-}
-
-/// Everything the shells said, in the order the run heard it.
-///
-/// A run folds per shell, so each shell's own order is kept and nothing else.
-/// `Sent::nth` counts messages over the whole run and is what puts them back
-/// together.
-pub fn heard<K: AsRef<[Line]>>(shells: &[Attended<K>]) -> Vec<Said<'_>> {
-    let mut said: Vec<Said<'_>> = shells
-        .iter()
-        .flat_map(|at| at.kept.as_ref().iter().map(|line| Said { shell: &at.shell, line }))
-        .collect();
-
-    said.sort_by_key(|said| said.line.sent.nth);
-    said
-}
-
-pub use master::{ExitStatus, Master, Run, Whole};
-pub use slave::{Served, Slave};
-pub use tree::{forest, ShellNode};
-
-pub use wire::{field, Answer, Kind, Line, Micros, Pid, Sent};
+pub use wire::{field, Answer, Message, Micros, Pid, Stamp, Verb};
 
 pub use crate::bash::shell::Shell;
 pub use crate::failure::{Doing, Failure};
@@ -162,31 +113,50 @@ pub use crate::failure::{Doing, Failure};
 /// reaction is made once a shell is there.
 ///
 /// A description: `&self` throughout, because nothing about it changes by
-/// running.
+/// running. **No method has a default body** — an `impl Rig` block is the whole
+/// contract, and a rig with nothing of its own writes `String::new()` and
+/// `Workspace::Temporary` where it means them.
+///
+/// | it is handed | it produces |
+/// |---|---|
+/// | [`&Layout`](Layout) — `dir`, and `prelude`, the address a shell sources | [`Self::Reaction`](Rig::Reaction) |
+/// | [`Arc<Shell>`](Shell) — `bash: Bash`, `options: Options`, `joined: Stamp` | |
+///
+/// [`bash`](Rig::bash) is laid beside the protocol's own by the session;
+/// [`stack::with_walk`](crate::bash::stack::with_walk) composes it where the
+/// rig reports a frame walk.
 pub trait Rig {
     /// What reacts to one shell.
-    type Attending: Reacting;
+    type Reaction: Reacting;
 
     /// The words this rig gives the subject, laid beside the protocol's own and
     /// sourced by it. The same text in either orchestration.
-    fn bash(&self) -> String {
-        String::new()
-    }
+    fn bash(&self) -> String;
 
-    fn workspace(&self) -> Workspace {
-        Workspace::Temporary
-    }
+    /// Where the session's files go, and how long they outlive it.
+    fn workspace(&self) -> Workspace;
 
     /// A shell has joined, and everything about it is known. This is where it
     /// enters, and the last time it is a parameter.
-    fn joined(&self, at: &Laid, shell: Arc<Shell>) -> Result<Self::Attending, Failure>;
+    fn joined(&self, at: &Layout, shell: Arc<Shell>) -> Result<Self::Reaction, Failure>;
 }
 
 /// One shell's reaction, for as long as that shell can speak.
 ///
 /// It owns its state, so nothing is threaded through it. What is shared across
-/// shells — a sink, an index — is the caller's own and comes in through
+/// shells — a sink, a merged view — is the caller's own and comes in through
 /// [`Rig::joined`], which is why the core names no sharing discipline.
+///
+/// | | |
+/// |---|---|
+/// | [`hear`](Reacting::hear) | a [`Message`] nobody is waiting on |
+/// | [`answer`](Reacting::answer) | one the shell blocks on; the session writes the [`Answer`] back to it |
+/// | [`finish`](Reacting::finish) | what is left, which lands in [`Attended::kept`] |
+///
+/// **No method has a default body.** A reaction that drops what it hears, or
+/// refuses every question, says so itself; the two implementations below are
+/// the templates to copy. [`heard`] puts the per-shell foldings back into
+/// arrival order, by [`Stamp::nth`].
 pub trait Reacting: Sized {
     /// What is left when the shell can no longer speak. `Self` where nothing is
     /// released at the end.
@@ -195,37 +165,38 @@ pub trait Reacting: Sized {
     /// A message nobody is waiting on.
     ///
     /// A `Failure` from either this or [`answer`](Reacting::answer) ends the
-    /// conversation: under `Master` the subject is killed and the run yields
+    /// conversation: under [`Driving`] the subject is killed and the run yields
     /// that reason. It is not negotiated with bash — a reaction that cannot do
     /// its work is not something bash can be asked about.
-    fn hear(&mut self, _said: Line) -> Result<(), Failure> {
-        Ok(())
-    }
+    fn hear(&mut self, said: Message) -> Result<(), Failure>;
 
     /// A message this shell is blocked on; the session frames what comes back
     /// and writes it there.
     ///
     /// An answer is a command, and every answer is the same kind of thing.
-    /// Saying no is a command that returns non-zero — what the subject makes of
-    /// that is its own business, and the session only waits to see.
-    fn answer(&mut self, asked: Line) -> Result<Answer, Failure> {
-        self.hear(asked)?;
-
-        Ok(Answer::status(127))
-    }
+    /// Saying no is a command that returns non-zero — [`Answer::unknown`] is
+    /// the one for a word this rig has no answer for — and what the subject
+    /// makes of that is its own business.
+    fn answer(&mut self, asked: Message) -> Result<Answer, Failure>;
 
     /// The conversation is over; release what this held.
     fn finish(self) -> Result<Self::Kept, Failure>;
 }
 
-/// A reaction that keeps every message.
-impl Reacting for Vec<Line> {
+/// A reaction that keeps every message, and has no answer to any of them.
+impl Reacting for Vec<Message> {
     type Kept = Self;
 
-    fn hear(&mut self, said: Line) -> Result<(), Failure> {
+    fn hear(&mut self, said: Message) -> Result<(), Failure> {
         self.push(said);
 
         Ok(())
+    }
+
+    fn answer(&mut self, asked: Message) -> Result<Answer, Failure> {
+        self.hear(asked)?;
+
+        Ok(Answer::unknown())
     }
 
     fn finish(self) -> Result<Self, Failure> {
@@ -236,6 +207,14 @@ impl Reacting for Vec<Line> {
 /// A reaction that keeps nothing and answers nothing.
 impl Reacting for () {
     type Kept = Self;
+
+    fn hear(&mut self, _said: Message) -> Result<(), Failure> {
+        Ok(())
+    }
+
+    fn answer(&mut self, _asked: Message) -> Result<Answer, Failure> {
+        Ok(Answer::unknown())
+    }
 
     fn finish(self) -> Result<Self, Failure> {
         Ok(())

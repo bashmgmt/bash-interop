@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use crate::failure::{Doing, Failure};
 
 pub(super) use message::Arrived;
-pub use message::{field, Answer, Kind, Line, Micros, Pid, Sent};
+pub use message::{field, Answer, Verb, Message, Micros, Pid, Stamp};
 pub use pipes::Wire;
 
 /// The client half, shipped verbatim. It locates the workspace from its own

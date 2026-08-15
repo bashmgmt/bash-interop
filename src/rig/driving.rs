@@ -7,7 +7,8 @@ use std::io;
 use std::path::Path;
 use std::process::{Child, Command};
 
-use super::serving::{Serving, Until};
+use super::session::Session;
+use super::watch::Watch;
 use super::{Attended, Kept, Rig};
 use crate::failure::{Doing, Failure};
 
@@ -55,20 +56,26 @@ pub struct Whole<K> {
 /// environment puts one there — `env VAR=v -- cmd` is the whole story.
 /// Instrumentation travels by `BASH_ENV` instead, which is what reaches the
 /// shells a command line never could.
-pub trait Master: Rig {
+///
+/// | | |
+/// |---|---|
+/// | what ends it | a pidfd on the subject, watched and never signalled |
+/// | what comes back | [`Run`] — every [`Attended`] shell, the subject's [`ExitStatus`], and what went wrong closing up |
+/// | with that discharged | [`Run::whole`] → [`Whole`] |
+pub trait Driving: Rig {
     fn run<A: AsRef<OsStr>>(&self, argv: &[A]) -> Result<Run<Kept<Self>>, Failure>
     where
         Self: Sized,
     {
-        let mut serving = Serving::lay(self)?;
+        let mut session = Session::open(self)?;
 
-        // Declared after the serving, so it drops before it: leaving through
+        // Declared after the session, so it drops before it: leaving through
         // `?` below stops the subject before releasing what it was feeding.
-        let mut subject = Subject::spawn(argv, serving.address())?;
+        let mut subject = Subject::spawn(argv, &session.layout.prelude)?;
 
-        serving.drive(&Until::process(subject.pid())?)?;
+        session.drive(&Watch::process(subject.pid())?)?;
         let subject = ExitStatus::from(subject.finish().doing(|| "waiting for bash".into())?);
-        let (shells, failed) = serving.finish();
+        let (shells, failed) = session.finish();
 
         Ok(Run { shells, subject, failed })
     }

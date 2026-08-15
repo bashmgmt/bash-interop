@@ -20,7 +20,7 @@ const BASH: &str = include_str!("stack.bash");
 /// `__bc_stack` has to be defined before anything calls it, so every
 /// instrument that reports a walk is built here rather than by joining strings
 /// at each tool.
-pub fn with(bash: &[&str]) -> String {
+pub fn with_walk(bash: &[&str]) -> String {
     let mut all = vec![BASH];
     all.extend_from_slice(bash);
 

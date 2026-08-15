@@ -1,7 +1,18 @@
 # The rig — a reaction, and two orchestrations
 
-`src/bash/rig/mod.rs` for the reaction, `master.rs` and `slave.rs` for the two
-ways a session comes about, `serving.rs` for what they share.
+`src/bash/rig/mod.rs` for the two traits, `driving.rs` and `serving.rs` for the
+two ways a session comes about, `session.rs` and `watch.rs` for what they share.
+
+```
+rig/  mod.rs       the doc; `Rig`, `Reacting`; the re-export list
+      attended.rs  `Workspace`, `Layout`, `Attended`, `Kept`, `Said`, `heard`
+      forest.rs    `ShellNode`, `forest` — who started whom
+      session.rs   `Session`, `Attending` — the conversation and its loop
+      watch.rs     `Watch`, `Ready`, `wait_for` — what ends one
+      driving.rs   `Driving`, `Run`, `Whole`, `Subject`, `ExitStatus`
+      serving.rs   `Serving`, `Served`
+      wire/        the protocol
+```
 
 A **rig** is a description: the bash it gives the subject, where the session's
 files go, and how to build a reaction once a shell is there. The reaction is
@@ -15,7 +26,7 @@ carries its own orchestration.
 ```rust
 pub trait Rig {
     /// What reacts to one shell.
-    type Attending: Reacting;
+    type Reaction: Reacting;
 
     /// The words this rig gives the subject, laid beside the protocol's own
     /// and sourced by it. The same text in either orchestration.
@@ -26,31 +37,60 @@ pub trait Rig {
 
     /// A shell has joined, and everything about it is known. This is where it
     /// enters, and the last time it is a parameter.
-    fn joined(&self, at: &Laid, shell: Arc<Shell>) -> Result<Self::Attending, Failure>;
+    fn joined(&self, at: &Layout, shell: Arc<Shell>) -> Result<Self::Reaction, Failure>;
 }
 
 pub trait Reacting: Sized {
     /// What is left when the shell can no longer speak.
     type Kept;
 
-    fn hear(&mut self, said: Line) -> Result<(), Failure>;
-    fn answer(&mut self, asked: Line) -> Result<Answer, Failure>;
+    fn hear(&mut self, said: Message) -> Result<(), Failure>;
+    fn answer(&mut self, asked: Message) -> Result<Answer, Failure>;
     fn finish(self) -> Result<Self::Kept, Failure>;
 }
 ```
 
-**`joined` and `finish` are the only required methods.** `Rig` defaults to no
-words of the subject's own and a workspace thrown away; `Reacting` defaults to
-keeping nothing, and to hearing a question and telling the shell the word is
-unknown (`return 127`).
+**No method has a default body.** An `impl` block is the whole contract: a rig
+with no words of its own writes `String::new()` and `Workspace::Temporary`
+because it means them, and a reaction that drops what it hears or refuses every
+question says so where a reader will look for it.
 
-Two shipped implementations cover the common cases: `Vec<Line>` keeps every
-message, `()` keeps nothing. A rig that wants either needs no type of its own.
+The template is a *value*, not an inherited body:
+
+```rust
+impl Answer {
+    /// A word this rig has no answer for. 127 is bash's own "command not
+    /// found", which is the claim being made.
+    pub fn unknown() -> Self;
+
+    /// Ran, and nothing to say about it.
+    pub fn ok() -> Self;
+}
+```
+
+so what used to be inherited is now written where it applies, and the decision
+inside it — that an unanswered question is still worth hearing — is visible:
+
+```rust
+fn answer(&mut self, asked: Message) -> Result<Answer, Failure> {
+    self.hear(asked)?;
+
+    Ok(Answer::unknown())
+}
+```
+
+Two shipped reactions are the templates to copy from, and a rig that wants
+either whole names it as its `Reaction` and writes nothing:
+
+| | `hear` | `answer` | `finish` |
+|---|---|---|---|
+| `Vec<Message>` | push | `hear`, then `Answer::unknown()` | `Ok(self)` |
+| `()` | drop it | `Answer::unknown()` | `Ok(())` |
 
 `&self` on `Rig` throughout — a rig is a description and is never mutated by
 running. `&mut self` on `Reacting` — a reaction is the thing that changes.
 
-`Line` arrives **by value**: a reaction that keeps it does so without cloning,
+`Message` arrives **by value**: a reaction that keeps it does so without cloning,
 one that ignores it drops it for free.
 
 ### Facts are members, not parameters
@@ -62,7 +102,7 @@ once, at `joined`, and a reaction that needs them keeps them:
 ```rust
 struct Seen { shell: Arc<Shell>, captures: Vec<Capture> }
 
-fn joined(&self, _at: &Laid, shell: Arc<Shell>) -> Result<Seen, Failure> {
+fn joined(&self, _at: &Layout, shell: Arc<Shell>) -> Result<Seen, Failure> {
     Ok(Seen { shell, captures: Vec::new() })
 }
 ```
@@ -72,7 +112,7 @@ no other way to construct one, so no path through the session can hold a
 message whose shell is unknown. A message from a pid that never joined is a
 fault and ends the run.
 
-`Laid { dir, prelude }` is where the session's files ended up — the workspace,
+`Layout { dir, prelude }` is where the session's files ended up — the workspace,
 and the address a shell sources to join. It is handed over for the same reason:
 a reaction that resolves frame sources afterwards, or hands the address to
 something it starts, knows where they are without being told twice.
@@ -127,19 +167,19 @@ Where a caller wants the run flat again:
 ```rust
 pub struct Said<'a> { pub shell: &'a Arc<Shell>, pub line: &'a Line }
 
-pub fn heard<K: AsRef<[Line]>>(shells: &[Attended<K>]) -> Vec<Said<'_>>;
+pub fn heard<K: AsRef<[Message]>>(shells: &[Attended<K>]) -> Vec<Said<'_>>;
 ```
 
-`Sent::nth` counts messages over the whole run, so merging the per-shell
+`Stamp::nth` counts messages over the whole run, so merging the per-shell
 foldings back into arrival order is a sort on one field. A `Said` is a message
 and the shell that sent it, which is what any later reading of a walk needs —
 see [stack.md](stack.md#bashs-own-words). A `Kept` of the caller's own joins in
-by implementing `AsRef<[Line]>`.
+by implementing `AsRef<[Message]>`.
 
-## `Master` — Rust orchestrates
+## `Driving` — Rust orchestrates
 
 ```rust
-pub trait Master: Rig {
+pub trait Driving: Rig {
     fn run<A: AsRef<OsStr>>(&self, argv: &[A]) -> Result<Run<Kept<Self>>, Failure>;
 }
 
@@ -189,16 +229,16 @@ other path; `Child::wait` caches its status, so doing it twice costs nothing.
 Reaping is `wait`, not `try_wait`: a killed child that is merely unreaped still
 answers `kill(pid, 0)`.
 
-`Subject` is a local of `Master::run`, declared after the serving, so leaving
+`Subject` is a local of `Driving::run`, declared after the serving, so leaving
 through `?` drops it first and the shell is stopped before what was feeding it
 is released. The kill on the way out is also what collects anything that
 outlived the leader; a process that means to survive detaches with `setsid`,
 which leaves the group.
 
-## `Slave` — bash orchestrates
+## `Serving` — bash orchestrates
 
 ```rust
-pub trait Slave: Rig {
+pub trait Serving: Rig {
     fn serve<A>(&self, held: OwnedFd, announce: A) -> Result<Served<Kept<Self>>, Failure>
     where A: FnOnce(&Answer) -> Result<(), Failure>;
 
@@ -248,7 +288,7 @@ wait "$BASHPROF_PID"       # the reading is on disk
 One mechanism covers both, which is why there is no closing word, no reserved
 payload word, and no interception in the serving loop. A descendant that
 inherited the handle keeps the session open — correctly, since it can still
-speak, and by the same rule `Master` applies to its process group.
+speak, and by the same rule `Driving` applies to its process group.
 
 A client that keeps talking after the session ended writes into a fifo whose
 reader is gone and takes `SIGPIPE`. Releasing last — from a `trap … EXIT` — is
@@ -268,7 +308,7 @@ BC_INSTR say STEP compile
 BC_LEAVE                                    # release, wait, return its status
 ```
 
-`assets/joining.bash` is the bash half; `Slave::serve_coprocess` is the Rust
+`assets/joining.bash` is the bash half; `Serving::serve_coprocess` is the Rust
 half, and a server that wants a channel of its own calls `serve` directly.
 Unlike a tool's words, `joining.bash` is only ever vendored — it runs before
 there is anything to inject, and it is what brings the protocol into a shell.
@@ -297,20 +337,20 @@ and because that rig answers questions, which no shipped tool does.
 
 | | the descriptor | the session's extent | who cleans up |
 |---|---|---|---|
-| `Master` | a pidfd on the subject the run started | its process group | the run: kill, reap, report the status |
-| `Slave` | the handle the initiator holds | whoever inherited it | nobody — not our process |
+| `Driving` | a pidfd on the subject the run started | its process group | the run: kill, reap, report the status |
+| `Serving` | the handle the initiator holds | whoever inherited it | nobody — not our process |
 
 **A session lasts as long as anyone who could still speak.** One sentence for
 both, and the loop below is the whole of it.
 
-## `Serving` — what they share
+## `Session` — what they share
 
 ```rust
-struct Serving<'r, R: Rig> {
+struct Session<'r, R: Rig> {
     rig: &'r R,
-    laid: Laid,
+    layout: Layout,
     wire: Wire,
-    shells: Vec<Attending<R::Attending>>,
+    shells: Vec<Attending<R::Reaction>>,
     newest: HashMap<Pid, usize>,
     _temporary: Option<TempDir>,
 }
@@ -318,9 +358,13 @@ struct Serving<'r, R: Rig> {
 struct Attending<A> { shell: Arc<Shell>, reacting: A }
 ```
 
-`lay` writes the workspace and the pipe; nothing of the rig's exists yet,
+`Attending` is a shell whose reaction is live; `Attended` is the same pair once
+that reaction has finished. Having one of the first is the whole proof that its
+shell announced itself.
+
+`open` writes the workspace and the pipe; nothing of the rig's exists yet,
 because a reaction is built when a shell turns up rather than in advance.
-`address()` is the session's only address. `newest` is which shell a later
+`layout.prelude` is the session's only address. `newest` is which shell a later
 message from a pid belongs to — a pid reused across a long run opens a new
 shell rather than reopening the first.
 
@@ -331,8 +375,8 @@ asking any reaction to finish, since it is the earlier fault.
 There is no interval and no timer.
 
 ```rust
-fn drive(&mut self, until: &Until) -> Result<(), Failure> {
-    while let Ready::Spoke = wait_for(&self.wire, until)? {
+fn drive(&mut self, watch: &Watch) -> Result<(), Failure> {
+    while let Ready::Spoke = wait_for(&self.wire, watch)? {
         self.deliver()?;
     }
 
@@ -348,15 +392,15 @@ message already waiting is read before the end is noticed, and the delivery
 behind the loop takes what arrived with it.
 
 ```rust
-struct Until(OwnedFd);
+struct Watch(OwnedFd);
 
-impl Until {
+impl Watch {
     fn process(pid: libc::pid_t) -> Result<Self, Failure>;   // pidfd
     fn held(handle: OwnedFd) -> Self;                        // POLLHUP
 }
 ```
 
-**`Until` observes; whoever started the thing owns it.** `Until` never signals
+**`Watch` observes; whoever started the thing owns it.** `Watch` never signals
 and never reaps, which is what lets one loop serve both orchestrations. It is
 private: neither constructor is reachable outside the role method that needs
 it, so the two cannot be mixed.
@@ -368,22 +412,22 @@ delivers whether or not they were asked for.
 ## What a reaction is for
 
 **Tracking what a run produced is entirely the client's.** The library ships no
-accumulator beyond `Vec<Line>` and `()`, and no rig implementation.
+accumulator beyond `Vec<Message>` and `()`, and no rig implementation.
 
 | | its `Attending` → `Kept` | what it overrides |
 |---|---|---|
 | bashcap | `Capturing { shell, into, sink, written }` → `usize` | `bash`; `hear` decodes and writes; `finish` flushes and reports how many |
-| bashprof | `Vec<Line>` → itself | `bash` alone. Every message carries the name of the call it was made inside of, so reading is one pass with a map, then two hylic folds — one to nest, one to read the tree as timings |
+| bashprof | `Vec<Message>` → itself | `bash` and `workspace` alone. Every message carries the name of the call it was made inside of, so reading is one pass with a map, then two hylic folds — one to nest, one to read the tree as timings |
 | `examples/snapshotting.rs` | `Seen { shell, captures }` → `Vec<Capture>` | `bash`; `hear` decodes against its own shell and keeps |
-| `examples/answering.rs` | `Conversation { shell, dir, heard }` → `Vec<Line>` | `bash`; `answer` decides from what that shell said, and writes its bash into `Laid::dir` |
+| `examples/answering.rs` | `Conversation { shell, dir, heard }` → `Vec<Message>` | `bash`; `answer` decides from what that shell said, and writes its bash into `Layout::dir` |
 | `examples/streaming.rs` | `Writing { shell, into, sink, written }` → `usize` | `hear` writes, `finish` flushes — one file, every shell |
 | `joined/merging.rs` | `Merges { shell, into, heard }` → `()` | the merge is a shared list; pushing as messages arrive *is* the merge |
-| `proofs/answering.rs` | `Soak { steps, heard, answered }` → itself | `bash`, `hear`, `answer`; `AsRef<[Line]>` so `heard` reaches it |
+| `proofs/answering.rs` | `Soak { steps, heard, answered }` → itself | `bash`, `hear`, `answer`; `AsRef<[Message]>` so `heard` reaches it |
 | `proofs/owning.rs` | `Boom` → `()` | `answer`, which never returns |
 
 ## When the rig fails
 
-**A `Failure` from `hear` or `answer` ends the conversation.** Under `Master` it
+**A `Failure` from `hear` or `answer` ends the conversation.** Under `Driving` it
 leaves through `?`,
 dropping `Subject` — killing the group and reaping it — and `run` yields that
 reason instead of a `Run`.
@@ -405,7 +449,7 @@ and `status`, and the default `answer` says the word is unknown with `return
 Serving is therefore stateless: no flag, no poisoned mode, no second reading of
 a message already handled.
 
-Under `Slave` a shell that was blocked when the fault happened stays blocked:
+Under `Serving` a shell that was blocked when the fault happened stays blocked:
 the session owns nothing it could kill.
 
 None of this costs the status. `bashcap run` still exits with the subject's

@@ -3,7 +3,7 @@
 `assets/bashcap.bash`, `assets/bashprof.bash`
 
 An instrumented call site is source, not a debugging insertion:
-`BASHPROF_TIME_CPS build make all` names a phase and is committed. Without the
+`BASHPROF_TIMETHIS build make all` names a phase and is committed. Without the
 tool that word does not exist and the script exits 127, so a script that ships
 carries the word with it.
 
@@ -18,7 +18,7 @@ installs.
 assets/bashcap.bash       BASHCAP, WITH_BASHCAP, __bc_take_flags  → __bc_capture
 src/bashcap/effect.bash   __bc_capture
 
-assets/bashprof.bash      BASHPROF_TIME_CPS                       → __bp_begin, __bp_end
+assets/bashprof.bash      BASHPROF_TIMETHIS                       → __bp_begin, __bp_end
 src/bashprof/effect.bash  __bp_begin, __bp_end
 ```
 
@@ -84,7 +84,7 @@ pass-through:
 | | |
 |---|---|
 | `WITH_BASHCAP` | consumes the same leading `-BCV:`/`-BCS:` flags before the continuation, or they are run as a command |
-| `BASHPROF_TIME_CPS` | returns 125 when called without a label — without it a call with no arguments shifts nothing, runs nothing and reports success |
+| `BASHPROF_TIMETHIS` | returns 125 when called without a label — without it a call with no arguments shifts nothing, runs nothing and reports success |
 
 One file means one definition of each, so there is nothing to keep in step.
 `__bc_take_flags` is the single parser both bashcap words use, and the shift

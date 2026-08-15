@@ -85,8 +85,8 @@ pub struct Stack { /* private */ }
 
 impl Stack {
     pub fn of(frames: Vec<Frame>) -> Option<Self>;   // None for no frames
-    pub fn at(&self) -> &Frame;                      // where the walk was taken
-    pub fn outer(&self) -> &[Frame];                 // the frames above it
+    pub fn top(&self) -> &Frame;                     // where the walk was taken
+    pub fn below(&self) -> &[Frame];                 // the frames above it
     pub fn frames(&self) -> impl Iterator<Item = &Frame>;
 }
 
@@ -241,7 +241,7 @@ it, and where it is checked without running bash.
 | | skip | arguments |
 |---|---|---|
 | `BASHCAP` (`src/bashcap/`) | 2 | under `--trace-calls` |
-| `BASHPROF_TIME_CPS` (`tests/examples/bashprof.rs`) | 2 | whatever the shell has |
+| `BASHPROF_TIMETHIS` (`tests/examples/bashprof.rs`) | 2 | whatever the shell has |
 
 Both reach it through `bash::STACK`, prepended to their own bash in
 `Rig::bash`.

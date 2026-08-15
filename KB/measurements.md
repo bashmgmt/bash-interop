@@ -93,7 +93,7 @@ counts against `__BC__limit`. See [stack.md](stack.md).
 
 An instrument that separates its layers as **functions** puts every layer's
 frame on the stack of everything measured below it, and every walk carries
-them. `BASHPROF_TIME_CPS` as one function against the same word as a CPS spine
+them. `BASHPROF_TIMETHIS` as one function against the same word as a CPS spine
 of three, BEGIN payload in bytes by how many measured calls enclose it:
 
 | enclosing measurements | one function | spine of three |
@@ -110,11 +110,11 @@ column: each frame repeats the instrument's own path.
 **What costs this is a layer that is still on the stack while the measured call
 runs.** A layer that returns first does not: `__bp_begin` sends the BEGIN and
 returns before `"$@"`, so it stands in its own walk and in nobody else's. Four
-levels of `BASHPROF_TIME_CPS`, deepest first:
+levels of `BASHPROF_TIMETHIS`, deepest first:
 
 ```
-funcs: ('__bc_stack' '__bp_begin' 'BASHPROF_TIME_CPS' 'd3' 'BASHPROF_TIME_CPS'
-        'd2' 'BASHPROF_TIME_CPS' 'd1' 'BASHPROF_TIME_CPS' 'main')
+funcs: ('__bc_stack' '__bp_begin' 'BASHPROF_TIMETHIS' 'd3' 'BASHPROF_TIMETHIS'
+        'd2' 'BASHPROF_TIMETHIS' 'd1' 'BASHPROF_TIMETHIS' 'main')
 skip : 3
 ```
 

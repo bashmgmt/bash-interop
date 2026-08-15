@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use mb_resolver::bash::rig::{
-    Answer, ExitStatus, Failure, Kind, Laid, Line, Master, Reacting, Rig, Shell,
+    Answer, Driving, ExitStatus, Failure, Layout, Message, Reacting, Rig, Shell, Verb, Workspace,
 };
 
 use crate::support::{bash, Scripts};
@@ -58,7 +58,7 @@ fn every_reply_pipe_goes_with_its_answer() {
 
     assert_eq!(ran.subject, ExitStatus::Code(0));
     assert_eq!(
-        lines(&ran.shells).iter().filter(|line| line.kind == Kind::Ask).count(),
+        lines(&ran.shells).iter().filter(|message| message.verb == Verb::Ask).count(),
         43,
         "two shells asked"
     );
@@ -122,9 +122,18 @@ struct Exploding;
 struct Boom;
 
 impl Rig for Exploding {
-    type Attending = Boom;
+    type Reaction = Boom;
 
-    fn joined(&self, _at: &Laid, _shell: Arc<Shell>) -> Result<Boom, Failure> {
+    /// No words of its own in the subject's shells.
+    fn bash(&self) -> String {
+        String::new()
+    }
+
+    fn workspace(&self) -> Workspace {
+        Workspace::Temporary
+    }
+
+    fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Boom, Failure> {
         Ok(Boom)
     }
 }
@@ -132,7 +141,11 @@ impl Rig for Exploding {
 impl Reacting for Boom {
     type Kept = ();
 
-    fn answer(&mut self, _: Line) -> Result<Answer, Failure> {
+    fn hear(&mut self, _said: Message) -> Result<(), Failure> {
+        Ok(())
+    }
+
+    fn answer(&mut self, _: Message) -> Result<Answer, Failure> {
         panic!("answer blew up")
     }
 
@@ -141,7 +154,7 @@ impl Reacting for Boom {
     }
 }
 
-impl Master for Exploding {}
+impl Driving for Exploding {}
 
 /// The panic propagates and the subject is still killed. Nothing comes back
 /// from the run, so the subject writes its own pid to a file before asking.

@@ -13,7 +13,7 @@
 # before there is anything to inject, and what brings the protocol into the
 # shell in the first place.
 #
-# The convention it stands on has a second half in Rust — `Slave::serve_coprocess`
+# The convention it stands on has a second half in Rust — `Serving::serve_coprocess`
 # — and it is this: the client holds the server's standard input, and the
 # server writes one line on its standard output, the command that joins.
 #

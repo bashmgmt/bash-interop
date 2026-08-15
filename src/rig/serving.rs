@@ -1,216 +1,97 @@
-//! The conversation itself: a workspace with a wire in it, one reaction per
-//! shell, and the loop that serves until nobody can speak any more.
+//! bash orchestrates: a script that is already running started the server,
+//! takes the address it is handed, and lets go when it is done.
 //!
-//! What that means is an [`Until`] — a descriptor the role built. Which shells
-//! it stands for, and whether anything is owed to them afterwards, belongs to
-//! the role and not here.
+//! Nothing here starts a process or ends one. What the client started, the
+//! client cleans up, which is why the only thing this side watches is the
+//! handle.
 
-use std::collections::HashMap;
-use std::fs;
 use std::io;
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
-use std::path::Path;
-use std::sync::Arc;
+use std::os::fd::{AsFd, OwnedFd};
 
-use tempfile::TempDir;
-
-use super::wire::{prelude, Arrived, Kind, Pid, Wire};
-use super::{Attended, Kept, Laid, Reacting, Rig, Shell, Workspace};
+use super::session::Session;
+use super::watch::Watch;
+use super::{Answer, Attended, Kept, Rig};
 use crate::failure::{Doing, Failure};
 
-/// One shell and the reaction built for it. Having one is the whole proof that
-/// the shell announced itself: there is no other way to make one.
-struct Attending<A> {
-    shell: Arc<Shell>,
-    reacting: A,
+/// What a served session produced.
+///
+/// Reaching one of these means the conversation ran and was seen out. A
+/// `Failure` instead means it never got that far: the workspace could not be
+/// laid, or a reaction could not do its work.
+pub struct Served<K> {
+    /// Every shell that joined, in the order they did, with what its reaction
+    /// left behind.
+    pub shells: Vec<Attended<K>>,
+
+    /// What went wrong closing up, if anything: a message left half-read, or a
+    /// reaction that would not let go. Both happen after the conversation
+    /// reached its own end.
+    pub failed: Option<Failure>,
 }
 
-/// A laid conversation: the workspace is written and the pipe is open. What is
-/// missing is who speaks and what ends it.
-pub(super) struct Serving<'r, R: Rig> {
-    rig: &'r R,
-    laid: Laid,
-    wire: Wire,
+/// A rig a running bash may attach to.
+///
+/// | | |
+/// |---|---|
+/// | what ends it | the handle the initiator holds, watched and never closed here |
+/// | what comes back | [`Served`] — every [`Attended`] shell, and what went wrong closing up |
+///
+/// `held` is a descriptor the initiator holds open for as long as it wants the
+/// session: serving ends when the last holder has let go, whether the client
+/// released it or died with it. Releasing it and waiting for the process it
+/// started is how a client closes and learns that the reading is written.
+///
+/// `announce` is handed the session's address — one command, which the client
+/// runs to join. It is called once, before anything is served, so a client
+/// waiting for it is unblocked before the first message can arrive.
+///
+/// What the address reaches is the client's decision. Sourcing it instruments
+/// that shell, its functions, its subshells and what it sources; exporting
+/// `BASH_ENV` to the same path instruments the processes it starts.
+pub trait Serving: Rig {
+    fn serve<A>(&self, held: OwnedFd, announce: A) -> Result<Served<Kept<Self>>, Failure>
+    where
+        A: FnOnce(&Answer) -> Result<(), Failure>,
+        Self: Sized,
+    {
+        let mut session = Session::open(self)?;
 
-    shells: Vec<Attending<R::Attending>>,
+        let address = &session.layout.prelude;
+        let path = address.to_str().ok_or_else(|| {
+            Failure::new("announcing the session", format!("{} is not text", address.display()))
+        })?;
+        announce(&Answer::of("source", [path]))?;
 
-    /// The newest shell carrying each pid, which is what a later message from
-    /// that pid belongs to. A pid reused across a long run opens a new shell
-    /// rather than reopening the first.
-    newest: HashMap<Pid, usize>,
+        session.drive(&Watch::held(held))?;
 
-    /// Held only to be dropped: it takes the workspace with it, and it goes
-    /// last so nothing is reading the files when it does.
-    _temporary: Option<TempDir>,
-}
+        let (shells, failed) = session.finish();
 
-impl<'r, R: Rig> Serving<'r, R> {
-    /// The workspace is canonicalised: every shell reads its own location from
-    /// the path it was sourced from, so a relative one would move with the
-    /// subject.
-    pub(super) fn lay(rig: &'r R) -> Result<Self, Failure> {
-        let (at, temporary) = match rig.workspace() {
-            Workspace::At(at) => (at, None),
-            Workspace::Temporary => {
-                let temp =
-                    tempfile::tempdir().doing(|| "opening a workspace for the run".into())?;
+        Ok(Served { shells, failed })
+    }
 
-                (temp.path().to_path_buf(), Some(temp))
-            }
-        };
-        let opening = || format!("opening the workspace {}", at.display());
+    /// Serve the client that started this process as a coprocess: it holds this
+    /// process's standard input, and reads the address from its standard
+    /// output.
+    ///
+    /// That convention has a second half, and `BC_JOIN` in `assets/joining.bash`
+    /// is it — one word doing the `coproc`, the one `read` and the `declare -a`.
+    /// A server that wants a channel of its own calls [`serve`](Serving::serve)
+    /// instead.
+    fn serve_coprocess(&self) -> Result<Served<Kept<Self>>, Failure>
+    where
+        Self: Sized,
+    {
+        let held = io::stdin()
+            .as_fd()
+            .try_clone_to_owned()
+            .doing(|| "taking hold of the handle the client kept".into())?;
 
-        fs::create_dir_all(&at).doing(opening)?;
-        let dir = fs::canonicalize(&at).doing(opening)?;
+        // `println!` writes through a line buffer, so the newline that ends the
+        // address is also what puts it on the pipe the client is blocked on.
+        self.serve(held, |address| {
+            println!("{address}");
 
-        let wire = Wire::create(&dir)?;
-        let prelude = prelude(&dir, &rig.bash())?;
-
-        Ok(Self {
-            rig,
-            laid: Laid { dir, prelude },
-            wire,
-            shells: Vec::new(),
-            newest: HashMap::new(),
-            _temporary: temporary,
+            Ok(())
         })
-    }
-
-    /// The file a shell has to source to join. It is the session's only
-    /// address.
-    pub(super) fn address(&self) -> &Path {
-        &self.laid.prelude
-    }
-
-    /// Every message the pipe holds, handed to the shell that sent it. An
-    /// account of itself makes that shell; everything else needs one to already
-    /// exist, and a message from a pid that never announced itself is a fault.
-    ///
-    /// A shell that asked is blocked until its answer is written, so writing it
-    /// is part of delivering rather than something a caller does afterwards.
-    fn deliver(&mut self) -> Result<(), Failure> {
-        for arrived in self.wire.drain()? {
-            match arrived {
-                Arrived::Joined { pid, sent, account } => {
-                    let shell = Arc::new(Shell::of(self.shells.len(), pid, sent, &account)?);
-                    let reacting = self.rig.joined(&self.laid, shell.clone())?;
-
-                    self.newest.insert(pid, self.shells.len());
-                    self.shells.push(Attending { shell, reacting });
-                }
-
-                Arrived::Spoke { pid, line } => {
-                    let at = *self.newest.get(&pid).ok_or_else(|| {
-                        Failure::new(
-                            "placing a message",
-                            format!("pid {pid} spoke without ever joining"),
-                        )
-                    })?;
-                    let reacting = &mut self.shells[at].reacting;
-
-                    match line.kind {
-                        Kind::Say => reacting.hear(line)?,
-                        Kind::Ask => {
-                            let answer = reacting.answer(line)?;
-
-                            self.wire.answer(pid, answer)?;
-                        }
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// Serve until nobody can speak any more. There is no interval and no
-    /// timer.
-    ///
-    /// The pipe is polled first, so a message already waiting is read before
-    /// the end is noticed, and the delivery behind the loop takes what arrived
-    /// with it.
-    pub(super) fn drive(&mut self, until: &Until) -> Result<(), Failure> {
-        while let Ready::Spoke = wait_for(&self.wire, until)? {
-            self.deliver()?;
-        }
-
-        self.deliver()
-    }
-
-    /// Release what the session holds. A message left half-read is reported
-    /// before any reaction is asked to finish, since it is the earlier fault.
-    pub(super) fn finish(self) -> (Vec<Attended<Kept<R>>>, Option<Failure>) {
-        let Self { shells, wire, .. } = self;
-        let mut failed = wire.finish().err();
-        let mut done = Vec::with_capacity(shells.len());
-
-        for Attending { shell, reacting } in shells {
-            match reacting.finish() {
-                Ok(kept) => done.push(Attended { shell, kept }),
-                Err(why) => failed = failed.or(Some(why)),
-            }
-        }
-
-        (done, failed)
-    }
-}
-
-/// What a serving ends on: a descriptor that becomes ready when nobody who
-/// could speak is left.
-///
-/// It is only ever watched. Signalling and reaping belong to whoever started
-/// the thing being watched, which is never this.
-pub(super) struct Until(OwnedFd);
-
-impl Until {
-    /// A process whose end is the end. `pidfd_open` needs no ownership of it,
-    /// which is why the same watch serves a child and a stranger.
-    pub(super) fn process(pid: libc::pid_t) -> Result<Self, Failure> {
-        let raw = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) };
-        if raw < 0 {
-            return Err(io::Error::last_os_error()).doing(|| format!("watching bash {pid}"));
-        }
-
-        Ok(Self(unsafe { OwnedFd::from_raw_fd(raw as RawFd) }))
-    }
-
-    /// A handle an initiator holds: ready once the last holder has let go.
-    pub(super) fn held(handle: OwnedFd) -> Self {
-        Self(handle)
-    }
-}
-
-enum Ready {
-    Spoke,
-    Gone,
-}
-
-/// One `poll` over the pipe and the end condition at once. A ready descriptor
-/// does not imply an empty pipe, so the pipe is checked first.
-///
-/// `events` asks for `POLLIN` on both, which is what a pidfd reports when its
-/// process exits. A handle reports `POLLHUP` or `POLLERR` instead, and `poll`
-/// delivers those whether or not they were asked for — so the second descriptor
-/// is read as ready on anything at all.
-fn wait_for(wire: &Wire, until: &Until) -> Result<Ready, Failure> {
-    loop {
-        let mut watching = [
-            libc::pollfd { fd: wire.reader(), events: libc::POLLIN, revents: 0 },
-            libc::pollfd { fd: until.0.as_raw_fd(), events: libc::POLLIN, revents: 0 },
-        ];
-
-        if unsafe { libc::poll(watching.as_mut_ptr(), 2, -1) } < 0 {
-            let cause = io::Error::last_os_error();
-            if cause.kind() == io::ErrorKind::Interrupted {
-                continue;
-            }
-            return Err(cause).doing(|| "waiting for the conversation".into());
-        }
-
-        if watching[0].revents & libc::POLLIN != 0 {
-            return Ok(Ready::Spoke);
-        }
-        if watching[1].revents != 0 {
-            return Ok(Ready::Gone);
-        }
     }
 }

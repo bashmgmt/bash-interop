@@ -11,7 +11,9 @@ use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 
-use mb_resolver::bash::rig::{Answer, Attended, Failure, Laid, Line, Rig, Shell, Slave};
+use mb_resolver::bash::rig::{
+    Answer, Attended, Failure, Layout, Message, Rig, Serving, Shell, Workspace,
+};
 
 use crate::support::Scripts;
 use crate::{behind, report, ENTRY};
@@ -20,18 +22,22 @@ use crate::{behind, report, ENTRY};
 struct Attaching;
 
 impl Rig for Attaching {
-    type Attending = Vec<Line>;
+    type Reaction = Vec<Message>;
+
+    fn workspace(&self) -> Workspace {
+        Workspace::Temporary
+    }
 
     fn bash(&self) -> String {
         "TELL() { BC_INSTR say TELL \"$@\"; }".to_string()
     }
 
-    fn joined(&self, _at: &Laid, _shell: Arc<Shell>) -> Result<Vec<Line>, Failure> {
+    fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Vec<Message>, Failure> {
         Ok(Vec::new())
     }
 }
 
-impl Slave for Attaching {}
+impl Serving for Attaching {}
 
 /// The client's side of joining: run the one command it was handed, then carry
 /// on with its own script. `declare -a` reads the address exactly as the
@@ -54,7 +60,7 @@ fn joining(address: &Answer, script: &Path, handle: OwnedFd) -> Child {
 
 /// Serve `scripts`' entry in a shell started for it, and hand back the shells
 /// that joined beside how that shell ended.
-fn joined(scripts: &Scripts) -> (Vec<Attended<Vec<Line>>>, Option<i32>) {
+fn joined(scripts: &Scripts) -> (Vec<Attended<Vec<Message>>>, Option<i32>) {
     let (held, handle) = pipe().expect("a handle");
 
     let mut child = None;
@@ -177,7 +183,7 @@ fn a_shell_says_what_it_is_rather_than_being_guessed_at() {
     assert_eq!(served.shells.len(), 1);
 
     let shell = &served.shells[0].shell;
-    let started = &shell.bash.started;
+    let started = &shell.bash.invocation;
 
     assert!(started.interactive, "it said so: {started:?}");
     assert!(started.standard_input, "and where its code came from");
@@ -187,5 +193,5 @@ fn a_shell_says_what_it_is_rather_than_being_guessed_at() {
 
     // Interactive is not something the options can be turned into: `set`
     // refuses `-i`, so this is settled at startup and true of the whole shell.
-    assert!(shell.state.flags.has('i'));
+    assert!(shell.options.flags.has('i'));
 }
