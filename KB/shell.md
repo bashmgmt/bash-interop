@@ -20,21 +20,25 @@ pub struct Options { pub flags: Flags, pub shellopts: Vec<String>, pub bashopts:
 
 **A shell's account of itself opens it**, and it is the shell saying so rather
 than anything inferred from the shape of what it went on to write. The account
-is the first line on the shell's own pipe; it is not a `Message` and cannot
-become one: it is what *makes* a shell, and a `Message` presupposes one.
+travels with the announcement — on the control fifo, in frames, before the
+shell's pipe is even opened — so the run knows everything about a shell before
+it releases it. It is not a `Message` and cannot become one: it is what *makes*
+a shell, and a `Message` presupposes one.
 
 ```bash
 __bc_account() {
-    local IFS=' '
-    __bc_send "$1" JOIN \
+    local __bc_out=$1 IFS=' '
+    set -- "at=$EPOCHREALTIME" \
         pid "$BASHPID" shlvl "$SHLVL" subshell "$BASH_SUBSHELL" \
         versinfo "(${BASH_VERSINFO[*]@Q})" bash "$BASH" zero "$0" flags "$-" \
         shellopts "$SHELLOPTS" bashopts "$BASHOPTS" command "${BASH_EXECUTION_STRING-}"
+    printf -v "$__bc_out" '(%s)' "${*@Q}"
 }
 ```
 
-Everything in it is passed as bash reports it, and what any of it means is
-decided in `Shell::of`. Adding a fact is a word here and a field there.
+One array literal, the clock first and no verb, written into the caller's
+local. Everything in it is passed as bash reports it, and what any of it means
+is decided in `Shell::of`. Adding a fact is a word here and a field there.
 
 None of it can change while a shell lives: a subshell has a `$BASHPID` of its
 own and joins as a shell of its own, and `set` refuses `-i`, `-c` and `-s`, so
@@ -63,6 +67,6 @@ on its first word; that it descends from a particular shell is not reported.
 
 ## See also
 
-- [wire.md](wire.md#lines) — the account as a line
+- [wire.md](wire.md#the-control-fifo) — how the account travels
 - [rig.md](rig.md#facts-are-members-not-parameters) — where a shell enters a reaction
 - [stack.md](stack.md) — the walk that cannot be read without the shell

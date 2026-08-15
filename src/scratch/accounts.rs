@@ -11,8 +11,8 @@ use crate::bash::rig::wire::Account;
 use crate::bash::rig::{Micros, Shell, Stamp};
 use crate::bash::value::emit_array;
 
-/// The words a `JOIN` line carries. `zero` is the shell's `$0` and `flags` its
-/// `$-`, which between them decide how a walk taken in it reads.
+/// The pairs an announcement carries. `zero` is the shell's `$0` and `flags`
+/// its `$-`, which between them decide how a walk taken in it reads.
 pub fn account(pid: u32, zero: &str, flags: &str) -> Vec<String> {
     let versinfo =
         emit_array(&["5", "3", "9", "1", "release", "x86_64-pc-linux-gnu"].map(String::from));

@@ -22,6 +22,15 @@ There is no ambiguity between *not yet* and *no longer*, and no state to keep
 beside the pipe. This is why end of input on a shell's pipe is its goodbye, and
 why the blocking `exec {fd}>up.$tok` is the rendezvous.
 
+| many writers on one fifo | |
+|---|---|
+| each writes 4096 bytes per `write` | every line arrives whole |
+| each writes 4097 | lines interleave |
+
+`PIPE_BUF` is 4096 on Linux, and it bounds a *write*, not a line: this is why
+the control fifo carries frames of at most 4096 bytes and a shell's pipe —
+one writer — carries lines of any length.
+
 ## tokio, on the same
 
 Verified with a scratch crate on tokio 1.53, current-thread runtime:
@@ -178,6 +187,8 @@ mechanism that cannot be checked by reading the source. One file per subject.
 | `a_fork_that_speaks_is_a_shell_of_its_own_and_parts_on_its_own` | a fork takes a pipe of its own, its `parted` precedes the parent's, and the parent's words stay the parent's |
 | `two_labels_in_one_process_are_two_shells` | `BC_JOIN` twice is two pipes and two shells with one pid |
 | `a_label_nobody_joined_is_an_error_by_absence` | `BC_INSTR NOPE …` names the label and the call site, returns 125, and the run knows nothing |
+| `an_account_of_any_size_arrives_whole` | a `bash -c` with a 21 KB command of `€` — six frames, cut inside characters — reads back byte for byte as `Invocation::command` |
+| `many_shells_announce_at_once` | 16 shells with 6 KB commands announce together; every account whole and its own |
 
 | `transport.rs` | establishes |
 |---|---|
@@ -200,15 +211,15 @@ mechanism that cannot be checked by reading the source. One file per subject.
 
 | `starting.rs` | establishes |
 |---|---|
-| `the_rigs_word_reaches_every_shell_and_so_does_the_callers_environment` | `Setup::bash` puts the rig's word in the subject and a child it starts; a variable set with `env` is inherited the same way |
+| `the_rigs_word_and_environment_reach_every_shell_and_the_address_is_always_there` | `Setup::bash` puts the rig's word in the subject and a child it starts; so does a variable from `Driving::environment`, and one set with `env` on the command line; `$BC_SESSION` is a readable file in both |
 | `the_command_line_is_run_as_asked` | the run starts the program the argv names, with nothing appended |
-| `a_subject_may_join_by_hand_where_it_chooses` | `env -u BASH_ENV`, then `source "$BC_SESSION/prelude.bash"`; children that sourced nothing are not shells |
+| `a_subject_may_join_by_hand_where_it_chooses` | a rig whose `environment` is empty: `source "$BC_SESSION"` where the script says; children that sourced nothing are not shells |
 
 | `serving.rs` | establishes |
 |---|---|
 | `a_shell_that_joined_is_heard_until_it_lets_go` | a client's words and its subshell's arrive; the session ends with the handle; the client's status is its own |
 | `a_shell_the_session_outlived_is_left_to_its_own_devices` | a client that released the handle while running has `parted: None`, and its next word takes `SIGPIPE` |
-| `a_joined_shell_may_publish_the_address_to_its_children` | exporting `BASH_ENV` to the prelude reaches a child process |
+| `a_joined_shell_may_publish_the_address_to_its_children` | `export BASH_ENV="$BC_SESSION"` reaches a child process |
 | `a_shell_says_what_it_is_rather_than_being_guessed_at` | an interactive shell joins by sourcing, and says `-i`, `-s`, no command line |
 
 | `owning.rs` | establishes |
@@ -223,7 +234,7 @@ mechanism that cannot be checked by reading the source. One file per subject.
 | `a_line_cut_short_by_a_shell_that_left_ends_the_run` | a fork that exits mid-line ends the run naming the line |
 | `a_line_cut_short_at_the_end_is_reported_beside_the_subjects_status` | the same left by a shell the session outlived is `Run::failed`, beside the subject's status |
 | `a_line_that_will_not_read_ends_the_run` | `(junk` ends the run quoting it |
-| `an_account_out_of_place_ends_the_run` | a second `JOIN` line is not a message |
+| `a_frame_the_protocol_did_not_write_ends_the_run` | a line on the control fifo that is not a frame ends the run quoting it |
 
 | `failing.rs` | establishes |
 |---|---|
@@ -257,5 +268,12 @@ fired for.** The handler must return 0.
 **Enabling `extdebug` while `BASH_ENV` is being read starts the debugger.**
 `bashcap`'s trace arms itself from a `DEBUG` trap on the next command, which
 must be the subject's — so its join comes before the trap.
+
+**`local LC_ALL=C` counts bytes, and the subject's locale is back on return.**
+`${#s}` and `${s:a:b}` count characters in the shell's locale; under `LC_ALL=C`
+they count bytes, an assignment to `LC_ALL` takes effect at once — `local`
+included — and returning restores the outer value, unset included. Measured
+with and without `set -o posix` (bash 5.3.9). This is what bounds a frame in
+bytes.
 
 **`mkfifo` is not a builtin.** See above.

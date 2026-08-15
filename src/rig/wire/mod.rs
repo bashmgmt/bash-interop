@@ -40,8 +40,8 @@ pub(crate) fn mkfifo(path: &Path) -> Result<(), Failure> {
 }
 
 /// Lays the protocol's bash into `dir` with the rig's beside it, and returns
-/// the file `BASH_ENV` names. `dir` must be absolute: every shell reads its
-/// own location from that path.
+/// the address: the file a shell sources to join. `dir` must be absolute:
+/// every shell reads its own location from that path.
 pub fn prelude(dir: &Path, bash: &str) -> Result<PathBuf, Failure> {
     let entry = dir.join("prelude.bash");
 

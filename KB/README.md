@@ -33,12 +33,13 @@ Every module under `src/bash/rig/` is private; `mod.rs` carries `Rig` and
 `Reacting` and one re-export list that is the rest of the API:
 
 ```rust
-pub use attended::{heard, Attended, Kept, Layout, Said, Setup, Workspace};
+pub use attended::{heard, Attended, Kept, Layout, Reaching, Said, Setup, Workspace};
 pub use driving::{Driving, ExitStatus, Run, Whole};
 pub use serving::{Served, Serving};
 pub use wire::{field, Answer, Message, Micros, Pid, Stamp, Verb};
 pub use crate::bash::shell::Shell;
 pub use crate::failure::{Doing, Failure};
+pub const JOINING: &str = include_str!("joining.txt");
 ```
 
 **A rig is a description; the reaction is per shell.** `Rig::joined` builds one
@@ -56,6 +57,15 @@ Both are traits extending `Rig` with one provided `async fn`, so a rig declares
 which orchestrations it supports by implementing them. A session lasts as long
 as anyone who could still speak, and nothing inside a rig ends one.
 
+**The address is one file, and the core exports it and decides nothing else.**
+The address is the prelude's path — the file a shell sources to join. A driven
+subject finds it as `BC_SESSION` in its environment; a served client is handed
+it once and puts it there itself (`BC_START`). Whether `BASH_ENV` also names
+it — so every non-interactive bash in the tree joins as it starts — is the
+rig's answer, given through `Driving::environment`; `Reaching` spells the two
+usual ones. `JOINING` is every way a script joins, in bash, and both binaries
+print it under `--help`.
+
 Every instrument that reports a walk is composed by `stack::with_walk(&[…])`,
 which puts `stack.bash` first: `__bc_stack` has to be defined before anything
 calls it, and that rule lives there rather than at each tool.
@@ -64,7 +74,7 @@ calls it, and that rule lives there rather than at each tool.
 
 | moment | started by | effect |
 |---|---|---|
-| join | `rig.bash`, at source — `BC_JOIN <LABEL>` | the shell makes its pipe, announces it, blocks until the run has opened it, gives its account. A fork does the same on its first word |
+| join | `rig.bash`, at source — `BC_JOIN <LABEL>` | the shell makes its pipe, announces it on the control fifo with its account, and blocks until the run has opened it. A fork does the same on its first word |
 | say | the subject | `BC_INSTR <LABEL> say …` ships an arglist and returns |
 | ask | the subject | `BC_INSTR <LABEL> ask …` ships one, blocks, and runs what comes back |
 
@@ -107,10 +117,11 @@ An **answer** is an arglist too, and it is a command the shell runs:
 ## Building on it
 
 Implement `Rig` — `setup`, `joined` — and a `Reacting` for what it builds,
-unless `Vec<Message>` or `()` is what you want; then implement `Driving`,
-`Serving`, or both. `Setup::bash` states `BC_JOIN <LABEL>`. What several shells
-share is yours, held by the rig and handed to each reaction it builds — an
-`Rc<RefCell<_>>` is enough, and its borrow is never held across an `.await`.
+unless `Vec<Message>` or `()` is what you want; then implement `Driving`
+(`environment`: how the shells are reached), `Serving`, or both. `Setup::bash`
+states `BC_JOIN <LABEL>`. What several shells share is yours, held by the rig
+and handed to each reaction it builds — an `Rc<RefCell<_>>` is enough, and its
+borrow is never held across an `.await`.
 
 Nothing on either trait defaults, so an `impl` block is the whole contract.
 What a default used to decide is a named value instead: `Answer::unknown()` is

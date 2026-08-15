@@ -100,6 +100,25 @@ which writes its own separator.
 Proved by `proofs/transparency.rs::a_clients_own_trap_and_ifs_are_untouched`,
 which sets `IFS=,` and then reads the version back off the shell.
 
+## `LC_ALL` is the subject's, and `${#s}` reads it
+
+`${#s}` and `${s:a:b}` count in the shell's locale. The one place a shipped
+file has to count bytes — cutting the account into frames of at most
+`PIPE_BUF` — takes `LC_ALL=C` the same way, for exactly that frame:
+
+```bash
+__bc_announce() {
+    local LC_ALL=C
+    local __bc_room=$(( 4096 - ${#1} - 4 )) __bc_from=0
+    …
+}
+```
+
+Two `local`s, not one: the words of a `local` are expanded before it runs, so
+`${#1}` in the same statement would still count characters. An assignment to
+`LC_ALL` takes effect at once, and the return puts the subject's back — unset
+included ([measurements.md](measurements.md#bash-constraints-that-bound-the-design)).
+
 ## The slot pattern
 
 A helper that computes a value and then calls a continuation cannot hold that

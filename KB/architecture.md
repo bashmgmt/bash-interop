@@ -73,23 +73,33 @@ dependency on either side's idea of encoding.
 `value` therefore stands on nothing and is usable on its own — see
 [values.md](../bash/values.md).
 
-### 3. Instrumentation reaches shells through `BASH_ENV`, not argv
+### 3. One address; the core exports it and decides nothing else
 
-A command line reaches one process. `BASH_ENV` reaches every non-interactive
-bash in the tree the subject creates, which is what makes `bashcap
-run_bash_env --into out make test` work: every recipe shell `make` starts joins
-by itself.
-
-So the run lays two files into a workspace — the protocol's bash and the rig's
-— exports `BC_SESSION=<dir>` and `BASH_ENV=<dir>/prelude.bash`, and starts the
-command line. Nothing is templated into either file: the prelude finds its own
+A session has one address: the prelude's path, the file a shell sources to
+join. The run lays two files into a workspace — the protocol's bash and the
+rig's — and nothing is templated into either: the prelude finds its own
 workspace from `${BASH_SOURCE[0]%/*}`, which means the shipped file is real
 bash that can be read and checked directly.
 
-The command line is then free to be exactly what the caller wrote, program
+A driven run exports the address, `BC_SESSION=<prelude path>`, into the
+subject and starts the command line. **How the shells reach it is the rig's
+answer**, given through `Driving::environment` — the pairs the environment
+gets beyond the address. `Reaching` spells the two usual ones: `BashEnv` is
+`("BASH_ENV", <the same path>)`, which reaches every non-interactive bash in
+the tree the subject creates — what makes `bashcap run --into out make test`
+work, every recipe shell `make` starts joining by itself; `ByHand` is nothing,
+and a script joins where it says `source "$BC_SESSION"`. The core consults
+neither; the tools default to the first and take `--reach by-hand`.
+
+A served client is handed the same address once, on the channel its initiator
+gave it, and does the same thing itself: `BC_START` reads it into
+`BC_SESSION`, exports it, and sources it. So the join line is one line in
+every role, and `JOINING` — one text, printed by both binaries under `--help`
+— is every way a script writes it.
+
+The command line is free to be exactly what the caller wrote, program
 included: `&["env", "TARGET=staging", "bash", "x.bash"]` needs no support from
-the run, and `&["env", "-u", "BASH_ENV", "bash", "x.bash"]` is a subject that
-sources `"$BC_SESSION/prelude.bash"` where it chooses.
+the run.
 
 ### 4. A rig is a description; a reaction is per shell, and a task
 
@@ -100,12 +110,13 @@ trait Reacting { type Kept;  async hear(Message);  async answer(Message) -> Answ
 
 Every shell has a pipe of its own, so which shell said something is which pipe
 it came out of, and every pipe has a task of its own: read a line, react,
-maybe answer, until end of input. The first line on a pipe is the shell's
-account of itself: which bash, how it was given its code, where it sits, what
-it had switched on. None of that can change while the shell lives — a subshell
-gets its own `$BASHPID` and joins as a shell of its own, and `set` refuses
-`-i`, `-c` and `-s`. So it is said once, and the reaction built from it holds
-it as a **member from construction**.
+maybe answer, until end of input. A shell announces itself with its account:
+which bash, how it was given its code, where it sits, what it had switched on
+— on the control fifo, before its pipe is opened, so the run knows everything
+about a shell before it releases it. None of that can change while the shell
+lives — a subshell gets its own `$BASHPID` and joins as a shell of its own, and
+`set` refuses `-i`, `-c` and `-s`. So it is said once, and the reaction built
+from it holds it as a **member from construction**.
 
 Owning a reaction is the proof that its shell announced itself; a message
 reaches it only down that shell's own pipe.
@@ -137,12 +148,12 @@ a rig declares which orchestrations it supports by implementing them, and its
 reaction is the same code either way.
 
 Both tools expose the pair as two symmetric verbs taking one shared options
-type — `run_bash_env` and `serve` — so the command line says the same thing the
-traits do:
+type — `run` and `serve` — so the command line says the same thing the traits
+do:
 
 ```
-bashprof run_bash_env --into build.times -- make test
-bashprof serve        --into build.times      # started by BC_START, from a script
+bashprof run   [--reach bash-env|by-hand] --into build.times -- make test
+bashprof serve --into build.times      # started by BC_START, from a script
 ```
 
 One sentence covers both ends: **a session lasts as long as anyone who could
@@ -184,11 +195,14 @@ mid-message.
 Provenance, ordering, subshell capture, lifetimes and a control channel — none
 of which a tool implements again:
 
-- **Every shell has a pipe of its own**, made by the shell, opened by the run:
-  the blocking open is the rendezvous, and end of input is the goodbye. A
-  `( … )` or `$( … )` that speaks takes a pipe of its own on its first word.
+- **Every shell has a pipe of its own**, made by the shell, announced with its
+  account, opened by the run: the blocking open is the rendezvous, and end of
+  input is the goodbye. A `( … )` or `$( … )` that speaks takes a pipe of its
+  own on its first word.
 - **A line is a message.** One writer per pipe, so nothing interleaves and no
-  write need be atomic; there is no frame.
+  write need be atomic; the pipe has no frame. The control fifo has many
+  writers and one: an announcement is frames of at most `PIPE_BUF` bytes,
+  keyed by the shell's token and put back together in bytes.
 - **Both clocks on every message**: the sending shell's `$EPOCHREALTIME` and the
   run's own. A span is the interval between two of them, which is why nothing is
   timed in bash; the sender's clock is what orders a run.
@@ -215,6 +229,7 @@ and no tool runs unprofiled; the same script under the tool measures itself. See
 | a session-wide accumulator in the library | what a run produces is the client's; `Vec<Message>` and `()` are the only two shipped |
 | a timer, an interval, a heartbeat | serving ends when nobody who could speak is left, and that is a descriptor; tokio's `time` feature is not enabled |
 | a closing word or reserved payload word | the handle says when it is over, so nothing in the loop intercepts a message |
+| a way in the core prefers | the core exports the address; `BASH_ENV` or by hand is a rig's `environment`, and a tool's default |
 | a poisoned or degraded mode | an answer that says no is a command returning non-zero, like any other |
 | parallelism | concurrency is a task per shell on one thread; the cost is bash's `printf`, not ours, and a `Send` bound would tax every implementor for nothing |
 | a fork tree | a fork inherits and then takes its own pipe; that it descends from a shell is not reported |

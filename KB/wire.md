@@ -2,13 +2,14 @@
 
 `src/bash/rig/wire/`, with its bash in `src/bash/rig/wire/prelude.bash`.
 
-A control fifo every shell announces itself on, a pipe of its own for every
-shell, and a message that is one bash array literal on one line.
+A control fifo every shell announces itself on — with its account, in frames
+— a pipe of its own for every shell, and a message that is one bash array
+literal on one line.
 
 ```
 wire/  mod.rs        the paths (join, up, rep), prelude(), mkfifo
-       control.rs    `Control` — the join fifo: tokens, close
-       lines.rs      `Lines` — a fifo read end, cut at newlines
+       control.rs    `Control` — the join fifo: frames in, `Announced { token, account }` out; close
+       lines.rs      `Lines` — a fifo read end, cut at newlines; `Raw` bytes out
        pipe.rs       `Pipe` — one shell's up + rep: next, drain, answer, close
        message.rs    `Message`, `Verb`, `Stamp`, `Micros`, `Pid`, `Answer`, `Account`, `Line`
        prelude.bash
@@ -53,13 +54,14 @@ fn prelude(dir: &Path, bash: &str) -> Result<PathBuf, Failure>;
 **Nothing is templated.** `prelude.bash` is shipped verbatim and finds its own
 workspace from `${BASH_SOURCE[0]%/*}` — inside a function, the file the
 function was defined in — and ends by sourcing `rig.bash` beside it. The run
-lays both into the workspace and points `BASH_ENV` at the first. `dir` must be
-absolute, which is why the session canonicalises it.
+lays both into the workspace; the first is the address — `Layout::prelude`,
+`BC_SESSION`, what a shell sources to join. `dir` must be absolute, which is
+why the session canonicalises it.
 
 ## Three fifos
 
 ```
-<dir>/join           the control fifo — many writers, one token per line
+<dir>/join           the control fifo — many writers, one announcement per shell, in frames
 <dir>/up.<token>     one shell's pipe — one writer, one line per message
 <dir>/rep.<token>    one shell's answers — one line each
 ```
@@ -68,14 +70,56 @@ absolute, which is why the session canonicalises it.
 |---|---|---|---|---|
 | `join` | the run, at open | every shell, once | `O_RDWR`: never end of input | opened, written, closed per attach |
 | `up.<token>` | the shell, before it announces | exactly one process | `O_RDONLY\|O_NONBLOCK`, `tokio::net::unix::pipe::Receiver` | `exec {fd}>` for its life |
-| `rep.<token>` | the run, on hearing the token | the run | `open_sender` per answer | `exec {fd}<>` for its life |
+| `rep.<token>` | the run, on the announcement | the run | `open_sender` per answer | `exec {fd}<>` for its life |
 
-**There is no frame.** A token is under 64 bytes and one `write`, so the
-control fifo needs no key. A shell's pipe has one writer, so nothing can
-interleave and no write need be atomic: a message wider than `PIPE_BUF` is one
-`printf` the kernel hands over in pieces, in order. The reader on both cuts at
-newlines and does nothing else. `mkfifo` is not a builtin, so an attach costs
-one fork — see [measurements.md](measurements.md).
+**The pipe has no frame; the control fifo has one.** A shell's pipe has one
+writer, so nothing can interleave and no write need be atomic: a message wider
+than `PIPE_BUF` is one `printf` the kernel hands over in pieces, in order, and
+the reader cuts at newlines and does nothing else. The control fifo has many
+writers and a write is atomic only up to `PIPE_BUF` (4096 on Linux), so what
+goes there is cut into frames that each fit whole. `mkfifo` is not a builtin,
+so an attach costs one fork — see [measurements.md](measurements.md).
+
+### The control fifo
+
+```
+<token> + <bytes>\n      a frame with more to come
+<token> . <bytes>\n      the last frame
+```
+
+```bash
+__bc_announce() {
+    local LC_ALL=C
+    local __bc_room=$(( 4096 - ${#1} - 4 )) __bc_from=0
+    while (( ${#2} - __bc_from > __bc_room )); do
+        printf '%s + %s\n' "$1" "${2:__bc_from:__bc_room}" || __BC_THROW
+        __bc_from=$(( __bc_from + __bc_room ))
+    done
+    printf '%s . %s\n' "$1" "${2:__bc_from}" || __BC_THROW
+}
+```
+
+`local LC_ALL=C` makes `${#2}` and `${2:a:b}` count bytes, so a frame is at
+most `4096` bytes whatever the account holds, and the subject's locale is back
+on return ([scoping.md](scoping.md)). A frame may therefore end inside a
+character. Frames of different shells interleave; `Control` keeps the bytes of
+each unfinished announcement by token, appends each frame, and on `.` decodes
+the whole as UTF-8 and reads it as the `Account`:
+
+```rust
+pub(crate) struct Control { lines: Lines, dir: PathBuf, partial: HashMap<String, Vec<u8>> }
+pub(crate) struct Announced { pub token: String, pub account: Account }
+
+impl Control {
+    pub(crate) async fn next(&mut self) -> Result<Announced, Failure>;   // cancellation-safe
+    pub(crate) fn close(self) -> Result<(), Failure>;
+}
+```
+
+A line that is not a frame — no token that could name a file, no ` + ` or
+` . ` after it — ends the run naming the line. `close` releases every shell
+announced whole and not yet opened, drops an announcement left in the middle,
+and unlinks `join`.
 
 ## Attaching: the blocking open is the rendezvous
 
@@ -83,24 +127,25 @@ one fork — see [measurements.md](measurements.md).
 __bc_attach() {
     local __bc_dir=${__BC__DIR[$1]}
     local __bc_tok="$1::$BASHPID.${EPOCHREALTIME#*[.,]}.${SRANDOM:-$RANDOM$RANDOM}"
-    local __bc_fd __bc_rep
+    local __bc_fd __bc_rep __bc_acct
 
     [[ -p "$__bc_dir/join" ]] || { __bc_complain "no session at $__bc_dir"; return "$__BC__FAILED"; }
-    mkfifo "$__bc_dir/up.$__bc_tok"                 || __BC_THROW
-    printf '%s\n' "$__bc_tok" >"$__bc_dir/join"     || __BC_THROW
-    exec {__bc_fd}>"$__bc_dir/up.$__bc_tok"         || __BC_THROW
-    exec {__bc_rep}<>"$__bc_dir/rep.$__bc_tok"      || __BC_THROW
+    __bc_account __bc_acct
+    mkfifo "$__bc_dir/up.$__bc_tok"                                 || __BC_THROW
+    __bc_announce "$__bc_tok" "$__bc_acct" >"$__bc_dir/join"        || __BC_BAIL
+    exec {__bc_fd}>"$__bc_dir/up.$__bc_tok"                         || __BC_THROW
+    exec {__bc_rep}<>"$__bc_dir/rep.$__bc_tok"                      || __BC_THROW
     …
-    __bc_account "$1" || __BC_BAIL
 }
 ```
 
-Make the pipe, announce it, block in opening its write end until the run
-opens the read end, open the reply pipe the run made meanwhile, say who you
-are. The order is what makes it safe: the run cannot open before the fifo
-exists, and the shell cannot write before the run has opened. The `[[ -p ]]`
-check is there because `>` would create a regular file where no fifo is; a
-session that closed unlinked `join`.
+Take the account, make the pipe, announce token and account together, block in
+opening the pipe's write end until the run opens the read end, open the reply
+pipe the run made meanwhile. The order is what makes it safe: the run cannot
+open before the fifo exists, the shell cannot write before the run has opened,
+and the run knows everything about the shell before it releases it. The
+`[[ -p ]]` check is there because `>` would create a regular file where no
+fifo is; a session that closed unlinked `join`.
 
 **When a process attaches:** at source, from `BC_JOIN` in `rig.bash`. A fork —
 which sourced nothing — attaches on its first `BC_INSTR`: `$BASHPID` is not
@@ -118,20 +163,21 @@ it, and Rust keys nothing on it.
 Every line is a bash array literal, the protocol's words in front:
 
 ```
-('JOIN' 'at=1786786563.138850' 'pid' '4711' 'shlvl' '2' … 'command' '')     line one: the account
-('SAY'  'at=1786786563.138912' 'REC' 'compiled' 'x.rs')                       every line after
+('at=1786786563.138850' 'pid' '4711' 'shlvl' '2' … 'command' '')      the account, on the control fifo, once
+('SAY'  'at=1786786563.138912' 'REC' 'compiled' 'x.rs')                every line on the shell's pipe
 ('ASK'  'at=…' 'which' 'target')
 ```
 
-The **account** is the first line on a pipe and only ever the first. Its size
-is unbounded (`command` is `$BASH_EXECUTION_STRING`), which is why it travels
-the single-writer pipe and not the control fifo. Everything in it is passed as
-bash reports it — see [shell.md](shell.md). A first line that is not `JOIN`,
-or a `JOIN` after it, is malformed and ends the run.
+The **account** has no verb — the clock comes first — and is unbounded
+(`command` is `$BASH_EXECUTION_STRING`), which is what the frames are for.
+Everything in it is passed as bash reports it — see [shell.md](shell.md). The
+pipe carries `SAY` and `ASK` and nothing else; any other first word ends the
+run.
 
 ```rust
-pub(crate) struct Line { pub text: String, pub heard_at: Micros }      // as read off a pipe
-pub(crate) struct Account { pub stamp: Stamp, pub words: Vec<String> }  // Account::read(line)
+pub(crate) struct Raw  { pub bytes: Vec<u8>, pub heard_at: Micros }    // as read off any fifo
+pub(crate) struct Line { pub text: String, pub heard_at: Micros }      // a pipe's, decoded
+pub(crate) struct Account { pub stamp: Stamp, pub words: Vec<String> }  // Account::read(text, heard_at)
 
 pub struct Message { pub verb: Verb, pub stamp: Stamp, pub words: Vec<String> }   // Message::read(line)
 pub struct Stamp { pub sent_at: Micros, pub heard_at: Micros }
@@ -146,10 +192,11 @@ account and reached through the shell a reaction was handed.
 reads a `key value` payload convention a client may choose, unrelated to the
 `key=value` headers the protocol writes in front.
 
-`Lines` reads straight into its buffer at each read, so a `next` dropped
-mid-await loses nothing; the only await is on readiness. `drain` reads
-everything already there without waiting; `finish` reports a line left
-half-written.
+`Lines` yields bytes and reads straight into its buffer at each read, so a
+`next` dropped mid-await loses nothing; the only await is on readiness.
+`drain` reads everything already there without waiting; `finish` reports a
+line left half-written. What a line means is the reader's: `Pipe` decodes each
+as UTF-8, `Control` reassembles frames first.
 
 ## Sending
 

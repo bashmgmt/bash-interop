@@ -21,12 +21,10 @@ pub mod shell;
 pub mod stack;
 pub mod value;
 
-/// The names an injected file brings into a shell — the protocol's, and the
-/// walk's.
-///
-/// Bash meant to be read the same with a tool and without it may not use one
-/// of these. That is what lets a tool ship the words a call site says as one
-/// file, injected and vendored, with only their effect existing twice: the
-/// words name a hook, and the hook is where these appear.
+/// What the protocol and the walk bring into a shell — the entry words, the
+/// guards, the walk — and bash meant to be read the same with a tool and
+/// without it may therefore not say. That is what lets a tool ship the words
+/// a call site says as one file, injected and vendored, with only their effect
+/// existing twice: the words name a hook, and the hook is where these appear.
 pub const INJECTED_NAMES: [&str; 5] =
     ["BC_JOIN", "BC_INSTR", "__BC_BAIL", "__BC_THROW", "__bc_stack"];

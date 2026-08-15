@@ -27,9 +27,14 @@ src/bashprof/effect.bash  __bp_begin, __bp_end
 vendors them and nothing injects them. It has no guard either — a script that
 calls `BC_START` wants a session, and the tool being absent is a missing command
 rather than a call site to neutralise. See
-[rig.md](rig.md#the-coprocess-convention).
+[rig.md](rig.md#the-coprocess-convention). Every way a script joins — driven
+and already joined, `source "$BC_SESSION"` by hand, only if there is a session,
+`BC_START`, and the guard below — is `bash::rig::JOINING`, printed by
+`bashprof run --help` and `bashcap run --help`.
 
-The client sources the words unconditionally and guards the hook:
+The client sources the words unconditionally and guards the hook — silently: a
+polyfilled hook does nothing and says nothing, and a client that wants a notice
+writes one beside the guard:
 
 ```bash
 source lib/bashprof.bash
@@ -46,11 +51,14 @@ NAME` prints the entire body.
 
 ## Why the guard names the hook
 
-The tool defines everything through `BASH_ENV`, which bash sources **before the
-script's first line**, in every shell. The client's `source` therefore always
-comes second — and it redefines the words with the same bytes, which changes
+Under `--reach bash-env` the tool defines everything through `BASH_ENV`, which
+bash sources **before the script's first line**, in every shell; joined by hand
+or under `serve`, the tool's definitions arrive where the script says `source
+"$BC_SESSION"` or `BC_START`. The client's `source` of the words therefore
+comes second, or redefines the words with the same bytes, which changes
 nothing. The guard sits on the half that differs, so a client cannot displace
-the real effect whichever way round the two arrive.
+the real effect whichever way round the two arrive — provided the guard comes
+after the join, which is the order `JOINING` shows.
 
 A bash function definition is global wherever it executes, so the guard may sit
 inside a function of the client's own.

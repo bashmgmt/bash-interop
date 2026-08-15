@@ -5,8 +5,9 @@ two ways a session comes about, `session.rs`, `attend.rs` and `watch.rs` for
 what they share.
 
 ```
-rig/  mod.rs       the doc; `Rig`, `Reacting`, the two templates; the re-export list
-      attended.rs  `Setup`, `Workspace`, `Layout`, `Attended`, `Kept`, `Said`, `heard`
+rig/  mod.rs       the doc; `Rig`, `Reacting`, the two templates; the re-export list; `JOINING`
+      joining.txt  how a script joins, in every way there is — `JOINING`'s text
+      attended.rs  `Setup`, `Workspace`, `Layout`, `Reaching`, `Attended`, `Kept`, `Said`, `heard`
       session.rs   `Session` — open, serve, announced, close
       attend.rs    `attend` — one shell's task, start to finish
       watch.rs     `Watch` — what a session ends on
@@ -79,7 +80,7 @@ What shells share is the caller's own, handed in through `Rig::joined`:
 ```rust
 type Sink = Rc<RefCell<BufWriter<File>>>;
 
-struct BashCap { into: PathBuf, sink: Sink, tracing: Tracing }
+struct BashCap { into: PathBuf, sink: Sink, reaching: Reaching, tracing: Tracing }
 struct Capturing { shell: Arc<Shell>, into: PathBuf, sink: Sink, written: usize }
 ```
 
@@ -110,7 +111,8 @@ message reaches a reaction only down that shell's own pipe, so no path through
 the session can hold a message whose shell is unknown.
 
 `Layout { dir, prelude }` is where the session's files ended up — the
-workspace, and the address a shell sources to join.
+workspace, and the address a shell sources to join. `Layout::bash_env()` is
+that address spelled as the `("BASH_ENV", <prelude>)` pair.
 
 **Nothing in a rig ends a session.** A rig reacts; when the conversation is
 over is decided by whoever started the shells. A `Failure` is the only thing a
@@ -151,26 +153,29 @@ whole across shells is a resource the rig owns and hands shares of.
 
 ```rust
 pub trait Driving: Rig {
+    /// What the subject's environment gets beyond the address. Nothing is a
+    /// legitimate answer: the shells then join by hand.
+    fn environment(&self, at: &Layout) -> Vec<(OsString, OsString)>;
+
     async fn run<A: AsRef<OsStr>>(&self, argv: &[A]) -> Result<Run<Kept<Self>>, Failure>;
 }
 
 pub struct Run<K> { pub shells: Vec<Attended<K>>, pub subject: ExitStatus, pub failed: Option<Failure> }
 pub struct Whole<K> { pub shells: Vec<Attended<K>>, pub subject: ExitStatus }   // Run::whole()
+
+/// The two usual answers. The core consults neither.
+pub enum Reaching { BashEnv, ByHand }
+impl Reaching { pub fn environment(self, at: &Layout) -> Vec<(OsString, OsString)> }  // [at.bash_env()] | []
 ```
 
 **The command line is run as it is given, and carries its own program.**
-`rig.run(&["bash", "x.bash"])`, and a caller wanting a launcher or an
-environment writes one into the argv: `&["env", "TARGET=staging", "bash",
-"x.bash"]`. The run exports two variables into it and nothing else:
-
-```
-BC_SESSION=<dir>
-BASH_ENV=<dir>/prelude.bash
-```
-
-`BASH_ENV` is the default way in and reaches every non-interactive bash in the
-tree. `env -u BASH_ENV -- cmd` is a subject that sources
-`"$BC_SESSION/prelude.bash"` where it chooses.
+`rig.run(&["bash", "x.bash"])`, and a caller wanting a launcher writes one
+into the argv: `&["env", "TARGET=staging", "bash", "x.bash"]`. The run exports
+the address into it, `BC_SESSION=<prelude path>`, and then whatever the rig's
+`environment` returned — `Reaching::BashEnv.environment(at)` is
+`BASH_ENV=<the same path>`, which reaches every non-interactive bash in the
+tree; `Reaching::ByHand` is nothing, and a script joins where it says
+`source "$BC_SESSION"`. A rig with an environment of its own lists it there.
 
 **Reaching a `Run` means bash got to its own end**, so `subject` is always the
 subject's own status. `failed` is what went wrong closing up. A `Failure` in
@@ -187,7 +192,7 @@ sees end of input. `Drop` does the same if `run` left by any other path.
 ```rust
 pub trait Serving: Rig {
     async fn serve<A>(&self, held: OwnedFd, announce: A) -> Result<Served<Kept<Self>>, Failure>
-    where A: FnOnce(&Answer) -> Result<(), Failure>;
+    where A: FnOnce(&str) -> Result<(), Failure>;
 
     async fn serve_coprocess(&self) -> Result<Served<Kept<Self>>, Failure>;
 }
@@ -197,13 +202,16 @@ pub struct Served<K> { pub shells: Vec<Attended<K>>, pub failed: Option<Failure>
 
 A script that is already running starts the server, takes the address it is
 handed, and lets go when it is done. Nothing on this side starts a process or
-ends one. `announce` is called once, before anything is served, with
-`Answer::of("source", [prelude])`; a client runs it the way the prelude runs
-an answer:
+ends one. `announce` is called once, before anything is served, with the
+address — the prelude's path, one line of text; the client puts it where a
+driven shell would find it and sources it:
 
 ```bash
-declare -a __join="$line"; "${__join[@]}"
+export BC_SESSION="$line"; source "$BC_SESSION"
 ```
+
+A `Failure` while serving still sees the session out — every shell released
+or finished, the fifos gone — before it is returned.
 
 `held` is a descriptor the initiator keeps open for as long as it wants the
 session. Serving ends when the last holder has let go, deliberately or by
@@ -225,10 +233,16 @@ BC_LEAVE                                     # release, wait, return its status
 ```
 
 `assets/joining.bash` is the bash half; `Serving::serve_coprocess` is the Rust
-half. `coproc` takes a literal NAME, so the session's fds live in `BC_SESSION`
-and there is one server per shell. `BC_LEAVE` returns the server's status, so a
-client under `set -e` stops on a server that failed, and by the time it
-returns whatever the server writes is written.
+half. `coproc` takes a literal NAME, so the server's fds live in `BC_SERVER`
+and there is one server per shell; `BC_START` reads the address into
+`BC_SESSION`, exports it, and sources it. `BC_LEAVE` returns the server's
+status, so a client under `set -e` stops on a server that failed, and by the
+time it returns whatever the server writes is written.
+
+`JOINING` (`rig/joining.txt`) is the whole list — driven and already joined,
+by hand, started as a coprocess, only if there is a session, the vendored words
+and their polyfill — and both binaries print it under `run --help` and
+`serve --help`.
 
 `__fixtures/joined/build.bash` starts the shipped `bashprof serve` and is
 driven from `tests/cli.rs`; `merging.bash` starts `tests/joined/merging.rs`, a
@@ -264,7 +278,7 @@ async fn serve(&mut self, watch: &Watch) -> Result<(), Failure> {
     loop {
         tokio::select! {
             biased;
-            token = self.control.next()             => self.announced(token?).await?,
+            announced = self.control.next()         => self.announced(announced?).await?,
             Some(done) = self.attending.join_next() => …,   // a task's Failure ends the run here
             fired = watch.fired()                   => return fired,
         }
@@ -272,9 +286,12 @@ async fn serve(&mut self, watch: &Watch) -> Result<(), Failure> {
 }
 ```
 
-`announced` makes the shell's reply pipe, opens its pipe — which is what
-releases the shell from its blocking open — reads the first line as the
-account, builds the `Shell`, awaits `rig.joined`, and spawns the task.
+`Control::next` yields `Announced { token, account }`: the shell's account
+came with its announcement, reassembled from frames on the control fifo (see
+[wire.md](wire.md#the-control-fifo)). `announced` makes the shell's reply
+pipe, opens its pipe — which is what releases the shell from its blocking open
+— builds the `Shell`, awaits `rig.joined`, and spawns the task. Nothing in the
+accept loop awaits a shell.
 
 `attend` is the task: `select!` on the next line and on `closing`; a `SAY`
 goes to `hear`, an `ASK` to `answer` and the answer down the reply pipe; end
@@ -303,8 +320,9 @@ a command, and no command means *the operator broke*.
 | an answer that returns non-zero | the subject's — `set -e`, `\|\|`, or ignore it |
 | a line the protocol did not write, or one left half-written | the run's while it is served; `failed` if found at close |
 
-Under `Serving` a shell that was blocked when the fault happened stays blocked:
-the session owns nothing it could kill.
+Under `Serving` the session is closed before the `Failure` is returned: a shell
+announced and not yet opened is released, one attached takes `SIGPIPE` at its
+next word. The session owns nothing it could kill.
 
 ## Status
 
