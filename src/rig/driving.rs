@@ -58,6 +58,7 @@ pub struct Whole<K> {
 /// |---|---|
 /// | what every shell finds | `BC_SESSION=<the address>` — the file a shell sources to join |
 /// | what else reaches them | [`environment`](Driving::environment): the rig's answer, [`Reached`] the two usual ones |
+/// | where the session is laid | a directory of the run's own ([`run`](Driving::run)), or the caller's ([`run_at`](Driving::run_at)) |
 /// | what ends it | a pidfd on the subject, watched and never signalled; then the group is killed |
 /// | what comes back | [`Run`], and [`Run::whole`] → [`Whole`] |
 ///

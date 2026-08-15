@@ -6,7 +6,7 @@
 //!
 //! | | |
 //! |---|---|
-//! | [`attaching`] | a shell's pipe: the rendezvous, a fork's own, two labels in one shell |
+//! | [`attaching`] | a shell's pipe: the rendezvous, a fork's own, two labels in one shell, the words a join brings |
 //! | [`transport`] | every shell reaches the run, and a message arrives whole |
 //! | [`transparency`] | what the subject keeps: its status, its trap, its `IFS` |
 //! | [`answering`] | every form of answer, from two shells at once, one waiting on the other |

@@ -133,7 +133,7 @@ pub const JOINING: &str = include_str!("joining.txt");
 /// | it is handed | it produces |
 /// |---|---|
 /// | [`&Layout`](Layout) — `dir`, and `address`, what a shell sources | [`Self::Reaction`](Rig::Reaction) |
-/// | [`Arc<Shell>`](Shell) — `bash: Bash`, `options: Options`, `joined: Stamp` | |
+/// | [`Arc<Shell>`](Shell) — `bash: Bash`, `options: Options`, `brought`, `joined: Stamp` | |
 ///
 /// The rig's bash is laid beside the protocol's own by the session;
 /// [`stack::with_walk`](crate::bash::stack::with_walk) composes it where the

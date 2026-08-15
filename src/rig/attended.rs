@@ -1,5 +1,4 @@
-//! What a rig states about itself, where a session puts its files, and what a
-//! run hands back.
+//! Where a session puts its files, and what a run hands back.
 
 use std::ffi::OsString;
 use std::path::PathBuf;
