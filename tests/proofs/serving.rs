@@ -41,12 +41,12 @@ impl Serving for Attaching {}
 
 /// The client's side, as the vendored words do it: probe the directory it
 /// named until the session is up, attach by sourcing the file laid there,
-/// export the coordinate for its children; then on with its own script.
+/// then on with its own script — which is handed the same coordinate as its
+/// `$1`, explicitly, the way everything else receives it.
 const JOINING: &str = r#"
 until [[ -p "$1/join" ]]; do sleep 0.01; done
 source "$1/session.bash"
-export BC_SESSION="$1"
-source "$2"
+source "$2" "$1"
 "#;
 
 /// A shell of the initiator's own, holding the session's handle on its
@@ -145,7 +145,7 @@ async fn a_joined_shell_may_publish_the_address_to_its_children() {
             ENTRY,
             r#"
             TELL parent "$BASHPID"
-            export BASH_ENV="$BC_SESSION/session.bash"
+            export BASH_ENV="$1/session.bash"
             bash "${BASH_SOURCE[0]%/*}/child.bash"
             "#,
         ),
