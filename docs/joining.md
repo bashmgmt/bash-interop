@@ -38,42 +38,46 @@ build() { sleep 0.1; }
 BASHPROF_TIMETHIS build build
 ```
 
-## Driven, `--reach by-hand` — defined everywhere, joined where it says
+## Driven, `--reach by-hand` — joining is chosen, not blanket
+
+Why this mode exists: under `--reach bash-env` *every* shell of the tree
+joins, helpers included — a dependency fetch or a `./configure` floods the
+reading with shells nobody asked about. Under by-hand, the tool provisions
+a **Definitions** file instead: every shell still gets the words at
+startup (`BASH_ENV` reaches them all), but no shell is joined until *its
+own code* says so. The script below joins itself and deliberately leaves
+its helper out — that choice is the whole point of the mode.
 
 ```bash
 #!/usr/bin/env bash
 # Started as:  bashprof run --reach by-hand --into build.times -- bash build.bash
-#
-# The provisioned file only defined; BC_SESSION carries the workspace.
-# BASH_ENV reaches EVERY shell of this tree, so every shell has the words
-# defined — but joining is per shell, and happens only where a script
-# says so.
 set -euo pipefail
 declare -- workspace="${BC_SESSION:?the workspace, from the tool}"
 
-# prepare.bash runs before this shell joins. It has the words defined
-# like everything else in the tree; it never initiates, so it is not a
-# shell of the run and nothing it does is heard. If it called a tool
-# word anyway, that word would refuse loudly — "label BASHPROF is not
-# joined", status 125 — rather than silently measure into nowhere.
-bash prepare.bash
+# fetch-deps.bash is an ordinary helper of this build — not part of the
+# protocol. Like every shell in the tree it wakes up with the words
+# defined; nobody initiates in it, so it stays outside the session: it
+# runs exactly as it would unwrapped, and nothing it does is heard.
+bash fetch-deps.bash
 
+# From here on, THIS shell is part of the run.
 BASHPROF_INIT "$workspace"
 
 build() { sleep 0.1; }
 BASHPROF_TIMETHIS build build
 ```
 
-Two consequences of the `Definitions` arm worth knowing before choosing
-it. First, "defined but unjoined" is a **loud** state: the real hooks are
-present everywhere, so a tool word called before initiation refuses with
-status 125 at its own call site — and `BASHPROF_TIMETHIS` refuses *before*
-running the wrapped command, so under `set -e` the script stops there.
-This is deliberate: the caller asked for a measurement, and silently not
-measuring would be worse. Second, it differs from the *vendored-words*
-standalone story ([vendoring.md](vendoring.md)): there a script defines
-no-op hooks behind a guard and genuinely runs unprofiled; here the guard
-would find the real hooks already defined and install nothing.
+One sharp edge to know before choosing this mode: "outside the session"
+holds only for a shell that does not *call* the tool's words. If
+`fetch-deps.bash` said `BASHPROF_TIMETHIS` itself, that word would refuse
+loudly — `label BASHPROF is not joined`, status 125, at its own call site,
+*before* running the wrapped command — so under `set -e` the helper would
+stop there. This is deliberate: a call site asked for a measurement, and
+silently measuring into nowhere would be worse. (It also differs from the
+vendored-words standalone story of [vendoring.md](vendoring.md), where a
+script guards in no-op hooks and genuinely runs unprofiled — here the real
+hooks exist everywhere, so that guard installs nothing.) A helper that
+legitimately shares the tool's words joins too, or is left as it is.
 
 ## A coprocess client — this script owns the session
 
