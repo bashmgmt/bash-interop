@@ -37,3 +37,5 @@ jobs:
       - run: bash --version
       - run: cargo test --lib -- --test-threads=1
       - run: cargo test --test proofs -- --test-threads=1
+      - run: cargo test --doc
+      - run: docs/sync-quotes.bash --check

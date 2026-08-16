@@ -24,6 +24,7 @@
 # session lasts as long as anyone holds the handle `coproc` gave: a subshell
 # inherits it and keeps the session open for as long as it lives.
 
+# ANCHOR: words
 # $@ is the server's command line, program included, and the workspace is in
 # there as the server's own argument — this word does not know it. NAME is a
 # literal in `coproc`'s grammar, so there is one server per shell.
@@ -57,3 +58,4 @@ BC_LEAVE() {
 
     wait "$BC_SERVER_PID"
 }
+# ANCHOR_END: words

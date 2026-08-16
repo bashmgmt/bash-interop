@@ -6,10 +6,12 @@ prelude.bash, the Driving/Serving roles, `JOINING`), `scratch` (public test
 material). `assets/joining.bash` is the vendorable client half, exported as
 `rig::JOINING_BASH`.
 
-**KB/ is the knowledge base** — `onboarding.md` to start, one document per
-module, `measurements.md` holds the kernel and bash facts the transport stands
-on: check there before proposing a transport change; `architecture.md` is the
-design above the code. Do not restate either in code comments.
+**docs/ is the book** — `docs/README.md` is the contents page,
+`overview.md` the way in, `measurements.md` holds the kernel and bash facts
+the transport stands on: check there before proposing a transport change;
+`design.md` is the design above the code. Do not restate any of it in code
+comments. Code quotes in the book are anchored — after changing an anchored
+region run `docs/sync-quotes.bash`; CI checks with `--check`.
 
 ```bash
 cargo test --lib -- --test-threads=1

@@ -157,6 +157,7 @@ pub const JOINING_BASH: &str = include_str!("../../assets/joining.bash");
 /// The rig's bash is laid beside the protocol's own by the session;
 /// [`stack::with_walk`](crate::stack::with_walk) composes it where the
 /// rig reports a frame walk.
+// ANCHOR: rig-trait
 #[expect(async_fn_in_trait, reason = "single-threaded by design: no Send bound")]
 pub trait Rig {
     /// What reacts to one shell.
@@ -179,6 +180,7 @@ pub trait Rig {
     /// accept loop, so a slow `joined` delays the next join and nothing else.
     async fn joined(&self, at: &Layout, shell: Arc<Shell>) -> Result<Self::Reaction, Failure>;
 }
+// ANCHOR_END: rig-trait
 
 /// One shell's reaction, for as long as that shell can speak.
 ///
@@ -194,6 +196,7 @@ pub trait Rig {
 ///
 /// **No method has a default body.** The two implementations below are the
 /// templates to copy.
+// ANCHOR: reacting-trait
 #[expect(async_fn_in_trait, reason = "single-threaded by design: no Send bound")]
 pub trait Reacting: Sized + 'static {
     /// What is left when the shell can no longer speak. `Self` where nothing
@@ -213,6 +216,7 @@ pub trait Reacting: Sized + 'static {
     /// The conversation is over; release what this held.
     async fn finish(self) -> Result<Self::Kept, Failure>;
 }
+// ANCHOR_END: reacting-trait
 
 /// A reaction that keeps every message, and has no answer to any of them.
 impl Reacting for Vec<Message> {

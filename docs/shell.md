@@ -78,5 +78,5 @@ on its first word; that it descends from a particular shell is not reported.
 ## See also
 
 - [wire.md](wire.md#the-control-fifo) — how the account travels
-- [rig.md](rig.md#facts-are-members-not-parameters) — where a shell enters a reaction
+- [rig.md](rigs.md) — where a shell enters a reaction
 - [stack.md](stack.md) — the walk that cannot be read without the shell

@@ -57,36 +57,34 @@ BC_INSTR() {
 }
 ```
 
-## Three files, a lock, and the fifos — one model
+## Two files laid, one provisioned, a lock — one model
 
-`Layout` is where every name in the workspace lives; nothing else spells one.
-`lay(&Layout, bash)` writes the three files, the invocation last — once it is
-there, the session is sourceable:
+`Layout` is where every name in the workspace lives; nothing else spells
+one. `lay(&Layout, bash)` writes the two definition files:
 
 ```
 <dir>/prelude.bash   generic, shipped verbatim: BC_JOIN, BC_INSTR, the internals
-<dir>/rig.bash       Rig::bash(&Layout) — the rig's words, effects and joins, dir baked in
-<dir>/session.bash   generated: the invocation — what a shell sources to join
+<dir>/rig.bash       Rig::bash(&Layout) — definitions only, inert to source
 <dir>/lock           flock()ed for the session's life; the kernel releases it on any death
 ```
 
-The invocation is two argumentless lines, quoted through `emit_scalar`, so a
-hostile path still sources:
+Neither laid file initiates: a shell that sources both has the words and no
+channel, until a line of client code says `BC_JOIN <label> <dir> [word…]` —
+the rig's own init function usually, its standard spelling stated as data by
+`Rig::joining(&Layout)`. The one file that may initiate instead,
+`<dir>/bash_env.bash`, is written only by `Layout::bash_env(provision)` —
+the two sources, then the joining line iff `Provision::Joining` — and only
+when a run provisions it:
 
-```bash
-source '<dir>/prelude.bash'
-source '<dir>/rig.bash'
+```
+<dir>/bash_env.bash  provisioned: source prelude, source rig, then the stated joining, or not
 ```
 
-It is self-contained — correct with an empty environment — and it passes
-nothing: the rig's text carries the coordinate itself, spelled with
-`emit_scalar` where its author needed it. Sourced without arguments, the
-rig's text runs with the subject's own `$@` visible — usable on a join line,
-never written to. `Layout::new` validates the dir as one line of UTF-8 text,
-since it crosses into bash and onto the announce line; the label is bash's to
-check, at the join. `dir` must be absolute, which is why the session
-canonicalises it. Re-sourcing the invocation in a child process re-runs the
-joins, which is how `BASH_ENV` reaches a tree; re-sourcing it in a shell
+`Layout::new` validates the dir as one line of UTF-8 text, since it crosses
+into bash and onto the announce line; the label is bash's to check, at the
+join. `dir` must be absolute, which is why the session canonicalises it.
+Re-sourcing a joining `bash_env.bash` in a child process re-runs the join,
+which is how `BASH_ENV` reaches a tree; re-running the join in a shell
 already joined is refused by `BC_JOIN` (`already joined`, 125).
 
 The session owns the directory: the lock is taken before anything in it is
@@ -338,6 +336,6 @@ ends, so a kept workspace holds names only for shells still alive.
 
 ## See also
 
-- [rig.md](rig.md) — the session and the task
+- [rig.md](rigs.md) — the session and the task
 - [shell.md](shell.md) — what the account carries
 - [measurements.md](measurements.md) — what the kernel does, and what each proof establishes

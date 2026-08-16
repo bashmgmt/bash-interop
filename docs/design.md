@@ -1,8 +1,8 @@
 # The bash instrumentation toolkit — design
 
 What `src/` is, what each layer is allowed to know, and the decisions the
-shape follows from. Per-directory reference is [`README.md`](README.md);
-this document is the level above it.
+shape follows from. The chapter-by-chapter reference is the rest of
+[this book](README.md); this document is the level above it.
 
 ## What it is for
 
@@ -19,17 +19,17 @@ capability is built from what is left.
 ## The layers
 
 ```
-value ─┬─ shell ─┬─ stack        bash's five parallel arrays, read back
-       │         └─ rig          the session: a workspace, a pipe and a task per shell, reactions
-       └─────────────┘
+bash-strings ─┬─ shell ─┬─ stack   bash's five parallel arrays, read back
+              │         └─ rig     the session: a workspace, a pipe and a task per shell, reactions
+              └─────────────┘
 ```
 
 | | knows about | never knows about |
 |---|---|---|
-| `value` | bash's quoted forms — `@Q`, `@A`, `declare -p` | everything else |
-| `shell` | `value` | how a shell was reached, what it went on to say |
-| `stack` | `value`, `shell` | the wire, the rig, any tool |
-| `rig` | `value`, `shell` | the stack, any tool |
+| `bash-strings` (its own crate) | bash's quoted forms — `@Q`, `@A`, `declare -p` | everything else |
+| `shell` | `bash-strings` | how a shell was reached, what it went on to say |
+| `stack` | `bash-strings`, `shell` | the wire, the rig, any tool |
+| `rig` | `bash-strings`, `shell` | the stack, any tool |
 
 **`stack` and `rig` are siblings and neither calls the other.** A tool composes
 them: the frame walk goes into the bash a rig injects, through `stack::with_walk`.
@@ -77,52 +77,53 @@ dependency on either side's idea of encoding.
 
 The workspace directory is the session's address and its only coordinate:
 every fifo and file is `<dir>/…`, modelled in one place — `Layout`, a
-validated directory and accessors for the constant names — and a shell joins
-by sourcing `<dir>/session.bash`. The session **owns** the directory it
-serves: `<dir>/lock` is `flock`ed before anything in it is touched and held
+validated directory and accessors for the constant names. The session
+**owns** the directory it serves: `<dir>/lock` is `flock`ed before anything in it is touched and held
 until its fifos are gone, so a second session on the same directory is
 refused whole, a killed predecessor's leavings are swept at the next open,
 and the kernel releases the hold on any death. A prescribed directory must
 exist; making it is the host's job, in both roles.
 
-The session lays three files: the generic prelude (shipped verbatim, reading
-neither its own location nor the environment), the rig's bash, and the
-invocation — two argumentless `source` lines, written last, so its presence
-means sourceable. The coordinate is baked into the rig's bash by its author:
-`Rig::bash(&Layout)` is generated with the settled workspace in hand, and
-spells it with `emit_scalar` wherever it is needed — joining is that text's
-own business, `BC_JOIN <label> <dir> [word…]`, zero, one or many labels —
-because the label is client vocabulary, the write-time-stable name the words
-speak that the join binds to a run-time coordinate; Rust is never told it.
-The words after the dir ride the announcement and land on `Shell::brought`.
-Sourced without arguments, the rig's text runs with the subject's own `$@`
-visible — usable on a join line, never written to.
+The session lays two files: the generic prelude (shipped verbatim, reading
+neither its own location nor the environment) and the rig's bash —
+**definitions only**, `Rig::bash(&Layout)`, inert to source. Initiation is a
+line of client code: `BC_JOIN <label> <dir> [word…]`, zero, one or many
+labels, the label being client vocabulary — the write-time-stable name the
+words speak, bound to a run-time coordinate at the join; Rust is never told
+it. The words after the dir ride the announcement and land on
+`Shell::brought`. The rig states its standard initiation as data,
+`Rig::joining(&Layout)`, which the core never runs: it is written into a
+provisioned startup file, or said by a client's own line. The one file that
+may initiate, `<dir>/bash_env.bash`, is written only by
+`Layout::bash_env(provision)` — the two sources, then the joining line iff
+`Provision::Joining` — the choice stated first, by whoever provisions.
 
 A driven run starts the command line; its workspace is a temporary directory
 of the run's own — or, `run_at`, one the caller made and keeps — so nothing
 external can prescribe or collide with it. **How the shells reach the
 session is the run's question, stated at the run**: `run` and `run_at` take
-an environment closure, `FnOnce(&Layout) -> Vec<(OsString, OsString)>`,
-whose return is the subject's whole environment delta — the core exports
-nothing. `Layout::bash_env()` is the usual pair: the join of every
-non-interactive bash in the tree — what makes `bashcap run --into out make
-test` work, every recipe shell `make` starts joining by itself. `BC_SESSION`
-is the tools' own convention for the by-hand reach — the workspace as a
-variable, `source "$BC_SESSION/session.bash"` where the script says — spelled
-in their binaries, not in the core. The tools' `--reach` is their vocabulary
-over these spellings, defaulting to both and taking `by-hand` for the
-variable alone.
+an environment closure — fallible, because provisioning writes a file —
+whose return is the subject's whole environment delta: the core exports
+nothing. `Layout::bash_env(Provision::Joining(…))` is the usual pair: the
+join of every non-interactive bash in the tree — what makes `bashcap run
+--into out make test` work, every recipe shell `make` starts joining by
+itself. `BC_SESSION` is the tools' own convention — the workspace as a
+variable, `BASHCAP_INIT "$BC_SESSION"` where a by-hand script says —
+spelled in their binaries, not in the core. The tools' `--reach` is their
+vocabulary over these spellings: `bash-env` provisions a joining file,
+`by-hand` a definitions file, initiation the scripts' own.
 
 A serving run requires the workspace from outside — `--at`, existing, no
 fallback — and answers to nobody: nothing is written back, a serving
 application is a complete standalone program, and the client feeds the same
-directory to start, probe and attach. Liveness is the workspace's to show —
+directory to start, probe, load and initiate. Liveness is the workspace's to show —
 the join fifo is present exactly while a session serves, which the lock and
 the sweep keep truthful — so `BC_UP <dir>` is one file test, and the one
 boundary is a server killed outright, whose stale fifo stands until its
 directory is next opened or removed. So the join line
-is one line in every role, and `JOINING` — one text, printed by both binaries
-under `--help` — is every way a script writes it. What one variable cannot do
+is one line in every role — a provisioned file's or the client's own — and
+`JOINING`, one text printed by both binaries under `--help`, is every way a
+script writes it. What one variable cannot do
 remains stated rather than implied away: `BASH_ENV` is one variable, and two
 driving runs both reaching through it shadow each other for the inner subtree
 — the escape is `--reach by-hand`, and it is the client's.
@@ -134,7 +135,8 @@ the run.
 ### 4. A rig is a description; a reaction is per shell, and a task
 
 ```rust
-trait Rig      { type Reaction: Reacting;  bash() -> String;  async joined(&Layout, Arc<Shell>) }
+trait Rig      { type Reaction: Reacting;  bash(&Layout) -> String;  joining(&Layout) -> String;
+                 async joined(&Layout, Arc<Shell>) }
 trait Reacting { type Kept;  async hear(Message);  async answer(Message) -> Answer;  async finish() -> Kept }
 ```
 
@@ -162,8 +164,8 @@ the provenance is the *shape*. `heard` flattens it back into the order it was
 said — the sending shells' own clocks — when a reading wants the run whole.
 
 **Neither trait has a default body.** A default is a decision an implementor did
-not make and cannot see; `Answer::unknown()` names the one the old default made
-(`return 127`, bash's own "command not found") and puts it where it applies.
+not make and cannot see; `Answer::unknown()` names the refusal (`return
+127`, bash's own "command not found") and puts it where it applies.
 
 What several shells share — a sink, a merged view — belongs to the rig, which
 hands each reaction a share. The core names no sharing discipline and has no
@@ -184,7 +186,7 @@ do:
 ```
 bashprof run   [--reach bash-env|by-hand] --into build.times -- make test
 bashprof serve --at prof.d --into build.times   # started by BC_START, from a script
-                                                # (mkdir first; BC_UP probes; BC_ATTACH joins)
+                                                # (mkdir; BC_UP probes; BC_LOAD; BASHPROF_INIT)
 ```
 
 One sentence covers both ends: **a session lasts as long as anyone who could
@@ -260,7 +262,7 @@ and no tool runs unprofiled; the same script under the tool measures itself. See
 | a session-wide accumulator in the library | what a run produces is the client's; `Vec<Message>` and `()` are the only two shipped |
 | a timer, an interval, a heartbeat | serving ends when nobody who could speak is left, and that is a descriptor; tokio's `time` feature is not enabled |
 | a closing word or reserved payload word | the handle says when it is over, so nothing in the loop intercepts a message |
-| a way in the core prefers | the core exports nothing; every environment is the run's closure, and `--reach` a tool's vocabulary over the two shipped pairs |
+| a way in the core prefers | the core exports nothing and runs no initiation; every environment is the run's closure, every join a stated line, and `--reach` a tool's vocabulary |
 | a poisoned or degraded mode | an answer that says no is a command returning non-zero, like any other |
 | parallelism | concurrency is a task per shell on one thread; the cost is bash's `printf`, not ours, and a `Send` bound would tax every implementor for nothing |
 | a fork tree | a fork inherits and then takes its own pipe; that it descends from a shell is not reported |
@@ -268,8 +270,7 @@ and no tool runs unprofiled; the same script under the tool measures itself. See
 
 ## See also
 
-- [`README.md`](README.md) — the layer-by-layer reference
-- [`rig.md`](rig.md) — `Rig`, `Reacting`, and the two roles
+- [`rigs.md`](rigs.md) — `Rig`, `Reacting`, and the two roles
 - [`wire.md`](wire.md) — the protocol, line by line
 - [`measurements.md`](measurements.md) — every number above
 - [`scoping.md`](scoping.md) — where a name binds in the shipped bash

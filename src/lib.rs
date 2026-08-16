@@ -17,7 +17,7 @@
 //! sits under both: bash writes `$0` into `BASH_SOURCE` for code it was given
 //! rather than read, and no walk can say on its own which word that is.
 //!
-//! Start with [`rig`]'s module doc; the full onboarding is `KB/onboarding.md`
+//! Start with [`rig`]'s module doc; the book is `docs/` — `docs/overview.md`
 //! in this crate's repository.
 
 pub mod failure;

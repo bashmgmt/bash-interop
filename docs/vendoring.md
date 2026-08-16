@@ -23,12 +23,12 @@ src/bashprof/effect.bash  __bp_begin, __bp_end
 ```
 
 `assets/joining.bash` is the one file with no second delivery: `BC_START`,
-`BC_UP` and `BC_ATTACH` run before there is a session to inject anything
+`BC_UP` and `BC_LOAD` run before there is a session to inject anything
 into, so a client vendors them and nothing injects them. It has no guard
 either — a script that calls `BC_START` wants a session, and the tool being
 absent is a missing command rather than a call site to neutralise. See
-[rig.md](rig.md#the-coprocess-convention). Every way a script joins — driven
-and already joined, `source "$BC_SESSION/session.bash"` by hand, only if
+[rig.md](serving.md#the-coprocess-convention). Every way a script joins — driven
+and already joined, load-and-init by hand, only if
 there is a session, started as a coprocess, and the guard below — is
 `bash_interop::rig::JOINING`, printed by `bashprof run --help` and
 `bashcap run --help`.
@@ -52,12 +52,12 @@ NAME` prints the entire body.
 
 ## Why the guard names the hook
 
-Under `--reach bash-env` the tool defines everything through `BASH_ENV`, which
-bash sources **before the script's first line**, in every shell; joined by hand
-or under `serve`, the tool's definitions arrive where the script says `source
-"$BC_SESSION/session.bash"` or `BC_ATTACH`. The client's `source` of the words therefore
-comes second, or redefines the words with the same bytes, which changes
-nothing. The guard sits on the half that differs, so a client cannot displace
+Under `--reach bash-env` the tool defines everything through the provisioned
+`BASH_ENV` file, which bash sources **before the script's first line**, in
+every shell; by hand or under `serve`, the tool's definitions arrive where
+the script says `BC_LOAD` or sources the pieces itself. The client's own
+`source` of the words therefore comes second, or redefines the words with
+the same bytes, which changes nothing. The guard sits on the half that differs, so a client cannot displace
 the real effect whichever way round the two arrive — provided the guard comes
 after the join, which is the order `JOINING` shows.
 

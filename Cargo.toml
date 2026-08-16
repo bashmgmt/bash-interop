@@ -7,7 +7,7 @@ readme = "README.md"
 repository = "https://github.com/simlei/bash-interop"
 keywords = ["bash", "shell", "instrumentation", "ipc", "tracing"]
 categories = ["development-tools", "os::unix-apis", "command-line-interface"]
-exclude = ["KB/**", ".plans/**"]
+exclude = [".plans/**"]
 
 [dependencies]
 bash-strings = "*"

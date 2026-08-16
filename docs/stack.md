@@ -193,7 +193,7 @@ between leaves a path that resolves to nothing, and that is what `missing`
 reports. It is not an error: the path was true when it was written. `bashprof`
 prints one line per missing source on stderr, and a rig whose reading outlives
 the run keeps its own workspace so the instrument's frames stay readable — see
-[rig.md](rig.md).
+[rig.md](rigs.md).
 
 **The line shift.** `BASH_LINENO[i]` is where frame `i` *was called from*, so
 where frame `i` is *executing* is `BASH_LINENO[i - 1]`. Because `skip >= 1`,

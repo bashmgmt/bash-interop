@@ -214,13 +214,15 @@ mechanism that cannot be checked by reading the source. One file per subject.
 |---|---|
 | `the_closures_return_is_the_subjects_whole_environment` | `Rig::bash` puts the rig's word in the subject and a child it starts; so does a variable from the run's closure, and one set with `env` on the command line; `BC_SESSION`, which the closure did not return, is absent in both — the core adds nothing |
 | `the_command_line_is_run_as_asked` | the run starts the program the argv names, with nothing appended |
-| `a_subject_may_join_by_hand_where_it_chooses` | a rig whose `environment` is only the client's own `BC_SESSION` pair: `source "$BC_SESSION/session.bash"` where the script says; children that sourced nothing are not shells |
+| `a_subject_may_join_by_hand_where_it_chooses` | a rig whose `environment` is only the client's own `BC_SESSION` pair: the script loads the pieces and says `BC_JOIN` itself; children that did nothing are not shells |
+| `a_definitions_file_leaves_initiation_to_the_script` | `Provision::Definitions`: the words in every shell, the channel in none, until the script's own join; the word before it went nowhere |
 
 | `serving.rs` | establishes |
 |---|---|
 | `a_shell_that_joined_is_heard_until_it_lets_go` | a client's words and its subshell's arrive; the session ends with the handle; the client's status is its own. Every serving proof gates on the join fifo and joins by the directory it named; the fifo brackets the session |
 | `a_shell_the_session_outlived_is_left_to_its_own_devices` | a client that released the handle while running has `parted: None`, and its next word takes `SIGPIPE` |
-| `a_joined_shell_may_publish_the_address_to_its_children` | `export BASH_ENV="$1/session.bash"` — the coordinate its client passed — reaches a child process |
+| `a_joined_shell_may_publish_to_its_children` | the client authors its own startup file (`%q`-spelled) and exports `BASH_ENV` to it; the child joins at startup |
+| `a_child_may_be_told_the_workspace_as_an_argument` | the coordinate travels as argv alone; the child loads the pieces and joins itself, naming the `BASH_ENV` it does not have |
 | `a_shell_says_what_it_is_rather_than_being_guessed_at` | an interactive shell joins by sourcing, and says `-i`, `-s`, no command line |
 | `an_occupied_workspace_is_refused` | the lock is taken before anything is touched: a second server on the same directory is refused whole while the first serves on |
 | `a_killed_predecessors_leavings_are_swept` | stale fifos in a prescribed workspace are removed under the lock at open; the session serves and closes clean |
