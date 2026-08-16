@@ -194,9 +194,9 @@ followed, no `..` collapsed.
 Bash does not record what a relative path was relative to **when the file was
 sourced**, only where the shell is now. A subject that changed directory in
 between leaves a path that resolves to nothing, and that is what `missing`
-reports. It is not an error: the path was true when it was written. `bashprof`
-prints one line per missing source on stderr, and a rig whose reading outlives
-the run keeps its own workspace so the instrument's frames stay readable — see
+reports. It is not an error: the path was true when it was written — a reading
+reports it as it chooses, and a rig whose reading outlives the run keeps
+its own workspace so the instrument's frames stay readable — see
 [rigs.md](rigs.md).
 
 One consequence of `skip >= 1` is worth stating: the `i - 1` index above
@@ -243,14 +243,11 @@ it, and where it is checked without running bash.
 
 ## Who uses it
 
-| word | crate | arguments recorded |
-|---|---|---|
-| `BASHCAP` | bashcap | under `--trace-calls` |
-| `BASHPROF_TIMETHIS` | bashprof | whatever the shell has |
-
-Each passes its own instrument depth (its word's frame plus the walk's),
-and both reach the walk through `stack::with_walk`, which puts `stack.bash`
-in front of their definitions in `Rig::bash`.
+Any word that reports where a shell is: it reaches the walk through
+`stack::with_walk`, which puts `stack.bash` in front of the rig's
+definitions in `Rig::bash`, and it passes its own instrument depth — its
+word's frame plus the walk's. Which words exist, and when they record
+arguments, is each tool's own book's.
 
 ## See also
 

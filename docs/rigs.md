@@ -9,7 +9,7 @@ Where the code lives, for when you want to read along:
 
 ```
 src/rig/
-      mod.rs       `Rig`, `Reacting`, the two shipped reactions, `JOINING`
+      mod.rs       `Rig`, `Reacting`, the two shipped reactions
       attended.rs  `Layout`, `Provision`, `Attended`, `Kept`, `Said`, `heard`
       driving.rs   `Driving`, `Run`, `Whole`, `ExitStatus`
       serving.rs   `Serving`, `Served`
@@ -90,7 +90,8 @@ pub trait Rig {
     fn bash(&self, at: &Layout) -> String;
 
     /// The rig's standard initiation, as a line of bash ending in a newline
-    /// — `BASHPROF_INIT '<dir>'`, or a raw `BC_JOIN <LABEL> <dir> [word…]`.
+    /// — the rig's own `<WORD>_INIT '<dir>'`, or a raw
+    /// `BC_JOIN <LABEL> <dir> [word…]`.
     /// Data: the core never runs it. [`Layout::bash_env`] writes it into the
     /// provisioned file under [`Provision::Joining`]; every other shell's
     /// initiation is its own code.
@@ -261,8 +262,8 @@ Why an enum and not a boolean: the two arms carry different information.
 `Joining` needs the line to write (usually `&rig.joining(at)`), and
 `Definitions` needs a warning attached — the file then carries no
 coordinate at all, so if your scripts must find the workspace, you state a
-variable for it (`BC_SESSION` is the tools' convention) *beside* this
-pair. [joining.md](joining.md) shows both arms as whole scripts, including
+variable for it (`BASHPROF_SESSION`, `BASHCAP_SESSION` — each tool its
+own name) *beside* this pair. [joining.md](joining.md) shows both arms as whole scripts, including
 what happens to a shell that has the words and never initiates.
 
 Behind the same type sits the ownership story, told once here and assumed

@@ -67,7 +67,7 @@ make instead fails to one wall — a fifo gives one process a non-consuming wait
 only through `open`, and a shared `open` cannot say which shell it releases.
 So a shell that attaches forks once, and that is the one cost of a pipe per
 shell: paid at source by every bash process under `BASH_ENV`, and by every
-fork that speaks. Asks fork for nothing.
+fork that speaks. An ask, by contrast, forks nothing.
 
 ## The token
 
@@ -212,9 +212,9 @@ mechanism that cannot be checked by reading the source. One file per subject.
 
 | `starting.rs` | establishes |
 |---|---|
-| `the_closures_return_is_the_subjects_whole_environment` | `Rig::bash` puts the rig's word in the subject and a child it starts; so does a variable from the run's closure, and one set with `env` on the command line; `BC_SESSION`, which the closure did not return, is absent in both — the core adds nothing |
+| `the_closures_return_is_the_subjects_whole_environment` | `Rig::bash` puts the rig's word in the subject and a child it starts; so does a variable from the run's closure, and one set with `env` on the command line; `DEPLOY_SESSION`, which the closure did not return, is absent in both — the core adds nothing |
 | `the_command_line_is_run_as_asked` | the run starts the program the argv names, with nothing appended |
-| `a_subject_may_join_by_hand_where_it_chooses` | a rig whose `environment` is only the client's own `BC_SESSION` pair: the script loads the pieces and says `BC_JOIN` itself; children that did nothing are not shells |
+| `a_subject_may_join_by_hand_where_it_chooses` | a rig whose `environment` is only the client's own `DEPLOY_SESSION` pair: the script loads the pieces and says `BC_JOIN` itself; children that did nothing are not shells |
 | `a_definitions_file_leaves_initiation_to_the_script` | `Provision::Definitions`: the words in every shell, the channel in none, until the script's own join; the word before it went nowhere |
 
 | `serving.rs` | establishes |

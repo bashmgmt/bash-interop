@@ -98,5 +98,5 @@ Details a careful reader asks about here:
 
 Every other way a shell can join a served session — by hand from the
 pieces, published to children — is a whole script in
-[joining.md](joining.md). In this repository, `__fixtures/joined/` holds a
-working client of exactly this shape, exercised by the test suites.
+[joining.md](joining.md). bashprof's `__fixtures/joined/build.bash` is a
+working client of exactly this shape, exercised by its cli suite.

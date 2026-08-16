@@ -27,9 +27,8 @@ own `coproc`, probing one is a file test, and loading sources the two
 files the session laid — [serving.md](serving.md#the-coprocess-convention).
 Every way a script joins — driven and already joined, by hand from the
 pieces, only if there is a session, as a coprocess client, and the guard
-below — is
-`bash_interop::rig::JOINING`, printed by `bashprof run --help` and
-`bashcap run --help`.
+below — is printed by each tool under `run --help` and `serve --help`,
+in its own words.
 
 The client sources the words unconditionally and guards the hook — silently: a
 polyfilled hook does nothing and says nothing, and a client that wants a notice
@@ -50,14 +49,15 @@ NAME` prints the entire body.
 
 ## Why the guard names the hook
 
-Under `--reach bash-env` the tool defines everything through the provisioned
+Under a joining provision (the tools' `--reach bash-env`) the tool defines
+everything through the provisioned
 `BASH_ENV` file, which bash sources **before the script's first line**, in
 every shell; by hand or under `serve`, the tool's definitions arrive where
 the script sources the laid files. The client's own
 `source` of the words therefore comes second, or redefines the words with
 the same bytes, which changes nothing. The guard sits on the half that differs, so a client cannot displace
 the real effect whichever way round the two arrive — provided the guard comes
-after the join, which is the order `JOINING` shows.
+after the join, which is the order the tools' `--help` shows.
 
 A bash function definition is global wherever it executes, so the guard may sit
 inside a function of the client's own.
@@ -86,18 +86,13 @@ both are in [measurements.md](measurements.md#what-a-callees-frame-gives-back).
 
 ## What a word owes its call site
 
-The same reading with the tool and without it, which is more than a
-pass-through:
-
-| | |
-|---|---|
-| `WITH_BASHCAP` | consumes the same leading `-BCV:`/`-BCS:` flags before the continuation, or they are run as a command |
-| `BASHPROF_TIMETHIS` | returns 125 when called without a label — without it a call with no arguments shifts nothing, runs nothing and reports success |
-
-One file means one definition of each, so there is nothing to keep in step.
-`__bc_take_flags` is the single parser both bashcap words use, and the shift
-width is derived from it: every consumed word lands in one of two arrays, so
-their combined length is how far to shift.
+The same reading with the tool and without it — which is more than a
+pass-through: a word that consumes flags consumes them identically with an
+empty hook, and a word that refuses a malformed call refuses it identically
+too. Anything less and the unprofiled run behaves differently from the
+measured one. What each shipped word owes — flags, refusals, statuses — is
+its own tool's book's. One file means one definition of each, so there is
+nothing to keep in step.
 
 Both directions are covered where they can fail. `src/bashcap/tests/vendoring.rs`
 and `src/bashprof/tests/vendoring.rs` run a vendored script with no tool at

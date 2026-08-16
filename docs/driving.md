@@ -65,10 +65,10 @@ The three usual sentences, each a complete answer:
 ```rust
 // Chosen: provision definitions only, and hand the coordinate to the
 // scripts under a name of YOUR convention — they initiate where they say.
-// (The tools spell this convention BC_SESSION.)
+// (bashprof spells this BASHPROF_SESSION, bashcap BASHCAP_SESSION.)
 |at| Ok(vec![
     at.bash_env(Provision::Definitions)?,
-    ("BC_SESSION".into(), at.text().into()),
+    ("DEPLOY_SESSION".into(), at.text().into()),
 ])
 ```
 

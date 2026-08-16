@@ -81,8 +81,8 @@ pub trait Serving: Rig {
 
     /// Serve the client that started this process as a coprocess: it holds
     /// this process's standard input — the write end `coproc` left it — and
-    /// lets go by closing it. [`JOINING`](super::JOINING) is the client's
-    /// half, whole.
+    /// lets go by closing it. The book's `docs/joining.md` shows the
+    /// client's half, whole.
     async fn serve_coprocess(&self, at: &Path) -> Result<Served<Kept<Self>>, Failure>
     where
         Self: Sized,

@@ -64,11 +64,11 @@ pub fn provisioned<R: Rig>(
     |at| Ok(vec![at.bash_env(Provision::Joining(&rig.joining(at)))?])
 }
 
-/// The convention a by-hand client reads: the workspace as `BC_SESSION`,
-/// the laid files sourced from it. A client's spelling, not the core's:
-/// the core adds nothing to any environment.
-pub fn bc_session(at: &Layout) -> (OsString, OsString) {
-    (OsString::from("BC_SESSION"), OsString::from(at.text()))
+/// The convention a by-hand client reads: the workspace under a name of
+/// the client's own choice, the laid files sourced from it. A spelling,
+/// not a mechanism: the core adds nothing to any environment.
+pub fn deploy_session(at: &Layout) -> (OsString, OsString) {
+    (OsString::from("DEPLOY_SESSION"), OsString::from(at.text()))
 }
 
 /// Keeps every message, and answers nothing.

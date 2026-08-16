@@ -19,9 +19,10 @@ capability is built from what is left.
 ## The layers
 
 ```
-bash-strings ─┬─ shell ─┬─ stack   bash's five parallel arrays, read back
-              │         └─ rig     the session: a workspace, a pipe and a task per shell, reactions
-              └─────────────┘
+bash-strings           the quoted forms: @Q, @A, declare -p, Cursor
+    └── shell          a shell's account of itself
+         ├── stack     bash's five parallel arrays, read back
+         └── rig       the session: a workspace, a pipe and a task per shell
 ```
 
 | | knows about | never knows about |
@@ -109,9 +110,9 @@ whose return is the subject's whole environment delta: the core exports
 nothing. `Layout::bash_env(Provision::Joining(…))` is the usual pair: the
 join of every non-interactive bash in the tree — what makes `bashcap run
 --into out make test` work, every recipe shell `make` starts joining by
-itself. `BC_SESSION` is the tools' own convention — the workspace as a
-variable, `BASHCAP_INIT "$BC_SESSION"` where a by-hand script says —
-spelled in their binaries, not in the core. The tools' `--reach` is their
+itself. The workspace as a variable is each tool's own convention —
+`BASHCAP_INIT "$BASHCAP_SESSION"` where a by-hand script says — spelled
+in their binaries under their own names, not in the core. The tools' `--reach` is their
 vocabulary over these spellings: `bash-env` provisions a joining file,
 `by-hand` a definitions file, initiation the scripts' own.
 
@@ -120,16 +121,18 @@ fallback — and answers to nobody: nothing is written back, a serving
 application is a complete standalone program, and the client feeds the same
 directory to start, probe, load and initiate. Liveness is the workspace's
 to show — the join fifo is present exactly while a session serves — so
-liveness is one file test, and the one boundary is a server killed
+"is something serving here?" is one file test, and the one boundary is a
+server killed
 outright, whose stale fifo stands until its directory is next opened or
 removed.
 
 The upshot across both roles: the join is always one line, a provisioned
-file's or the client's own, and `JOINING` — one text, printed by both
-binaries under `--help` — is every way a script writes it. One limit is
+file's or the client's own; each tool prints every way a script writes it
+under `--help`, in its own words. One limit is
 stated rather than papered over: `BASH_ENV` is a single variable, so two
 driven runs nested through it shadow each other for the inner subtree; the
-escape is `--reach by-hand`, and it is the client's.
+escape is a definitions-only provision — the tools' `--reach by-hand` —
+and it is the client's.
 
 The command line is free to be exactly what the caller wrote, program
 included: `&["env", "TARGET=staging", "bash", "x.bash"]` needs no support from
@@ -138,6 +141,7 @@ the run.
 ### 4. A rig is a description; a reaction is per shell, and a task
 
 ```rust
+// abridged — rigs.md quotes the real declarations
 trait Rig      { type Reaction: Reacting;  bash(&Layout) -> String;  joining(&Layout) -> String;
                  async joined(&Layout, Arc<Shell>) }
 trait Reacting { type Kept;  async hear(Message);  async answer(Message) -> Answer;  async finish() -> Kept }
@@ -182,15 +186,9 @@ holds the handle. Both are traits extending `Rig` with one provided `async fn`, 
 a rig declares which orchestrations it supports by implementing them, and its
 reaction is the same code either way.
 
-Both tools expose the pair as two symmetric verbs taking one shared options
-type — `run` and `serve` — so the command line says the same thing the traits
-do:
-
-```
-bashprof run   [--reach bash-env|by-hand] --into build.times -- make test
-bashprof serve --at "$PWD/prof.d" --into build.times   # started by a client's coproc
-                                       # (mkdir; probe join; source the laid files; init)
-```
+A program built on the core naturally exposes the pair as two symmetric
+verbs — the tools spell them `run` and `serve`, each verb's role table in
+its own book.
 
 One sentence covers both ends: **a session lasts as long as anyone who could
 still speak.** `Watch` is a descriptor — a pidfd, or the handle an initiator
@@ -209,7 +207,7 @@ could not do its work, not that it is finished.
 | no trap installed | a client's `trap … EXIT` fires as it would unwrapped |
 | no builtin shadowed | `printf`, `read`, `exec` mean what they mean |
 | no variable exported | nothing leaks into a child that did not join |
-| no name outside `__BC_*` | a subject's globals cannot collide with ours |
+| no name outside `BC_*`/`__BC_*` | a subject's globals cannot collide with ours |
 | no `set -o` change | `errexit`, `nounset`, `pipefail` are the subject's |
 | no `eval` | nothing of the subject's is re-parsed |
 | its own exit status | a wrapped script is indistinguishable from an unwrapped one |
@@ -237,8 +235,8 @@ of which a tool implements again:
   own on its first word.
 - **A line is a message.** One writer per pipe, so nothing interleaves and no
   write need be atomic; the pipe has no frame. The control fifo has many
-  writers and one: an announcement is frames of at most `PIPE_BUF` bytes,
-  keyed by the shell's token and put back together in bytes.
+  writers and one reader: an announcement is frames of at most `PIPE_BUF`
+  bytes, keyed by the shell's token and put back together in bytes.
 - **Both clocks on every message**: the sending shell's `$EPOCHREALTIME` and the
   run's own. A span is the interval between two of them, which is why nothing is
   timed in bash; the sender's clock is what orders a run.

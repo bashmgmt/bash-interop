@@ -49,10 +49,10 @@ first list is short and closed:
 
 | | unbound means |
 |---|---|
-| `${__BP_made:-0}` | nothing has been measured in this shell yet |
-| `${__BP_inside-}` | the outermost call, with nothing around it |
-| `${__BASHPROF_STACK_SHIFT:-0}` | the caller wrapped nothing |
 | `${1-}`, `${__BC__at:-?}`, `${BASH_SOURCE[1]:-?}` | a client called a word wrong |
+
+A tool's effect keeps its own short list under the same rule — bashprof's
+`${__BP_inside-}` reads "the outermost call" — stated in its own book.
 
 `${x-}` rather than `${x:-}` wherever empty and unset are different facts.
 

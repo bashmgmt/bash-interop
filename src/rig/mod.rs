@@ -92,7 +92,8 @@
 //! Either way, the address is the workspace directory. Loading its laid
 //! files defines; initiation is the client's own line — except where a
 //! provisioned `bash_env.bash` states [`Provision::Joining`], the one
-//! auto-initiation there is. [`JOINING`] shows every way a script joins.
+//! auto-initiation there is. The book's `docs/joining.md` shows every way
+//! a script joins, each as a whole script.
 //!
 //! **A session lasts as long as anyone who could still speak.** Nothing inside
 //! a rig ends one.
@@ -130,14 +131,6 @@ pub use wire::{field, Answer, Message, Micros, Pid, Stamp, Verb};
 pub use crate::shell::Shell;
 pub use crate::failure::{Doing, Failure};
 
-/// How a bash script joins a session, in every way there is. Both tools print
-/// it under `--help`.
-///
-/// ```bash
-#[doc = include_str!("joining.txt")]
-/// ```
-pub const JOINING: &str = include_str!("joining.txt");
-
 /// What bash a rig gives the subject, and how a reaction is made once a
 /// shell is there.
 ///
@@ -165,7 +158,8 @@ pub trait Rig {
     fn bash(&self, at: &Layout) -> String;
 
     /// The rig's standard initiation, as a line of bash ending in a newline
-    /// — `BASHPROF_INIT '<dir>'`, or a raw `BC_JOIN <LABEL> <dir> [word…]`.
+    /// — the rig's own `<WORD>_INIT '<dir>'`, or a raw
+    /// `BC_JOIN <LABEL> <dir> [word…]`.
     /// Data: the core never runs it. [`Layout::bash_env`] writes it into the
     /// provisioned file under [`Provision::Joining`]; every other shell's
     /// initiation is its own code.

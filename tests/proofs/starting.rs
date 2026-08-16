@@ -35,7 +35,7 @@ impl Driving for Deploying {}
 /// variable reach the subject and a child it starts, because `BASH_ENV`
 /// reaches both; one the command line carries arrives too — it names its own
 /// program, so `env` puts one there. And a variable the closure did not
-/// return — `BC_SESSION` here — is absent: the core adds nothing.
+/// return — `DEPLOY_SESSION` here — is absent: the core adds nothing.
 #[tokio::test]
 async fn the_closures_return_is_the_subjects_whole_environment() {
     let scripts = Scripts::of(&[
@@ -43,7 +43,7 @@ async fn the_closures_return_is_the_subjects_whole_environment() {
             ENTRY,
             r#"
             TELL subject "$DEPLOY_TARGET" "$DEPLOY_STAGE" "$#"
-            [[ -z ${BC_SESSION-} ]] && TELL no-handle
+            [[ -z ${DEPLOY_SESSION-} ]] && TELL no-handle
             bash "${BASH_SOURCE[0]%/*}/child.bash"
             "#,
         ),
@@ -51,7 +51,7 @@ async fn the_closures_return_is_the_subjects_whole_environment() {
             "child.bash",
             r#"
             TELL child "$DEPLOY_TARGET" "$DEPLOY_STAGE"
-            [[ -z ${BC_SESSION-} ]] && TELL no-handle
+            [[ -z ${DEPLOY_SESSION-} ]] && TELL no-handle
             "#,
         ),
     ]);
@@ -115,7 +115,7 @@ async fn a_subject_may_join_by_hand_where_it_chooses() {
         (
             ENTRY,
             r#"
-            declare -- workspace="${BC_SESSION:?the workspace, from the run closure}"
+            declare -- workspace="${DEPLOY_SESSION:?the workspace, from the run closure}"
 
             bash "${BASH_SOURCE[0]%/*}/other.bash"
             source "$workspace/prelude.bash"
@@ -129,7 +129,7 @@ async fn a_subject_may_join_by_hand_where_it_chooses() {
     ]);
 
     let ran = Keeping
-        .run(&bash(scripts.at(ENTRY)), |at| Ok(vec![crate::bc_session(at)]))
+        .run(&bash(scripts.at(ENTRY)), |at| Ok(vec![crate::deploy_session(at)]))
         .await
         .unwrap()
         .whole()
@@ -149,7 +149,7 @@ async fn a_definitions_file_leaves_initiation_to_the_script() {
     let scripts = Scripts::of(&[(
         ENTRY,
         r#"
-        declare -- workspace="${BC_SESSION:?the workspace, from the run closure}"
+        declare -- workspace="${DEPLOY_SESSION:?the workspace, from the run closure}"
 
         TELL defined-but-quiet 2>/dev/null
         BC_JOIN TELL "$workspace"
@@ -159,7 +159,7 @@ async fn a_definitions_file_leaves_initiation_to_the_script() {
 
     let ran = Deploying
         .run(&bash(scripts.at(ENTRY)), |at| {
-            Ok(vec![at.bash_env(Provision::Definitions)?, crate::bc_session(at)])
+            Ok(vec![at.bash_env(Provision::Definitions)?, crate::deploy_session(at)])
         })
         .await
         .unwrap()

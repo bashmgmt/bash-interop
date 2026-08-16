@@ -91,6 +91,6 @@ states it, nothing more.
 
 ## See also
 
-- [wire.md](wire.md#the-control-fifo) — how the account travels
+- [wire.md](wire.md#the-fifos) — how the account travels
 - [rigs.md](rigs.md) — where a shell enters a reaction
 - [stack.md](stack.md) — the walk that cannot be read without the shell

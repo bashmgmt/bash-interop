@@ -30,7 +30,7 @@ async fn a_named_workspace_is_left_behind_without_its_fifos() {
             for i in 1 2 3; do BC_INSTR KEEP ask step "$i"; done
             bash "${BASH_SOURCE[0]%/*}/other.bash"
             ( BC_INSTR KEEP say REC fork )
-            declare -- workspace="${BC_SESSION:?the workspace, from the run closure}"
+            declare -- workspace="${DEPLOY_SESSION:?the workspace, from the run closure}"
             mkfifo "$workspace/up.GHOST"
             printf 'GHOST + half\n' >"$workspace/join"
             exit 0
@@ -48,7 +48,7 @@ async fn a_named_workspace_is_left_behind_without_its_fifos() {
     let ran = Keeping
         .run_at(&at, &bash(scripts.at(ENTRY)), |at| {
             Ok(vec![
-                crate::bc_session(at),
+                crate::deploy_session(at),
                 at.bash_env(Provision::Joining(&crate::join(at)))?,
             ])
         })

@@ -20,10 +20,12 @@ the session, and the fringe where auto-initiation lives.
 Every way in reaches the same end state — the words defined, the channel
 open — from a different starting situation. Each is one whole script below;
 the body of work is the same on purpose, so the prologues carry the whole
-difference. (`JOINING`, printed by both tools under `--help`, is the
-condensed card of the same list.)
+difference. Throughout, `bashprof` stands in for any program built on the
+core: its `--reach bash-env|by-hand` flags are that tool's spelling of
+the two provisioning choices below, and each tool prints this same list in
+its own words under `run --help` and `serve --help`.
 
-## Driven, `--reach bash-env` — the subject knows nothing
+## Driven, provisioned to join — the subject knows nothing
 
 ```bash
 #!/usr/bin/env bash
@@ -38,11 +40,11 @@ build() { sleep 0.1; }
 BASHPROF_TIMETHIS build build
 ```
 
-## Driven, `--reach by-hand` — joining is chosen, not blanket
+## Driven, definitions only — joining is chosen, not blanket
 
-Why this mode exists: under `--reach bash-env` *every* shell of the tree
+Why this mode exists: under a joining provision *every* shell of the tree
 joins, helpers included — a dependency fetch or a `./configure` floods the
-reading with shells nobody asked about. Under by-hand, the tool provisions
+reading with shells nobody asked about. In this mode the tool provisions
 a **Definitions** file instead: every shell still gets the words at
 startup (`BASH_ENV` reaches them all), but no shell is joined until *its
 own code* says so. The script below joins itself and deliberately leaves
@@ -52,7 +54,7 @@ its helper out — that choice is the whole point of the mode.
 #!/usr/bin/env bash
 # Started as:  bashprof run --reach by-hand --into build.times -- bash build.bash
 set -euo pipefail
-declare -- workspace="${BC_SESSION:?the workspace, from the tool}"
+declare -- workspace="${BASHPROF_SESSION:?the workspace, from the tool}"
 
 # fetch-deps.bash is an ordinary helper of this build — not part of the
 # protocol. Like every shell in the tree it wakes up with the words
