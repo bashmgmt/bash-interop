@@ -28,6 +28,14 @@ impl Layout {
     pub fn bash_env(&self) -> (OsString, OsString) {
         (OsString::from("BASH_ENV"), self.address.clone().into())
     }
+
+    /// The address, spelled as the conventional handle a script sources —
+    /// `source "$BC_SESSION"` — and both tools' spelling. The core consults
+    /// neither this pair nor any other: a run's environment is whatever its
+    /// closure returns.
+    pub fn bc_session(&self) -> (OsString, OsString) {
+        (OsString::from("BC_SESSION"), self.address.clone().into())
+    }
 }
 
 /// What one shell's reaction leaves behind, for a given rig.

@@ -4,9 +4,7 @@
 
 use std::sync::Arc;
 
-use mb_resolver::bash::rig::{
-    field, Driving, ExitStatus, Failure, Layout, Message, Reached, Reaching, Rig, Shell,
-};
+use mb_resolver::bash::rig::{field, Driving, ExitStatus, Failure, Layout, Message, Rig, Shell};
 
 use crate::support::{bash, Scripts};
 use crate::{behind, report, running, script, Keeping, ENTRY};
@@ -69,6 +67,8 @@ impl Rig for Twice {
     }
 }
 
+impl Driving for Twice {}
+
 #[tokio::test]
 async fn two_labels_in_one_process_are_two_shells() {
     let scripts = Scripts::of(&[(
@@ -80,8 +80,12 @@ async fn two_labels_in_one_process_are_two_shells() {
         "#,
     )]);
 
-    let twice = Reached { rig: Twice, reaching: Reaching::BashEnv };
-    let ran = twice.run(&bash(scripts.at(ENTRY))).await.unwrap().whole().unwrap();
+    let ran = Twice
+        .run(&bash(scripts.at(ENTRY)), |at| vec![at.bash_env()])
+        .await
+        .unwrap()
+        .whole()
+        .unwrap();
 
     assert_eq!(ran.shells.len(), 2, "{}", report(&ran.shells));
     assert_eq!(ran.shells[0].shell.pid, ran.shells[1].shell.pid, "one process");
@@ -128,7 +132,7 @@ async fn an_account_of_any_size_arrives_whole() {
         ),
     )]);
 
-    let ran = Keeping::bash_env().run(&bash(scripts.at(ENTRY))).await.unwrap().whole().unwrap();
+    let ran = Keeping.run(&bash(scripts.at(ENTRY)), |at| vec![at.bash_env()]).await.unwrap().whole().unwrap();
 
     assert_eq!(behind(&ran.shells, "REC"), [["done"]], "{}", report(&ran.shells));
     let child = ran.shells.iter().find(|at| at.shell.bash.invocation.command.is_some()).unwrap();
@@ -156,7 +160,7 @@ async fn many_shells_announce_at_once() {
         ),
     )]);
 
-    let ran = Keeping::bash_env().run(&bash(scripts.at(ENTRY))).await.unwrap().whole().unwrap();
+    let ran = Keeping.run(&bash(scripts.at(ENTRY)), |at| vec![at.bash_env()]).await.unwrap().whole().unwrap();
 
     assert_eq!(ran.shells.len(), 17, "the script and sixteen children{}", report(&ran.shells));
     for at in ran.shells.iter().filter(|at| at.shell.bash.invocation.command.is_some()) {
@@ -182,6 +186,8 @@ impl Rig for Bringing {
     }
 }
 
+impl Driving for Bringing {}
+
 /// The words a join brings ride its announcement and land on the shell every
 /// reaction is built with, boundaries intact; a fork, which attaches itself,
 /// announces its label's words too. `key value` pairs are the client's
@@ -196,8 +202,12 @@ async fn the_words_a_join_brings_are_on_the_shell() {
         "#,
     )]);
 
-    let bringing = Reached { rig: Bringing, reaching: Reaching::BashEnv };
-    let ran = bringing.run(&bash(scripts.at(ENTRY))).await.unwrap().whole().unwrap();
+    let ran = Bringing
+        .run(&bash(scripts.at(ENTRY)), |at| vec![at.bash_env()])
+        .await
+        .unwrap()
+        .whole()
+        .unwrap();
 
     assert_eq!(ran.shells.len(), 2, "{}", report(&ran.shells));
     for at in &ran.shells {

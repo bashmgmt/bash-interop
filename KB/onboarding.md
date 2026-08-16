@@ -37,7 +37,7 @@ each shell said or what the reaction made of it.
 | **account** | what a shell says of itself when it announces: which bash, how it was started, what it had on, and the words its join brought. It becomes `Shell`, and a reaction is built from it |
 | **kept** | what a reaction leaves behind when its shell is gone. `Reacting::Kept`; `Attended::kept` |
 | **driving / serving** | who started the shells: Rust ran a command line and owns it, or a bash script started the server and holds the handle. `Driving`, `Serving` |
-| **reaching** | how a driven subject's shells find the address: `BASH_ENV`, or by hand. The run's choice, not the rig's — `Reached { rig, reaching }`; `Driving::environment` for a rig with an environment of its own |
+| **environment** | the run's, whole: `run(argv, environment)` takes a closure over the settled `Layout`, and its return is everything the subject's environment gets. `bc_session()`/`bash_env()` are the usual pair |
 | **invocation** | the one generated bash file, `session.bash`: source the prelude, then the rig's bash with the workspace as `$1`. Self-contained, and it is the address |
 | **workspace** | the directory holding the session's files and fifos — the session's one coordinate, passed at every join. `Layout::dir`; a serving client prescribes it (`--at`) |
 | **watch** | the descriptor a session ends on — the subject's pidfd, or the handle a client holds. Observed, never signalled |
@@ -159,33 +159,22 @@ impl Reacting for Vec<Message> { … }   // keeps every message, answers `unknow
 impl Reacting for ()           { … }   // keeps nothing, answers `unknown()`;      Kept = ()
 
 /// Rust orchestrates: the run starts the command line in a workspace of its
-/// own, exports the address into it, watches its pidfd, kills the group at
-/// the end. Not `Send`; awaited from a current-thread runtime.
+/// own, watches its pidfd, kills the group at the end. The impl block is
+/// empty — the role opt-in. Not `Send`; awaited from a current-thread
+/// runtime.
 pub trait Driving: Rig {
-    /// What the subject's environment gets beyond `BC_SESSION=<address>`.
-    /// Nothing is a legitimate answer: the shells then join by hand.
-    fn environment(&self, at: &Layout) -> Vec<(OsString, OsString)>;
-
-    /// Provided. The command line is run as given and carries its own program;
-    /// the workspace is a temporary directory of the run's own.
-    async fn run<A: AsRef<OsStr>>(&self, argv: &[A]) -> Result<Run<Kept<Self>>, Failure>;
+    /// Provided. The command line is run as given and carries its own
+    /// program; the workspace is a temporary directory of the run's own.
+    /// `environment`'s return is the subject's WHOLE environment delta —
+    /// the core exports nothing.
+    async fn run<A, E>(&self, argv: &[A], environment: E) -> Result<Run<Kept<Self>>, Failure>
+    where A: AsRef<OsStr>, E: FnOnce(&Layout) -> Vec<(OsString, OsString)>;
 
     /// Provided. The caller's directory instead — created if missing, left
     /// behind to read.
-    async fn run_at<A: AsRef<OsStr>>(&self, at: &Path, argv: &[A]) -> Result<Run<Kept<Self>>, Failure>;
+    async fn run_at<A, E>(&self, at: &Path, argv: &[A], environment: E) -> Result<Run<Kept<Self>>, Failure>
+    where A: AsRef<OsStr>, E: FnOnce(&Layout) -> Vec<(OsString, OsString)>;
 }
-
-/// The two usual answers, and the enum `--reach` parses. The core consults
-/// neither: `Reached` carries them.
-pub enum Reaching { BashEnv, ByHand }
-
-/// A rig driven with one of them. How a driven subject's shells find the
-/// session is the run's question, so it is stated where the run is made —
-/// a rig that serves never carries it. A rig with an environment of its own
-/// implements `Driving` directly instead.
-pub struct Reached<R> { pub rig: R, pub reaching: Reaching }
-impl<R: Rig> Rig for Reached<R>     { /* delegates */ }
-impl<R: Rig> Driving for Reached<R> { /* [at.bash_env()] | [] */ }
 
 /// Bash orchestrates: a running script named the workspace, started the
 /// server, and holds a handle.
@@ -325,13 +314,16 @@ impl AsRef<[Message]> for Told {
     fn as_ref(&self) -> &[Message] { &self.heard }
 }
 
+impl Driving for Deploying {}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Failure> {
-    // Driven with the usual reach: BASH_ENV, so every non-interactive bash in
-    // the tree joins as it starts. A rig with an environment of its own
-    // implements `Driving` instead — tests/proofs/starting.rs shows one.
-    let deploying = Reached { rig: Deploying, reaching: Reaching::BashEnv };
-    let ran = deploying.run(&["bash", "deploy.bash"]).await?.whole()?;   // one entry per shell
+    // The closure's return is the subject's whole environment: the usual pair
+    // has every non-interactive bash in the tree join as it starts.
+    let ran = Deploying
+        .run(&["bash", "deploy.bash"], |at| vec![at.bc_session(), at.bash_env()])
+        .await?
+        .whole()?;   // one entry per shell
     for at in &ran.shells {
         println!("pid {} ({}) said {} things", at.shell.pid, at.shell.bash.version, at.kept.heard.len());
     }
@@ -435,7 +427,7 @@ src/bash/rig/
   mod.rs          Rig, Reacting, the two shipped reactions, the re-exports, JOINING
   joining.txt     JOINING's text
   attended.rs     Layout, Attended, Kept, Said, heard
-  driving.rs      Driving, Reaching, Reached, Run, Whole, ExitStatus; Subject (the process group)
+  driving.rs      Driving, Run, Whole, ExitStatus; Subject (the process group)
   serving.rs      Serving, Served
   session.rs      Session: open, serve, announced, close
   attend.rs       one shell's task

@@ -35,7 +35,7 @@ Every module under `src/bash/rig/` is private; `mod.rs` carries `Rig` and
 
 ```rust
 pub use attended::{heard, Attended, Kept, Layout, Said};
-pub use driving::{Driving, ExitStatus, Reached, Reaching, Run, Whole};
+pub use driving::{Driving, ExitStatus, Run, Whole};
 pub use serving::{Served, Serving};
 pub use wire::{field, Answer, Message, Micros, Pid, Stamp, Verb};
 pub use crate::bash::shell::Shell;
@@ -66,15 +66,16 @@ bash with the dir as `$1` — and joining is the rig's bash's own text:
 `BC_JOIN <LABEL> "$1" [word…]`, zero, one or many labels. The label is client
 vocabulary, the same species as a message's leading word; Rust is never told
 it. Nothing self-locates, and the address names the workspace
-(`${BC_SESSION%/*}`). A driven subject finds the address as `BC_SESSION` in
-its environment; a serving client chose the dir (`--at`, required), so the
-line it reads back is a value its own choice fixed — the read is what says the
-session is laid. Whether `BASH_ENV` also names the address is the run's
-question, not the rig's: `Reached { rig, reaching }` drives a rig with one of
-the two usual answers, a rig with an environment of its own implements
-`Driving::environment` itself, and `run_at` is `run` with a directory the
-caller names. `JOINING` is every way a script joins, in bash, and both
-binaries print it under `--help`.
+(`${BC_SESSION%/*}`). A serving client chose the dir (`--at`, required), so the
+line it reads back is a value its own choice fixed — the read is what says
+the session is laid. A driven subject's environment is **exactly what the
+run's closure returned**: `run(argv, environment)` / `run_at(at, argv,
+environment)` with `environment: FnOnce(&Layout) -> Vec<(OsString,
+OsString)>` — the core exports nothing and names no variable.
+`Layout::bc_session()` and `Layout::bash_env()` are the two usual pairs, pure
+material for the closure; the tools' `--reach` maps onto them. `JOINING` is
+every way a script joins, in bash, and both binaries print it under
+`--help`.
 
 Every instrument that reports a walk is composed by `stack::with_walk(&[…])`,
 which puts `stack.bash` first: `__bc_stack` has to be defined before anything
@@ -129,10 +130,10 @@ An **answer** is an arglist too, and it is a command the shell runs:
 Implement `Rig` — `bash`, `joined` — and a `Reacting` for what it builds,
 unless `Vec<Message>` or `()` is what you want. The rig's bash states its own
 joins — `BC_JOIN <LABEL> "$1"`, with any words it wants on the shell
-afterwards (`Shell::brought`). To drive it, wrap it — `Reached { rig,
-reaching }` — or implement `Driving` where the rig has an environment of its
-own; to serve it, `impl Serving` and pass the workspace the client
-prescribed. What several shells share is yours, held by the rig and handed to
+afterwards (`Shell::brought`). To drive it, `impl Driving for It {}` — empty,
+the role opt-in — and state the environment at the call:
+`it.run(argv, |at| vec![at.bc_session(), at.bash_env()])`; to serve it,
+`impl Serving` and pass the workspace the client prescribed. What several shells share is yours, held by the rig and handed to
 each reaction it builds — an `Rc<RefCell<_>>` is enough, and its borrow is
 never held across an `.await`.
 

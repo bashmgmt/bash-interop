@@ -36,8 +36,7 @@ mod support;
 use std::sync::Arc;
 
 use mb_resolver::bash::rig::{
-    heard, Attended, Driving, Failure, Layout, Message, Reached, Reaching, Rig, Shell,
-    Whole,
+    heard, Attended, Driving, Failure, Layout, Message, Rig, Shell, Whole,
 };
 
 use support::{bash, Scripts};
@@ -52,19 +51,6 @@ pub const JOIN: &str = "BC_JOIN KEEP \"$1\"\n";
 /// Keeps every message, and answers nothing.
 pub struct Keeping;
 
-impl Keeping {
-    /// Driven so every shell of the subject's tree joins as it starts.
-    pub fn bash_env() -> Reached<Self> {
-        Reached { rig: Keeping, reaching: Reaching::BashEnv }
-    }
-
-    /// Driven with the address alone: a script joins where it says
-    /// `source "$BC_SESSION"`.
-    pub fn by_hand() -> Reached<Self> {
-        Reached { rig: Keeping, reaching: Reaching::ByHand }
-    }
-}
-
 impl Rig for Keeping {
     type Reaction = Vec<Message>;
 
@@ -78,14 +64,16 @@ impl Rig for Keeping {
     }
 }
 
+impl Driving for Keeping {}
+
 /// A run of that rig, taken whole: every proof that expects a run to go through
 /// takes it that way, since a partial reading proves nothing.
 pub type Ran = Whole<Vec<Message>>;
 
 pub async fn running(files: &[(&str, &str)]) -> Ran {
     let scripts = Scripts::of(files);
-    let ran = Keeping::bash_env()
-        .run(&bash(scripts.at(ENTRY)))
+    let ran = Keeping
+        .run(&bash(scripts.at(ENTRY)), |at| vec![at.bash_env()])
         .await
         .unwrap_or_else(|error| panic!("{error}"));
 

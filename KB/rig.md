@@ -11,7 +11,7 @@ rig/  mod.rs       the doc; `Rig`, `Reacting`, the two templates; the re-export 
       session.rs   `Session` — open, serve, announced, close
       attend.rs    `attend` — one shell's task, start to finish
       watch.rs     `Watch` — what a session ends on
-      driving.rs   `Driving`, `Reaching`, `Reached`, `Run`, `Whole`, `Subject`, `ExitStatus`
+      driving.rs   `Driving`, `Run`, `Whole`, `Subject`, `ExitStatus`
       serving.rs   `Serving`, `Served`
       wire/        the protocol
 ```
@@ -151,43 +151,33 @@ whole across shells is a resource the rig owns and hands shares of.
 
 ```rust
 pub trait Driving: Rig {
-    /// What the subject's environment gets beyond the address. Nothing is a
-    /// legitimate answer: the shells then join by hand.
-    fn environment(&self, at: &Layout) -> Vec<(OsString, OsString)>;
-
     /// A workspace of the run's own, gone when the run ends.
-    async fn run<A: AsRef<OsStr>>(&self, argv: &[A]) -> Result<Run<Kept<Self>>, Failure>;
+    async fn run<A, E>(&self, argv: &[A], environment: E) -> Result<Run<Kept<Self>>, Failure>
+    where A: AsRef<OsStr>, E: FnOnce(&Layout) -> Vec<(OsString, OsString)>;
 
     /// The caller's directory instead — created if missing, left behind: a
     /// reading taken later may follow source paths into it.
-    async fn run_at<A: AsRef<OsStr>>(&self, at: &Path, argv: &[A]) -> Result<Run<Kept<Self>>, Failure>;
+    async fn run_at<A, E>(&self, at: &Path, argv: &[A], environment: E) -> Result<Run<Kept<Self>>, Failure>
+    where A: AsRef<OsStr>, E: FnOnce(&Layout) -> Vec<(OsString, OsString)>;
 }
+// the role opt-in is an empty impl block; the closure's return is the
+// subject's WHOLE environment delta — the core exports nothing
 
 pub struct Run<K> { pub shells: Vec<Attended<K>>, pub subject: ExitStatus, pub failed: Option<Failure> }
 pub struct Whole<K> { pub shells: Vec<Attended<K>>, pub subject: ExitStatus }   // Run::whole()
 
-/// The two usual answers, and the enum the tools' `--reach` parses. The core
-/// consults neither: what carries them is `Reached`.
-pub enum Reaching { BashEnv, ByHand }
-
-/// A rig driven with one of them. The rig describes; how a driven subject's
-/// shells find it is the run's question, so it is stated where the run is
-/// made rather than kept on the rig — a rig that serves never carries it.
-pub struct Reached<R> { pub rig: R, pub reaching: Reaching }
-impl<R: Rig> Rig for Reached<R>     { /* delegates to rig */ }
-impl<R: Rig> Driving for Reached<R> { /* environment: [at.bash_env()] | [] */ }
 ```
 
 **The command line is run as it is given, and carries its own program.**
-`rig.run(&["bash", "x.bash"])`, and a caller wanting a launcher writes one
-into the argv: `&["env", "TARGET=staging", "bash", "x.bash"]`. The run exports
-the address into it, `BC_SESSION=<the address>`, and then whatever
-`environment` returned — under `Reached` with `Reaching::BashEnv` that is
-`BASH_ENV=<the same address>`, which reaches every non-interactive bash in the
-tree; with `Reaching::ByHand` nothing, and a script joins where it says
-`source "$BC_SESSION"`. A rig with an environment of its own implements
-`Driving` directly and lists it there — `tests/proofs/starting.rs`'s
-`Deploying` is the worked example.
+`rig.run(&["bash", "x.bash"], |at| …)`, and a caller wanting a launcher
+writes one into the argv: `&["env", "TARGET=staging", "bash", "x.bash"]`. The
+subject's environment is exactly the closure's return, built from the settled
+`Layout`: `vec![at.bc_session(), at.bash_env()]` is the usual pair — the
+handle a script sources, and the join of every non-interactive bash in the
+tree; `vec![at.bc_session()]` leaves joining to the scripts; `vec![]` and any
+variable of the caller's own are equally legitimate sentences.
+`tests/proofs/starting.rs` proves the strong side: a variable the closure did
+not return is absent.
 
 **Reaching a `Run` means bash got to its own end**, so `subject` is always the
 subject's own status. `failed` is what went wrong closing up. A `Failure` in

@@ -6,13 +6,12 @@ use std::fmt;
 use std::io;
 use std::path::Path;
 use std::process::{Child, Command};
-use std::sync::Arc;
 
 use tokio::task::LocalSet;
 
 use super::session::Session;
 use super::watch::Watch;
-use super::{Attended, Kept, Layout, Rig, Shell};
+use super::{Attended, Kept, Layout, Rig};
 use crate::failure::{Doing, Failure};
 
 /// What a driven run produced.
@@ -48,16 +47,19 @@ pub struct Whole<K> {
     pub subject: ExitStatus,
 }
 
-/// A rig whose run Rust orchestrates.
+/// A rig whose run Rust orchestrates. The impl block is empty: the whole
+/// contract is the two provided entries.
 ///
 /// The command line is run as it is given and carries its own program, so a
 /// caller wanting a launcher puts one there: `env TARGET=staging -- bash
-/// x.bash` is the whole story.
+/// x.bash` is the whole story. `environment` is handed the settled [`Layout`]
+/// and its return is the subject's **whole** environment delta — the core
+/// adds nothing; [`Layout::bc_session`] and [`Layout::bash_env`] are the two
+/// usual pairs.
 ///
 /// | | |
 /// |---|---|
-/// | what every shell finds | `BC_SESSION=<the address>` — the file a shell sources to join |
-/// | what else reaches them | [`environment`](Driving::environment): the rig's answer, [`Reached`] the two usual ones |
+/// | what reaches the shells | exactly what `environment(&Layout)` returned |
 /// | where the session is laid | a directory of the run's own ([`run`](Driving::run)), or the caller's ([`run_at`](Driving::run_at)) |
 /// | what ends it | a pidfd on the subject, watched and never signalled; then the group is killed |
 /// | what comes back | [`Run`], and [`Run::whole`] → [`Whole`] |
@@ -66,38 +68,45 @@ pub struct Whole<K> {
 /// from a current-thread runtime or `block_on`.
 #[expect(async_fn_in_trait, reason = "single-threaded by design: no Send bound")]
 pub trait Driving: Rig {
-    /// What the subject's environment gets beyond the address. Nothing is a
-    /// legitimate answer: the shells then join by hand.
-    fn environment(&self, at: &Layout) -> Vec<(OsString, OsString)>;
-
     /// A workspace of the run's own, gone when the run ends.
-    async fn run<A: AsRef<OsStr>>(&self, argv: &[A]) -> Result<Run<Kept<Self>>, Failure>
+    async fn run<A, E>(&self, argv: &[A], environment: E) -> Result<Run<Kept<Self>>, Failure>
     where
+        A: AsRef<OsStr>,
+        E: FnOnce(&Layout) -> Vec<(OsString, OsString)>,
         Self: Sized,
     {
-        driven(self, None, argv).await
+        driven(self, None, argv, environment).await
     }
 
     /// The caller's directory instead — created if missing, left behind: a
     /// reading taken later may follow source paths into it.
-    async fn run_at<A: AsRef<OsStr>>(
+    async fn run_at<A, E>(
         &self,
         at: &Path,
         argv: &[A],
+        environment: E,
     ) -> Result<Run<Kept<Self>>, Failure>
     where
+        A: AsRef<OsStr>,
+        E: FnOnce(&Layout) -> Vec<(OsString, OsString)>,
         Self: Sized,
     {
-        driven(self, Some(at), argv).await
+        driven(self, Some(at), argv, environment).await
     }
 }
 
 /// The one driven orchestration behind both entries.
-async fn driven<R: Driving, A: AsRef<OsStr>>(
+async fn driven<R, A, E>(
     rig: &R,
     at: Option<&Path>,
     argv: &[A],
-) -> Result<Run<Kept<R>>, Failure> {
+    environment: E,
+) -> Result<Run<Kept<R>>, Failure>
+where
+    R: Rig,
+    A: AsRef<OsStr>,
+    E: FnOnce(&Layout) -> Vec<(OsString, OsString)>,
+{
     LocalSet::new()
         .run_until(async {
             let mut session = Session::open(rig, at)?;
@@ -105,8 +114,8 @@ async fn driven<R: Driving, A: AsRef<OsStr>>(
             // The subject lives inside the block: however it leaves, the
             // group is killed and reaped before the session releases files.
             let subject = async {
-                let environment = rig.environment(&session.layout);
-                let mut subject = Subject::spawn(argv, &session.layout, environment)?;
+                let environment = environment(&session.layout);
+                let mut subject = Subject::spawn(argv, environment)?;
 
                 session.serve(&Watch::process(subject.pid())?).await?;
                 subject.finish().doing(|| "waiting for bash".into())
@@ -120,52 +129,6 @@ async fn driven<R: Driving, A: AsRef<OsStr>>(
         .await
 }
 
-/// The two usual answers to [`Driving::environment`], and the enum the
-/// tools' `--reach` parses. The core consults neither: what carries them is
-/// [`Reached`].
-#[derive(Copy, Clone, Debug, PartialEq, Eq, clap::ValueEnum)]
-pub enum Reaching {
-    /// `BASH_ENV` names the address: every non-interactive bash in the
-    /// subject's tree joins as it starts.
-    BashEnv,
-
-    /// Nothing beyond the address: a shell joins where its script says
-    /// `source "$BC_SESSION"`.
-    ByHand,
-}
-
-/// A rig driven with one of them.
-///
-/// The rig describes; how a driven subject's shells find it is the run's
-/// question, so it is stated where the run is made rather than kept on the
-/// rig — a rig that serves never carries it. A rig with an environment of
-/// its own implements [`Driving`] directly instead.
-pub struct Reached<R> {
-    pub rig: R,
-    pub reaching: Reaching,
-}
-
-impl<R: Rig> Rig for Reached<R> {
-    type Reaction = R::Reaction;
-
-    fn bash(&self) -> String {
-        self.rig.bash()
-    }
-
-    async fn joined(&self, at: &Layout, shell: Arc<Shell>) -> Result<R::Reaction, Failure> {
-        self.rig.joined(at, shell).await
-    }
-}
-
-impl<R: Rig> Driving for Reached<R> {
-    fn environment(&self, at: &Layout) -> Vec<(OsString, OsString)> {
-        match self.reaching {
-            Reaching::BashEnv => vec![at.bash_env()],
-            Reaching::ByHand => Vec::new(),
-        }
-    }
-}
-
 /// The bash the run owns: its process group, and the right to end it.
 struct Subject {
     child: Child,
@@ -175,7 +138,6 @@ struct Subject {
 impl Subject {
     fn spawn<A: AsRef<OsStr>>(
         argv: &[A],
-        layout: &Layout,
         environment: Vec<(OsString, OsString)>,
     ) -> Result<Self, Failure> {
         use std::os::unix::process::CommandExt;
@@ -187,7 +149,7 @@ impl Subject {
             .ok_or_else(|| Failure::new("starting the subject", "the command line is empty"))?;
 
         let mut command = Command::new(program);
-        command.args(rest).env("BC_SESSION", &layout.address).envs(environment).process_group(0);
+        command.args(rest).envs(environment).process_group(0);
 
         let child = command.spawn().doing(|| format!("spawning {}", said()))?;
         let group = child.id() as libc::pid_t;

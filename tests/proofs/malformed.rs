@@ -24,8 +24,8 @@ async fn a_line_cut_short_by_a_shell_that_left_ends_the_run() {
         "#,
     )]);
 
-    let failure = Keeping::bash_env()
-        .run(&bash(scripts.at(ENTRY)))
+    let failure = Keeping
+        .run(&bash(scripts.at(ENTRY)), |at| vec![at.bash_env()])
         .await
         .err()
         .expect("the half-read line must be reported");
@@ -37,18 +37,16 @@ async fn a_line_cut_short_by_a_shell_that_left_ends_the_run() {
 /// run closes up — beside the subject's own status, which is news of its own.
 #[tokio::test]
 async fn a_line_cut_short_at_the_end_is_reported_beside_the_subjects_status() {
-    let ran = Keeping::bash_env()
-        .run(&bash(
-            Scripts::of(&[(
-                ENTRY,
-                r#"
-                setsid bash -c 'BC_INSTR KEEP say REC outsider $BASHPID; printf "(never finished" >&"${__BC__FD[KEEP]}"; sleep 30' &
-                sleep 0.3
-                exit 3
-                "#,
-            )])
-            .at(ENTRY),
-        ))
+    let scripts = Scripts::of(&[(
+        ENTRY,
+        r#"
+        setsid bash -c 'BC_INSTR KEEP say REC outsider $BASHPID; printf "(never finished" >&"${__BC__FD[KEEP]}"; sleep 30' &
+        sleep 0.3
+        exit 3
+        "#,
+    )]);
+    let ran = Keeping
+        .run(&bash(scripts.at(ENTRY)), |at| vec![at.bash_env()])
         .await
         .unwrap();
 
@@ -74,8 +72,8 @@ async fn a_line_that_will_not_read_ends_the_run() {
         "#,
     )]);
 
-    let failure = Keeping::bash_env()
-        .run(&bash(scripts.at(ENTRY)))
+    let failure = Keeping
+        .run(&bash(scripts.at(ENTRY)), |at| vec![at.bash_env()])
         .await
         .err()
         .expect("a line that will not read must end the run");
@@ -97,8 +95,8 @@ async fn a_frame_the_protocol_did_not_write_ends_the_run() {
         "#,
     )]);
 
-    let failure = Keeping::bash_env()
-        .run(&bash(scripts.at(ENTRY)))
+    let failure = Keeping
+        .run(&bash(scripts.at(ENTRY)), |at| vec![at.bash_env()])
         .await
         .err()
         .expect("a line that is not a frame must end the run");

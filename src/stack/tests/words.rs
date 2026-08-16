@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use crate::bash::rig::{
-    Answer, Driving, Failure, Layout, Message, Reached, Reaching, Reacting, Rig, Shell,
+    Answer, Driving, Failure, Layout, Message, Reacting, Rig, Shell,
 };
 use crate::bash::stack::{self, Columns, Site, Source, Stack};
 use crate::tests::scripts::{bash, Scripts};
@@ -67,10 +67,14 @@ impl Reacting for Walks {
     }
 }
 
+impl Driving for Walking {}
+
 /// Every walk a command line produced, shell by shell in the order they joined.
 async fn walks_in<A: AsRef<std::ffi::OsStr>>(argv: &[A]) -> Vec<Stack> {
-    let walking = Reached { rig: Walking, reaching: Reaching::BashEnv };
-    let ran = walking.run(argv).await.unwrap_or_else(|e| panic!("{e}"));
+    let ran = Walking
+        .run(argv, |at| vec![at.bash_env()])
+        .await
+        .unwrap_or_else(|e| panic!("{e}"));
 
     ran.whole().unwrap().shells.into_iter().flat_map(|at| at.kept).collect()
 }

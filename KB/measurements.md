@@ -212,7 +212,7 @@ mechanism that cannot be checked by reading the source. One file per subject.
 
 | `starting.rs` | establishes |
 |---|---|
-| `the_rigs_word_and_environment_reach_every_shell_and_the_address_is_always_there` | `Rig::bash` puts the rig's word in the subject and a child it starts; so does a variable from `Driving::environment`, and one set with `env` on the command line; `$BC_SESSION` is a readable file in both |
+| `the_closures_return_is_the_subjects_whole_environment` | `Rig::bash` puts the rig's word in the subject and a child it starts; so does a variable from the run's closure, and one set with `env` on the command line; `BC_SESSION`, which the closure did not return, is absent in both — the core adds nothing |
 | `the_command_line_is_run_as_asked` | the run starts the program the argv names, with nothing appended |
 | `a_subject_may_join_by_hand_where_it_chooses` | a rig whose `environment` is empty: `source "$BC_SESSION"` where the script says; children that sourced nothing are not shells |
 

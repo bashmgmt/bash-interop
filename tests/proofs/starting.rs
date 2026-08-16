@@ -1,11 +1,8 @@
 //! What the run starts, and what a rig puts in the shells it reaches.
 
-use std::ffi::OsString;
 use std::sync::Arc;
 
-use mb_resolver::bash::rig::{
-    Driving, ExitStatus, Failure, Layout, Message, Rig, Shell,
-};
+use mb_resolver::bash::rig::{Driving, ExitStatus, Failure, Layout, Message, Rig, Shell};
 
 use crate::support::{bash, Scripts};
 use crate::{behind, report, Keeping, ENTRY};
@@ -25,26 +22,21 @@ impl Rig for Deploying {
     }
 }
 
-impl Driving for Deploying {
-    /// `BASH_ENV`, and a variable of the rig's own beside it: the environment
-    /// is whatever the rig says, and the core adds the address.
-    fn environment(&self, at: &Layout) -> Vec<(OsString, OsString)> {
-        vec![at.bash_env(), ("DEPLOY_STAGE".into(), "canary".into())]
-    }
-}
+impl Driving for Deploying {}
 
-/// A rig's word reaches the subject and a child it starts, because `BASH_ENV`
-/// reaches both; so does the rig's variable, and so does one the command line
-/// carries — it names its own program, so `env` puts one there. `BC_SESSION`
-/// is in every shell either way, and is a file a shell could source.
+/// The closure's return is the subject's whole environment: its word and its
+/// variable reach the subject and a child it starts, because `BASH_ENV`
+/// reaches both; one the command line carries arrives too — it names its own
+/// program, so `env` puts one there. And a variable the closure did not
+/// return — `BC_SESSION` here — is absent: the core adds nothing.
 #[tokio::test]
-async fn the_rigs_word_and_environment_reach_every_shell_and_the_address_is_always_there() {
+async fn the_closures_return_is_the_subjects_whole_environment() {
     let scripts = Scripts::of(&[
         (
             ENTRY,
             r#"
             TELL subject "$DEPLOY_TARGET" "$DEPLOY_STAGE" "$#"
-            [[ -r $BC_SESSION ]] && TELL address readable
+            [[ -z ${BC_SESSION-} ]] && TELL no-handle
             bash "${BASH_SOURCE[0]%/*}/child.bash"
             "#,
         ),
@@ -52,7 +44,7 @@ async fn the_rigs_word_and_environment_reach_every_shell_and_the_address_is_alwa
             "child.bash",
             r#"
             TELL child "$DEPLOY_TARGET" "$DEPLOY_STAGE"
-            [[ -r $BC_SESSION ]] && TELL address readable
+            [[ -z ${BC_SESSION-} ]] && TELL no-handle
             "#,
         ),
     ]);
@@ -60,16 +52,21 @@ async fn the_rigs_word_and_environment_reach_every_shell_and_the_address_is_alwa
     let mut argv = vec!["env".to_string(), "DEPLOY_TARGET=staging".to_string()];
     argv.extend(bash(scripts.at(ENTRY)).iter().map(|word| word.to_string_lossy().to_string()));
 
-    let ran = Deploying.run(&argv).await.unwrap().whole().unwrap();
+    let ran = Deploying
+        .run(&argv, |at| vec![at.bash_env(), ("DEPLOY_STAGE".into(), "canary".into())])
+        .await
+        .unwrap()
+        .whole()
+        .unwrap();
 
     assert_eq!(ran.subject, ExitStatus::Code(0), "{}", report(&ran.shells));
     assert_eq!(
         behind(&ran.shells, "TELL"),
         [
             ["subject", "staging", "canary", "0"].as_slice(),
-            ["address", "readable"].as_slice(),
+            ["no-handle"].as_slice(),
             ["child", "staging", "canary"].as_slice(),
-            ["address", "readable"].as_slice(),
+            ["no-handle"].as_slice(),
         ],
         "{}",
         report(&ran.shells)
@@ -81,7 +78,12 @@ async fn the_rigs_word_and_environment_reach_every_shell_and_the_address_is_alwa
 #[tokio::test]
 async fn the_command_line_is_run_as_asked() {
     let scripts = Scripts::of(&[(ENTRY, "BC_INSTR KEEP say REC \"$0\" \"$#\"")]);
-    let ran = Keeping::bash_env().run(&bash(scripts.at(ENTRY))).await.unwrap().whole().unwrap();
+    let ran = Keeping
+        .run(&bash(scripts.at(ENTRY)), |at| vec![at.bash_env()])
+        .await
+        .unwrap()
+        .whole()
+        .unwrap();
 
     assert_eq!(ran.subject, ExitStatus::Code(0));
     assert_eq!(
@@ -92,7 +94,7 @@ async fn the_command_line_is_run_as_asked() {
     );
 }
 
-/// A rig whose environment adds nothing leaves joining to the scripts: the
+/// An environment of the handle alone leaves joining to the scripts: the
 /// subject sources the address where it chooses, and a child it starts, which
 /// sourced nothing, is not a shell.
 #[tokio::test]
@@ -110,7 +112,12 @@ async fn a_subject_may_join_by_hand_where_it_chooses() {
         ("other.bash", "type BC_INSTR >/dev/null 2>&1 && BC_INSTR KEEP say REC never\n"),
     ]);
 
-    let ran = Keeping::by_hand().run(&bash(scripts.at(ENTRY))).await.unwrap().whole().unwrap();
+    let ran = Keeping
+        .run(&bash(scripts.at(ENTRY)), |at| vec![at.bc_session()])
+        .await
+        .unwrap()
+        .whole()
+        .unwrap();
 
     assert_eq!(behind(&ran.shells, "REC"), [["by-hand"]], "{}", report(&ran.shells));
     assert_eq!(ran.shells.len(), 1, "the children never joined{}", report(&ran.shells));

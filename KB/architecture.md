@@ -92,15 +92,15 @@ A driven run exports the address, `BC_SESSION=<the address>`, into the
 subject and starts the command line; its workspace is a temporary directory of
 the run's own — or, `run_at`, one the caller names and keeps — so nothing
 external can prescribe or collide with it. **How the
-shells reach the address is the run's question, not the rig's**: `Reached {
-rig, reaching }` drives any rig with one of the two usual answers — `BashEnv`
-is `("BASH_ENV", <the same address>)`, which reaches every non-interactive
-bash in the tree the subject creates and is what makes `bashcap run --into out
-make test` work, every recipe shell `make` starts joining by itself; `ByHand`
-is nothing, and a script joins where it says `source "$BC_SESSION"`. A rig
-with an environment of its own implements `Driving::environment`, whose
-precondition is the settled `Layout`. The core consults neither; the tools
-default to the first and take `--reach by-hand`.
+shells reach the address is the run's question, stated at the run**: `run`
+and `run_at` take an environment closure, `FnOnce(&Layout) -> Vec<(OsString,
+OsString)>`, whose return is the subject's whole environment delta — the core
+exports nothing. `Layout::bc_session()` and `Layout::bash_env()` are the two
+usual pairs: the handle a script sources (`source "$BC_SESSION"`), and the
+join of every non-interactive bash in the tree — what makes `bashcap run
+--into out make test` work, every recipe shell `make` starts joining by
+itself. The tools' `--reach` is their own vocabulary over these pairs,
+defaulting to both and taking `by-hand` for the handle alone.
 
 A serving run requires the workspace from outside — `--at`, no fallback — so
 the client that starts the server knows the address before the server has done
@@ -247,7 +247,7 @@ and no tool runs unprofiled; the same script under the tool measures itself. See
 | a session-wide accumulator in the library | what a run produces is the client's; `Vec<Message>` and `()` are the only two shipped |
 | a timer, an interval, a heartbeat | serving ends when nobody who could speak is left, and that is a descriptor; tokio's `time` feature is not enabled |
 | a closing word or reserved payload word | the handle says when it is over, so nothing in the loop intercepts a message |
-| a way in the core prefers | the core exports the address; `BASH_ENV` or by hand is the run's choice (`Reached`), and a tool's default |
+| a way in the core prefers | the core exports nothing; every environment is the run's closure, and `--reach` a tool's vocabulary over the two shipped pairs |
 | a poisoned or degraded mode | an answer that says no is a command returning non-zero, like any other |
 | parallelism | concurrency is a task per shell on one thread; the cost is bash's `printf`, not ours, and a `Send` bound would tax every implementor for nothing |
 | a fork tree | a fork inherits and then takes its own pipe; that it descends from a shell is not reported |

@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use mb_resolver::bash::rig::{
-    Answer, Driving, ExitStatus, Failure, Layout, Message, Reached, Reaching, Reacting, Rig, Run,
+    Answer, Driving, ExitStatus, Failure, Layout, Message, Reacting, Rig, Run,
     Shell,
 };
 use tokio::sync::Notify;
@@ -52,6 +52,8 @@ impl Rig for Answering {
         Ok(Soak { steps: self.steps.clone(), heard: Vec::new(), answered: 0 })
     }
 }
+
+impl Driving for Answering {}
 
 impl Reacting for Soak {
     type Kept = Self;
@@ -128,10 +130,8 @@ async fn a_session_survives_every_way_of_answering() {
         ),
     ]);
 
-    let answering =
-        Reached { rig: Answering { steps: scripts.dir().to_path_buf() }, reaching: Reaching::BashEnv };
-    let ran = answering
-        .run(&bash(scripts.at(ENTRY)))
+    let ran = Answering { steps: scripts.dir().to_path_buf() }
+        .run(&bash(scripts.at(ENTRY)), |at| vec![at.bash_env()])
         .await
         .and_then(Run::whole)
         .unwrap_or_else(|error| panic!("{error}"));
@@ -193,6 +193,8 @@ impl Rig for Gated {
     }
 }
 
+impl Driving for Gated {}
+
 impl Reacting for Gate {
     type Kept = ();
 
@@ -230,10 +232,10 @@ async fn an_answer_may_wait_on_another_shells_word() {
         wait
         "#,
     )]);
-    let gated = Reached { rig: Gated { open: Rc::new(Notify::new()) }, reaching: Reaching::BashEnv };
+    let gated = Gated { open: Rc::new(Notify::new()) };
     let argv = bash(scripts.at(ENTRY));
 
-    let ran = tokio::time::timeout(Duration::from_secs(10), gated.run(&argv))
+    let ran = tokio::time::timeout(Duration::from_secs(10), gated.run(&argv, |at| vec![at.bash_env()]))
         .await
         .expect("served concurrently, or this would never return")
         .unwrap();

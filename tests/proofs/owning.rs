@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use mb_resolver::bash::rig::{
-    Answer, Driving, Failure, Layout, Message, Reached, Reaching, Reacting, Rig, Shell, Verb,
+    Answer, Driving, Failure, Layout, Message, Reacting, Rig, Shell, Verb,
 };
 
 use crate::support::{bash, Scripts};
@@ -42,8 +42,12 @@ async fn a_named_workspace_is_left_behind_without_its_fifos() {
         ),
     ]);
 
-    let ran =
-        Keeping::bash_env().run_at(&at, &bash(scripts.at(ENTRY))).await.unwrap().whole().unwrap();
+    let ran = Keeping
+        .run_at(&at, &bash(scripts.at(ENTRY)), |at| vec![at.bc_session(), at.bash_env()])
+        .await
+        .unwrap()
+        .whole()
+        .unwrap();
 
     assert_eq!(behind(&ran.shells, "REC"), [["fork"]]);
     assert_eq!(
@@ -154,6 +158,8 @@ impl Reacting for Boom {
     }
 }
 
+impl Driving for Exploding {}
+
 /// The panic propagates out of the run and the subject is still killed.
 /// Nothing comes back from the run, so the subject writes its own pid to a
 /// file before asking.
@@ -172,7 +178,7 @@ fn a_panicking_answer_kills_the_subject() {
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        runtime.block_on(Reached { rig: Exploding, reaching: Reaching::BashEnv }.run(&argv))
+        runtime.block_on(Exploding.run(&argv, |at| vec![at.bash_env()]))
     }));
     std::panic::set_hook(previous);
 

@@ -15,9 +15,7 @@
 //!
 //! ```no_run
 //! use std::sync::Arc;
-//! use mb_resolver::bash::rig::{
-//!     Answer, Driving, Failure, Layout, Message, Reached, Reaching, Reacting, Rig, Shell,
-//! };
+//! use mb_resolver::bash::rig::{Answer, Driving, Failure, Layout, Message, Reacting, Rig, Shell};
 //!
 //! /// Keeps what one shell said, and tells it to use staging.
 //! struct Deploying;
@@ -56,13 +54,16 @@
 //!     async fn finish(self) -> Result<Self, Failure> { Ok(self) }
 //! }
 //!
+//! impl Driving for Deploying {}
+//!
 //! # #[tokio::main(flavor = "current_thread")]
 //! # async fn main() -> Result<(), Failure> {
-//! // Driven with the usual reach: `BASH_ENV`, so every non-interactive bash
-//! // in the tree joins as it starts. A rig with an environment of its own
-//! // implements `Driving` instead.
-//! let ran = Reached { rig: Deploying, reaching: Reaching::BashEnv };
-//! for shell in ran.run(&["bash", "deploy.bash"]).await?.whole()?.shells {
+//! // The closure's return is the subject's whole environment: the usual pair
+//! // has every non-interactive bash in the tree join as it starts.
+//! let ran = Deploying
+//!     .run(&["bash", "deploy.bash"], |at| vec![at.bc_session(), at.bash_env()])
+//!     .await?;
+//! for shell in ran.whole()?.shells {
 //!     println!("pid {} said {} things", shell.shell.pid, shell.kept.heard.len());
 //! }
 //! # Ok(())
@@ -74,7 +75,7 @@
 //!
 //! | | who started the shells | how they find the address | what the session lasts for | what comes back |
 //! |---|---|---|---|---|
-//! | [`Driving`] | the run, in a process group of its own | `BC_SESSION` in the environment, plus what [`Driving::environment`] adds | that process group | [`Run`], with the subject's [`ExitStatus`] |
+//! | [`Driving`] | the run, in a process group of its own | exactly what the run's environment closure returned — [`Layout::bc_session`] and [`Layout::bash_env`] the usual pair | that process group | [`Run`], with the subject's [`ExitStatus`] |
 //! | [`Serving`] | a bash script, which named the workspace and started the server | its own choice: `<dir>/session.bash`, echoed back once the session is laid | whoever holds the handle | [`Served`] |
 //!
 //! Either way, the address is the file a shell sources to join, and
@@ -94,7 +95,7 @@
 //! | `attended` | [`Layout`], [`Attended`], [`Kept`], [`Said`], [`heard`] |
 //! | `session`, `attend` | the conversation: the workspace, the control fifo, one task per shell |
 //! | `watch` | the descriptor a session ends on |
-//! | `driving`, `serving` | the two roles, [`Reached`] and [`Reaching`], and what each hands back |
+//! | `driving`, `serving` | the two roles, and what each hands back |
 //! | `wire` | [`Message`], [`Answer`], and the protocol that carries them |
 
 mod attend;
@@ -108,7 +109,7 @@ pub(crate) mod wire;
 use std::sync::Arc;
 
 pub use attended::{heard, Attended, Kept, Layout, Said};
-pub use driving::{Driving, ExitStatus, Reached, Reaching, Run, Whole};
+pub use driving::{Driving, ExitStatus, Run, Whole};
 pub use serving::{Served, Serving};
 
 pub use wire::{field, Answer, Message, Micros, Pid, Stamp, Verb};

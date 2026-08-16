@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use mb_resolver::bash::rig::{
-    Answer, Driving, ExitStatus, Failure, Layout, Message, Reached, Reaching, Reacting, Rig, Shell,
+    Answer, Driving, ExitStatus, Failure, Layout, Message, Reacting, Rig, Shell,
     Verb,
 };
 
@@ -35,6 +35,8 @@ impl Rig for Breaking {
         Ok(Breaks { on: self.on, heard: Vec::new() })
     }
 }
+
+impl Driving for Breaking {}
 
 impl Reacting for Breaks {
     type Kept = Vec<Message>;
@@ -80,8 +82,8 @@ fn blocked(scripts: &Scripts) -> i32 {
 async fn a_rig_that_cannot_answer_ends_the_run_and_kills_the_subject() {
     let scripts = Scripts::of(&[(ENTRY, &format!("{REPORTING}BC_INSTR KEEP ask anything"))]);
 
-    let failure = Reached { rig: Breaking { on: Verb::Ask }, reaching: Reaching::BashEnv }
-        .run(&bash(scripts.at(ENTRY)))
+    let failure = Breaking { on: Verb::Ask }
+        .run(&bash(scripts.at(ENTRY)), |at| vec![at.bash_env()])
         .await
         .err()
         .expect("the run must end in the rig's failure");
@@ -108,8 +110,8 @@ async fn a_failure_while_hearing_ends_the_run_and_kills_the_subject() {
     )]);
 
     let started = Instant::now();
-    let failure = Reached { rig: Breaking { on: Verb::Say }, reaching: Reaching::BashEnv }
-        .run(&bash(scripts.at(ENTRY)))
+    let failure = Breaking { on: Verb::Say }
+        .run(&bash(scripts.at(ENTRY)), |at| vec![at.bash_env()])
         .await
         .err()
         .expect("the run must end in the rig's failure");
