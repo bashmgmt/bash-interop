@@ -16,6 +16,7 @@
 # `BASH_ARGC` and `BASH_ARGV` are empty unless the shell is under `extdebug`.
 # Expanding an unset array is not an error, including under `set -u`, and the
 # reader decides what a short one means.
+# ANCHOR: walk
 __bc_stack() {
     local -n __bc_stack_out="$1"
 
@@ -29,3 +30,4 @@ __bc_stack() {
         argv    "(${BASH_ARGV[*]@Q})"
     )
 }
+# ANCHOR_END: walk

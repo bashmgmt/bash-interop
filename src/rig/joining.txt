@@ -11,11 +11,12 @@ BASHPROF_INIT "$BC_SESSION"
 # the workspace, probes the same directory until the session is up, loads,
 # initiates, and holds the session open for as long as it runs:
 source lib/joining.bash
-mkdir -p prof.d
-BC_START bashprof serve --at prof.d --into build.times
-until BC_UP prof.d; do sleep 0.01; done
-BC_LOAD prof.d
-BASHPROF_INIT prof.d
+declare -- workspace="$PWD/prof.d"             # an address is absolute
+mkdir -p "$workspace"
+BC_START bashprof serve --at "$workspace" --into build.times
+until BC_UP "$workspace"; do sleep 0.01; done
+BC_LOAD "$workspace"
+BASHPROF_INIT "$workspace"
 BC_LEAVE                                       # let go, wait, return its status
 
 # Only if there is a session — a script that runs the same with or without one:

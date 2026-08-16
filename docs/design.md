@@ -78,11 +78,13 @@ dependency on either side's idea of encoding.
 The workspace directory is the session's address and its only coordinate:
 every fifo and file is `<dir>/…`, modelled in one place — `Layout`, a
 validated directory and accessors for the constant names. The session
-**owns** the directory it serves: `<dir>/lock` is `flock`ed before anything in it is touched and held
-until its fifos are gone, so a second session on the same directory is
-refused whole, a killed predecessor's leavings are swept at the next open,
-and the kernel releases the hold on any death. A prescribed directory must
-exist; making it is the host's job, in both roles.
+**owns** the directory it serves: `<dir>/lock` is `flock`ed before anything
+in it is touched and held until its fifos are gone. Ownership is what makes
+three promises cheap: a second session on the same directory is refused
+whole; a killed predecessor's leavings are swept at the next open, because
+the kernel released the dead lock; and the join fifo's presence is a
+truthful liveness signal. A prescribed directory must exist; making it is
+the host's job, in both roles.
 
 The session lays two files: the generic prelude (shipped verbatim, reading
 neither its own location nor the environment) and the rig's bash —
@@ -116,17 +118,18 @@ vocabulary over these spellings: `bash-env` provisions a joining file,
 A serving run requires the workspace from outside — `--at`, existing, no
 fallback — and answers to nobody: nothing is written back, a serving
 application is a complete standalone program, and the client feeds the same
-directory to start, probe, load and initiate. Liveness is the workspace's to show —
-the join fifo is present exactly while a session serves, which the lock and
-the sweep keep truthful — so `BC_UP <dir>` is one file test, and the one
-boundary is a server killed outright, whose stale fifo stands until its
-directory is next opened or removed. So the join line
-is one line in every role — a provisioned file's or the client's own — and
-`JOINING`, one text printed by both binaries under `--help`, is every way a
-script writes it. What one variable cannot do
-remains stated rather than implied away: `BASH_ENV` is one variable, and two
-driving runs both reaching through it shadow each other for the inner subtree
-— the escape is `--reach by-hand`, and it is the client's.
+directory to start, probe, load and initiate. Liveness is the workspace's
+to show — the join fifo is present exactly while a session serves — so
+`BC_UP <dir>` is one file test, and the one boundary is a server killed
+outright, whose stale fifo stands until its directory is next opened or
+removed.
+
+The upshot across both roles: the join is always one line, a provisioned
+file's or the client's own, and `JOINING` — one text, printed by both
+binaries under `--help` — is every way a script writes it. One limit is
+stated rather than papered over: `BASH_ENV` is a single variable, so two
+driven runs nested through it shadow each other for the inner subtree; the
+escape is `--reach by-hand`, and it is the client's.
 
 The command line is free to be exactly what the caller wrote, program
 included: `&["env", "TARGET=staging", "bash", "x.bash"]` needs no support from
@@ -185,7 +188,7 @@ do:
 
 ```
 bashprof run   [--reach bash-env|by-hand] --into build.times -- make test
-bashprof serve --at prof.d --into build.times   # started by BC_START, from a script
+bashprof serve --at "$PWD/prof.d" --into build.times   # started by BC_START, from a script
                                                 # (mkdir; BC_UP probes; BC_LOAD; BASHPROF_INIT)
 ```
 

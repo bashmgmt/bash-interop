@@ -1,9 +1,11 @@
 # Scoping
 
-Every bash file this crate ships — `rig/wire/prelude.bash`, `bashcap/*.bash`,
-and a tool's own instrument — runs inside the subject's frames rather than
-beside them. Where a name binds decides what a helper writes and what its
-continuation reads.
+Every bash file this crate ships — the prelude, the walk — and every
+tool's instrument built on it runs *inside the subject's frames* rather
+than beside them. Where a name binds therefore decides what a helper
+writes and what its continuation reads, and this chapter is the closed set
+of scoping facts the shipped bash stands on. Each was measured (bash
+5.3.9), not assumed.
 
 ## One stack, resolved by name at run time
 
@@ -68,14 +70,15 @@ Which forms are safe is not guessable, and these were measured on 5.3.9:
 depends on the second: after an empty hook has run, `$__BP_id` has to be empty
 rather than unbound.
 
-### The two roles differ in what is exposed
+### The two ways in differ in what `set -u` sees
 
-Under a driven run bash reads `BASH_ENV` while the shell is still starting,
-**before** the subject's own `set -u` line. Only function bodies run under it.
-A client that joins a session of its own has `set -u` on before it sources
-the session file, so the top level of the invocation — the prelude, then the
-rig's own bash with its joins — runs under it too. Every `__BC__*` name is assigned
-there before anything reads it, which is what makes the second case hold.
+Under a provisioned run, bash reads `BASH_ENV` while the shell is still
+starting, **before** the subject's own `set -u` line — so only function
+bodies later run under it. A client that joins by its own lines has
+`set -u` on *first*, so the top level of everything it sources — the
+prelude, the rig's definitions — and its own join line run under it too.
+Every `__BC__*` name is assigned before anything reads it, which is what
+makes the second case hold.
 
 ## `IFS` is the subject's, and `[*]` reads it
 
@@ -84,9 +87,9 @@ subject's. A shipped file that joins an array has to take one of its own for
 exactly that frame:
 
 ```bash
-__bc_capture() { local IFS=' '; … }     # every join below is [*]@Q
-__bc_account() { local IFS=' '; … }     # the version is "(${BASH_VERSINFO[*]@Q})"
-__bc_send()    { local IFS=' '; … }     # the line is "(${*@Q})"
+__bc_account() { local IFS=' '; … }     # prelude: the version is "(${BASH_VERSINFO[*]@Q})"
+__bc_send()    { local IFS=' '; … }     # prelude: the line is "(${*@Q})"
+__bc_capture() { local IFS=' '; … }     # bashcap's effect does the same
 ```
 
 `local IFS=' '` is released on return, **including where the subject had `IFS`
@@ -97,7 +100,7 @@ finds this: the array arrives comma-joined and reads back as one element.
 `[@]` does not join and needs nothing. Neither does `printf -v x '%s ' "${@@Q}"`,
 which writes its own separator.
 
-Proved by `proofs/transparency.rs::a_clients_own_trap_and_ifs_are_untouched`,
+Proved by `tests/proofs/transparency.rs::a_clients_own_trap_and_ifs_are_untouched`,
 which sets `IFS=,` and then reads the version back off the shell.
 
 ## `LC_ALL` is the subject's, and `${#s}` reads it

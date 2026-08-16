@@ -16,12 +16,16 @@ BASH_ARGV    ('2' 'walk' 'x')            one flat stack, groups reversed
 ```
 
 `BASH_ARGC` and `BASH_ARGV` exist only under `extdebug` — see
-`bashcap/KB/bashcap.md` for how that is turned on. Expanding an unset array is
+`bashcap/docs/bashcap.md` for how that is turned on. Expanding an unset array is
 not an error, including under `set -u`, so an instrument writes all five
 unconditionally.
 
 ## The instrument
 
+The whole instrument, as shipped (anchored — `src/stack/stack.bash`; its
+header comment carries the contract):
+
+<!-- quote: src/stack/stack.bash anchor=walk -->
 ```bash
 __bc_stack() {
     local -n __bc_stack_out="$1"
@@ -108,10 +112,10 @@ A walk is **one value, not a head and a tail.** Which frame is the call site is
 say so, and `Columns::frames` turns that into a `Failure` where the message is
 read. Nothing downstream carries the question.
 
-Three indices are undone, and all three are arithmetic:
-
-**`skip`** drops the instrument's own frames. It is at least 1 and never past
-the end of the walk.
+Three indices are undone on the Rust side, and all three are pure
+arithmetic. First, **`skip`** drops the instrument's own frames — it is at
+least 1 and never past the end of the walk. The other two have sections of
+their own below: the line shift, and the argument stack.
 
 ## The line each frame is executing
 
@@ -193,17 +197,18 @@ between leaves a path that resolves to nothing, and that is what `missing`
 reports. It is not an error: the path was true when it was written. `bashprof`
 prints one line per missing source on stderr, and a rig whose reading outlives
 the run keeps its own workspace so the instrument's frames stay readable — see
-[rig.md](rigs.md).
+[rigs.md](rigs.md).
 
-**The line shift.** `BASH_LINENO[i]` is where frame `i` *was called from*, so
-where frame `i` is *executing* is `BASH_LINENO[i - 1]`. Because `skip >= 1`,
-that index is in range for every reported frame — the off-by-one is
-unrepresentable rather than guarded.
+One consequence of `skip >= 1` is worth stating: the `i - 1` index above
+is in range for every reported frame, so the off-by-one is unrepresentable
+rather than guarded.
 
-**The argument stack.** `BASH_ARGC[i]` is the width of group `i`; its offset is
-the sum of the widths before it, and its contents are reversed within the
-group. Summing forward and reading each group backward gives the arguments in
-the order the call was written.
+## The argument stack
+
+ `BASH_ARGV` is one flat stack of words; `BASH_ARGC[i]` is the width of
+frame `i`'s group in it. A group's offset is the sum of the widths before
+it, and its contents are stored reversed. Summing forward and reading each
+group backward gives the arguments in the order the call was written.
 
 ### When arguments are absent
 
@@ -238,17 +243,18 @@ it, and where it is checked without running bash.
 
 ## Who uses it
 
-| | skip | arguments |
+| word | crate | arguments recorded |
 |---|---|---|
-| `BASHCAP` (`src/bashcap/`) | 2 | under `--trace-calls` |
-| `BASHPROF_TIMETHIS` (`tests/examples/bashprof.rs`) | 2 | whatever the shell has |
+| `BASHCAP` | bashcap | under `--trace-calls` |
+| `BASHPROF_TIMETHIS` | bashprof | whatever the shell has |
 
-Both reach it through `stack::with_walk`, which puts it in front of their own
-bash in `Rig::bash`.
+Each passes its own instrument depth (its word's frame plus the walk's),
+and both reach the walk through `stack::with_walk`, which puts `stack.bash`
+in front of their definitions in `Rig::bash`.
 
 ## See also
 
 - `bash-strings/docs/values.md` — `parse_array`, the shape each section is
-- `bashcap/KB/bashcap.md` — `extdebug`, and what else a snapshot carries
+- `bashcap/docs/bashcap.md` — `extdebug`, and what else a snapshot carries
 - [scoping.md](scoping.md) — why the nameref rather than a global
 - [measurements.md](measurements.md) — what a snapshot costs

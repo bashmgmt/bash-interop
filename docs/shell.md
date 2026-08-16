@@ -26,15 +26,27 @@ shell's pipe is even opened — so the run knows everything about a shell before
 it releases it. It is not a `Message` and cannot become one: it is what *makes*
 a shell, and a `Message` presupposes one.
 
+The account is built by one prelude function — read it as a checklist of
+everything a shell states about itself (anchored; these are the shipped
+bytes):
+
+<!-- quote: src/rig/wire/prelude.bash anchor=account -->
 ```bash
 __bc_account() {
     local __bc_out=$1 IFS=' '
     local -a __bc_meta="(${__BC__META[$2]-})"
     set -- "at=$EPOCHREALTIME" \
-        pid "$BASHPID" shlvl "$SHLVL" subshell "$BASH_SUBSHELL" \
-        versinfo "(${BASH_VERSINFO[*]@Q})" bash "$BASH" zero "$0" flags "$-" \
-        shellopts "$SHELLOPTS" bashopts "$BASHOPTS" command "${BASH_EXECUTION_STRING-}" \
-        brought "(${__bc_meta[*]@Q})"
+        pid       "$BASHPID" \
+        shlvl     "$SHLVL" \
+        subshell  "$BASH_SUBSHELL" \
+        versinfo  "(${BASH_VERSINFO[*]@Q})" \
+        bash      "$BASH" \
+        zero      "$0" \
+        flags     "$-" \
+        shellopts "$SHELLOPTS" \
+        bashopts  "$BASHOPTS" \
+        command   "${BASH_EXECUTION_STRING-}" \
+        brought   "(${__bc_meta[*]@Q})"
     printf -v "$__bc_out" '(%s)' "${*@Q}"
 }
 ```
@@ -63,20 +75,22 @@ at an interactive prompt — words a script can also produce. Which is which is 
 property of the shell, and the shell is the only thing that knows:
 `Invocation::from_a_file` is `command.is_none() && !standard_input`.
 
-An interactive shell can join *only* by sourcing the session file itself:
-bash reads `BASH_ENV` for non-interactive shells alone. Nothing about the mechanism cares
-— the same `BC_JOIN` runs however the shell got there, under either
-orchestration. See [scoping.md](scoping.md) and
-[stack.md](stack.md#bashs-own-words).
+An interactive shell can join *only* by typing its own way in — loading
+the pieces and saying the init — because bash reads `BASH_ENV` for
+non-interactive shells alone. Nothing about the mechanism cares: the same
+`BC_JOIN` runs however the shell got there, under either orchestration.
+See [scoping.md](scoping.md) and [stack.md](stack.md#bashs-own-words).
 
 ## What is not here
 
-Who forked whom. A fork inherits its parent's pipe descriptor and takes its own
-on its first word; that it descends from a particular shell is not reported.
-`$SHLVL` and `$BASH_SUBSHELL` are bash's own facts and are.
+Who forked whom. A fork inherits its parent's pipe descriptor and takes
+its own on its first word; that it descends from a particular shell is not
+reported — no ancestry is tracked, because bash itself does not know it.
+What bash *does* know — `$SHLVL`, `$BASH_SUBSHELL` — is reported as bash
+states it, nothing more.
 
 ## See also
 
 - [wire.md](wire.md#the-control-fifo) — how the account travels
-- [rig.md](rigs.md) — where a shell enters a reaction
+- [rigs.md](rigs.md) — where a shell enters a reaction
 - [stack.md](stack.md) — the walk that cannot be read without the shell

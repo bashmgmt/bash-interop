@@ -27,9 +27,9 @@ src/bashprof/effect.bash  __bp_begin, __bp_end
 into, so a client vendors them and nothing injects them. It has no guard
 either — a script that calls `BC_START` wants a session, and the tool being
 absent is a missing command rather than a call site to neutralise. See
-[rig.md](serving.md#the-coprocess-convention). Every way a script joins — driven
-and already joined, load-and-init by hand, only if
-there is a session, started as a coprocess, and the guard below — is
+[serving.md](serving.md#the-coprocess-convention). Every way a script joins —
+driven and already joined, load-and-init by hand, only if there is a session,
+started as a coprocess, and the guard below — is
 `bash_interop::rig::JOINING`, printed by `bashprof run --help` and
 `bashcap run --help`.
 
@@ -136,6 +136,6 @@ bashcap-demo` diffs against the asset.
 
 ## See also
 
-- `bashcap/KB/bashcap.md#the-clients-side` — the words a client calls
-- `bashprof/KB/bashprof.md#the-tool` — the same, for measurements
+- `bashcap/docs/bashcap.md#the-clients-side` — the words a client calls
+- `bashprof/docs/bashprof.md#the-tool` — the same, for measurements
 - [scoping.md](scoping.md) — what `BASH_ENV` reaches, and when

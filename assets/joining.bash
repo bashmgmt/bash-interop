@@ -3,11 +3,12 @@
 # initiates its own channel; from then on `BC_INSTR` is defined:
 #
 #     source lib/joining.bash
-#     mkdir -p prof.d
-#     BC_START bashprof serve --at prof.d --into build.times
-#     until BC_UP prof.d; do sleep 0.01; done
-#     BC_LOAD prof.d
-#     BASHPROF_INIT prof.d
+#     declare -- workspace="$PWD/prof.d"
+#     mkdir -p "$workspace"
+#     BC_START bashprof serve --at "$workspace" --into build.times
+#     until BC_UP "$workspace"; do sleep 0.01; done
+#     BC_LOAD "$workspace"
+#     BASHPROF_INIT "$workspace"
 #
 #     BC_INSTR BASHPROF say STEP compile
 #     BC_INSTR BASHPROF ask NEXT
@@ -18,7 +19,10 @@
 # and is what brings the protocol into the shell in the first place. Every
 # other way in is under `bashprof --help` and `bashcap --help`.
 #
-# The client feeds the same directory to every step and reads nothing back;
+# The client feeds the same directory to every step and reads nothing back.
+# The address is absolute because it outlives this shell's own cwd;
+# initiation refuses a relative one.
+#
 # the server is a complete standalone program. Loading defines; initiation is
 # the client's own line — the rig's init function, or a raw `BC_JOIN`. The
 # session lasts as long as anyone holds the handle `coproc` gave: a subshell
