@@ -57,24 +57,27 @@ traits extending `Rig` with one provided `async fn`, so a rig declares which
 orchestrations it supports by implementing them. A session lasts as long as
 anyone who could still speak, and nothing inside a rig ends one.
 
-**One coordinate, passed; no label in the core.** The workspace directory is
-the session's only coordinate — every fifo and file is `<dir>/…`, and the
-address is `<dir>/session.bash`: the generated invocation a shell sources to
-join. It is two lines — source the generic prelude, then source the rig's
-bash with the dir as `$1` — and joining is the rig's bash's own text:
-`BC_JOIN <LABEL> "$1" [word…]`, zero, one or many labels. The label is client
-vocabulary, the same species as a message's leading word; Rust is never told
-it. Nothing self-locates, and the address names the workspace
-(`${BC_SESSION%/*}`). A serving client chose the dir (`--at`, required), so the
-line it reads back is a value its own choice fixed — the read is what says
-the session is laid. A driven subject's environment is **exactly what the
-run's closure returned**: `run(argv, environment)` / `run_at(at, argv,
+**One coordinate, owned; no label in the core.** The workspace directory is
+the session's address and its only coordinate — every fifo and file is
+`<dir>/…`, modelled once by `Layout`, and the session holds `<dir>/lock`
+`flock`ed from before it touches anything until after its fifos are gone: an
+occupied directory is refused, a killed predecessor's leavings are swept at
+the next open, and the kernel releases the hold on any death. A prescribed
+directory must exist — making it is the host's job. A shell joins by
+sourcing `<dir>/session.bash`, the generated invocation: two argumentless
+lines — the generic prelude, then the rig's bash, which `Rig::bash(&Layout)`
+generated with the coordinate baked in, quoted. Joining is that text's own
+business: `BC_JOIN <LABEL> <dir> [word…]`, zero, one or many labels. The
+label is client vocabulary, the same species as a message's leading word;
+Rust is never told it. A serving session answers to nobody — liveness is
+the workspace's to show, the join fifo present exactly while it serves
+(`BC_UP`). A driven subject's environment is **exactly what the run's
+closure returned**: `run(argv, environment)` / `run_at(at, argv,
 environment)` with `environment: FnOnce(&Layout) -> Vec<(OsString,
 OsString)>` — the core exports nothing and names no variable.
-`Layout::bc_session()` and `Layout::bash_env()` are the two usual pairs, pure
-material for the closure; the tools' `--reach` maps onto them. `JOINING` is
-every way a script joins, in bash, and both binaries print it under
-`--help`.
+`Layout::bash_env()` is the usual pair, pure material for the closure; the
+tools' `--reach` maps onto it. `JOINING` is every way a script joins, in
+bash, and both binaries print it under `--help`.
 
 Every instrument that reports a walk is composed by `stack::with_walk(&[…])`,
 which puts `stack.bash` first: `__bc_stack` has to be defined before anything
@@ -84,7 +87,7 @@ calls it, and that rule lives there rather than at each tool.
 
 | moment | started by | effect |
 |---|---|---|
-| join | the rig's bash, at source — `BC_JOIN <LABEL> "$1" [word…]` | the shell makes its pipe, announces it on the control fifo with its account — the words the join brought included — and blocks until the run has opened it. A fork does the same on its first word |
+| join | the rig's bash, at source — `BC_JOIN <LABEL> <dir> [word…]` | the shell makes its pipe, announces it on the control fifo with its account — the words the join brought included — and blocks until the run has opened it. A fork does the same on its first word |
 | say | the subject | `BC_INSTR <LABEL> say …` ships an arglist and returns |
 | ask | the subject | `BC_INSTR <LABEL> ask …` ships one, blocks, and runs what comes back |
 
@@ -128,11 +131,11 @@ An **answer** is an arglist too, and it is a command the shell runs:
 
 Implement `Rig` — `bash`, `joined` — and a `Reacting` for what it builds,
 unless `Vec<Message>` or `()` is what you want. The rig's bash states its own
-joins — `BC_JOIN <LABEL> "$1"`, with any words it wants on the shell
-afterwards (`Shell::brought`). To drive it, `impl Driving for It {}` — empty,
-the role opt-in — and state the environment at the call:
-`it.run(argv, |at| vec![at.bc_session(), at.bash_env()])`; to serve it,
-`impl Serving` and pass the workspace the client prescribed. What several shells share is yours, held by the rig and handed to
+joins — `BC_JOIN <LABEL> <dir>`, the dir spelled with `emit_scalar`, with
+any words it wants on the shell afterwards (`Shell::brought`). To drive it,
+`impl Driving for It {}` — empty, the role opt-in — and state the
+environment at the call: `it.run(argv, |at| vec![at.bash_env()])`; to serve
+it, `impl Serving` and pass the workspace the client prescribed and made. What several shells share is yours, held by the rig and handed to
 each reaction it builds — an `Rc<RefCell<_>>` is enough, and its borrow is
 never held across an `.await`.
 

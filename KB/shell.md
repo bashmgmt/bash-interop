@@ -63,8 +63,8 @@ at an interactive prompt — words a script can also produce. Which is which is 
 property of the shell, and the shell is the only thing that knows:
 `Invocation::from_a_file` is `command.is_none() && !standard_input`.
 
-An interactive shell can join *only* by sourcing the address itself: bash reads
-`BASH_ENV` for non-interactive shells alone. Nothing about the mechanism cares
+An interactive shell can join *only* by sourcing the session file itself:
+bash reads `BASH_ENV` for non-interactive shells alone. Nothing about the mechanism cares
 — the same `BC_JOIN` runs however the shell got there, under either
 orchestration. See [scoping.md](scoping.md) and
 [stack.md](stack.md#bashs-own-words).

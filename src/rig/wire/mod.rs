@@ -7,9 +7,10 @@ mod message;
 mod pipe;
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use bash_strings::emit_scalar;
+use super::Layout;
 use crate::failure::{Doing, Failure};
 
 pub(crate) use control::{Announced, Control};
@@ -20,54 +21,24 @@ pub use message::{field, Answer, Message, Micros, Pid, Stamp, Verb};
 /// The client half, shipped verbatim.
 const PRELUDE: &str = include_str!("prelude.bash");
 
-/// The generated invocation, and the address: what a shell sources to join.
-const SESSION: &str = "session.bash";
-
-/// The control fifo, made and held by the run; the bash names it the same way.
-pub(crate) fn join(dir: &Path) -> PathBuf {
-    dir.join("join")
-}
-
-/// One shell's pipe, made by the shell.
-pub(crate) fn up(dir: &Path, token: &str) -> PathBuf {
-    dir.join(format!("up.{token}"))
-}
-
-/// One shell's reply pipe, made by the run before the shell can ask.
-pub(crate) fn rep(dir: &Path, token: &str) -> PathBuf {
-    dir.join(format!("rep.{token}"))
-}
-
 pub(crate) fn mkfifo(path: &Path) -> Result<(), Failure> {
     nix::unistd::mkfifo(path, nix::sys::stat::Mode::S_IRWXU)
         .doing(|| format!("making the fifo {}", path.display()))
 }
 
-/// Lays the session's bash into `dir` — the protocol's, the rig's, and the
-/// generated invocation naming both — and returns the address as text: it
-/// crosses into bash and onto the announce line, so it is validated whole
-/// here. `dir` must be absolute: the invocation spells it into every path,
-/// and hands it to the rig's bash as `$1` — which is where joining happens.
-pub(crate) fn lay(dir: &Path, bash: &str) -> Result<String, Failure> {
-    let laying = || format!("laying the session at {}", dir.display());
-    let dir = dir
-        .to_str()
-        .filter(|dir| !dir.contains('\n'))
-        .ok_or_else(|| Failure::new(laying(), "the workspace path is not one line of text"))?;
+/// Lays the session's bash into the workspace — the protocol's, the rig's,
+/// and the generated invocation naming both, written last: once it is there,
+/// the session is sourceable. The rig's text bakes the coordinate itself,
+/// so the invocation passes nothing.
+pub(crate) fn lay(at: &Layout, bash: &str) -> Result<(), Failure> {
+    let invocation =
+        format!("source {}\nsource {}\n", emit_scalar(&at.prelude()), emit_scalar(&at.rig()));
 
-    let invocation = format!(
-        "source {}\nsource {} {}\n",
-        emit_scalar(&format!("{dir}/prelude.bash")),
-        emit_scalar(&format!("{dir}/rig.bash")),
-        emit_scalar(dir),
-    );
-
-    for (name, body) in [("prelude.bash", PRELUDE), ("rig.bash", bash), (SESSION, &invocation)] {
-        let file = format!("{dir}/{name}");
+    for (file, body) in [(at.prelude(), PRELUDE), (at.rig(), bash), (at.session(), &invocation)] {
         fs::write(&file, body).doing(|| format!("writing {file}"))?;
     }
 
-    Ok(format!("{dir}/{SESSION}"))
+    Ok(())
 }
 
 #[cfg(test)]
@@ -123,23 +94,23 @@ mod tests {
         }
     }
 
-    /// The invocation is where the coordinate is spelled, quoted: a workspace
-    /// path bash would split or expand still joins, handed to the rig's bash
-    /// as its `$1`.
+    /// The invocation names the two files, quoted: a workspace path bash
+    /// would split or expand still sources. The rig's text is laid as given —
+    /// the coordinate is already baked into it.
     #[test]
-    fn the_invocation_spells_the_coordinate() {
+    fn the_invocation_names_the_session_s_files() {
         let temp = tempfile::tempdir().unwrap();
         let dir = temp.path().join("it's $HERE");
         std::fs::create_dir(&dir).unwrap();
+        let at = Layout::new(dir.clone()).unwrap();
 
-        let address = lay(&dir, "words\n").unwrap();
+        lay(&at, "words\n").unwrap();
 
         let dir = dir.to_str().unwrap();
-        assert_eq!(address, format!("{dir}/session.bash"));
         assert_eq!(
-            std::fs::read_to_string(&address).unwrap(),
+            std::fs::read_to_string(at.session()).unwrap(),
             format!(
-                "source '{q}/prelude.bash'\nsource '{q}/rig.bash' '{q}'\n",
+                "source '{q}/prelude.bash'\nsource '{q}/rig.bash'\n",
                 q = dir.replace('\'', r"'\''"),
             ),
         );

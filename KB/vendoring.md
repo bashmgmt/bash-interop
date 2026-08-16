@@ -22,15 +22,16 @@ assets/bashprof.bash      BASHPROF_TIMETHIS                       → __bp_begin
 src/bashprof/effect.bash  __bp_begin, __bp_end
 ```
 
-`assets/joining.bash` is the one file with no second delivery: `BC_START` and
-`BC_LEAVE` run before there is a session to inject anything into, so a client
-vendors them and nothing injects them. It has no guard either — a script that
-calls `BC_START` wants a session, and the tool being absent is a missing command
-rather than a call site to neutralise. See
+`assets/joining.bash` is the one file with no second delivery: `BC_START`,
+`BC_UP` and `BC_ATTACH` run before there is a session to inject anything
+into, so a client vendors them and nothing injects them. It has no guard
+either — a script that calls `BC_START` wants a session, and the tool being
+absent is a missing command rather than a call site to neutralise. See
 [rig.md](rig.md#the-coprocess-convention). Every way a script joins — driven
-and already joined, `source "$BC_SESSION"` by hand, only if there is a session,
-`BC_START`, and the guard below — is `bash::rig::JOINING`, printed by
-`bashprof run --help` and `bashcap run --help`.
+and already joined, `source "$BC_SESSION/session.bash"` by hand, only if
+there is a session, started as a coprocess, and the guard below — is
+`bash_interop::rig::JOINING`, printed by `bashprof run --help` and
+`bashcap run --help`.
 
 The client sources the words unconditionally and guards the hook — silently: a
 polyfilled hook does nothing and says nothing, and a client that wants a notice
@@ -54,7 +55,7 @@ NAME` prints the entire body.
 Under `--reach bash-env` the tool defines everything through `BASH_ENV`, which
 bash sources **before the script's first line**, in every shell; joined by hand
 or under `serve`, the tool's definitions arrive where the script says `source
-"$BC_SESSION"` or `BC_START`. The client's `source` of the words therefore
+"$BC_SESSION/session.bash"` or `BC_ATTACH`. The client's `source` of the words therefore
 comes second, or redefines the words with the same bytes, which changes
 nothing. The guard sits on the half that differs, so a client cannot displace
 the real effect whichever way round the two arrive — provided the guard comes

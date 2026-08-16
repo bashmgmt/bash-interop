@@ -28,7 +28,7 @@ each shell said or what the reaction made of it.
 | **subject** | the bash program under instrumentation: the command line a driven run starts, or the script that started a server |
 | **shell** | one bash process that joined. A `( … )`, a `$( … )`, a `bash -c` are each a shell of their own; `Shell` is what one is |
 | **session** | one run: a workspace, a control fifo, a pipe and a task per shell, until the *watch* fires |
-| **address** | the session's one entry point — `<dir>/session.bash`, the generated invocation a shell sources to join. `BC_SESSION` in a driven subject's environment; a serving client chose `<dir>` itself. Its dirname is the workspace |
+| **address** | the workspace directory itself. A shell joins by sourcing `<dir>/session.bash`, the generated invocation; a serving client chose and made `<dir>`, and the tools' convention carries it as `BC_SESSION` |
 | **label** | the word after `BC_INSTR` and `BC_JOIN`: the write-time-stable name a client's words speak, bound to the coordinate at join. A bash-side lookup key so one process can hold several sessions; Rust is never told it |
 | **rig** | a description: the bash the subject gets — joins included — and how a reaction is built once a shell is there. `Rig` |
 | **reaction** | what one shell talks to, for as long as it can speak. `Reacting`, made per shell by `Rig::joined`, run as a task of its own |
@@ -37,9 +37,9 @@ each shell said or what the reaction made of it.
 | **account** | what a shell says of itself when it announces: which bash, how it was started, what it had on, and the words its join brought. It becomes `Shell`, and a reaction is built from it |
 | **kept** | what a reaction leaves behind when its shell is gone. `Reacting::Kept`; `Attended::kept` |
 | **driving / serving** | who started the shells: Rust ran a command line and owns it, or a bash script started the server and holds the handle. `Driving`, `Serving` |
-| **environment** | the run's, whole: `run(argv, environment)` takes a closure over the settled `Layout`, and its return is everything the subject's environment gets. `bc_session()`/`bash_env()` are the usual pair |
-| **invocation** | the one generated bash file, `session.bash`: source the prelude, then the rig's bash with the workspace as `$1`. Self-contained, and it is the address |
-| **workspace** | the directory holding the session's files and fifos — the session's one coordinate, passed at every join. `Layout::dir`; a serving client prescribes it (`--at`) |
+| **environment** | the run's, whole: `run(argv, environment)` takes a closure over the settled `Layout`, and its return is everything the subject's environment gets. `bash_env()` is the usual pair |
+| **invocation** | the one generated bash file, `session.bash`: source the prelude, then the rig's bash, both argumentless. Self-contained; the rig's text carries the coordinate baked in |
+| **workspace** | the directory holding the session's files and fifos — the session's one coordinate and its address, locked (`<dir>/lock`) for the session's life. `Layout`; a prescribed one (`run_at`, `--at`) exists before the session does |
 | **watch** | the descriptor a session ends on — the subject's pidfd, or the handle a client holds. Observed, never signalled |
 
 ## The shape
@@ -47,10 +47,11 @@ each shell said or what the reaction made of it.
 ```
  subject's process tree                     workspace <dir>/                    one current-thread runtime
  ────────────────────────                   ──────────────────                  ──────────────────────────
- bash ── source "$BC_SESSION" ─────────►    session.bash  ── the address: source prelude,
-   │                                        prelude.bash     source rig.bash '<dir>'
-   │                                        rig.bash      ── Rig::bash — words, effects, joins
-   │  BC_JOIN LABEL "$1" ── announce ──►    join          ── frames ──►  Session::serve  ── Rig::joined ──┐
+ bash ── source <dir>/session.bash ────►    session.bash  ── source prelude, source rig.bash
+   │                                        prelude.bash  ── generic: BC_JOIN, BC_INSTR
+   │                                        rig.bash      ── Rig::bash(&Layout) — words, effects, joins
+   │                                        lock          ── flock()ed while the session lives
+   │  BC_JOIN LABEL <dir> ── announce ─►    join          ── frames ──►  Session::serve  ── Rig::joined ──┐
    │                 ── exec {fd}>up.tok ►  up.<token>    ── lines ───►  attend task ── Reacting::hear     │
    │  BC_INSTR ask   ◄─ read <&rep ───────  rep.<token>   ◄── answer ──             ── Reacting::answer ◄─┘
    ├─ ( subshell )   ── its own token, pipe, task ─────►                             ── Reacting::finish → Attended
@@ -73,28 +74,32 @@ BC_INSTR LABEL ask a b c   # ship it, block, run the answer; its status is the a
 ```
 
 Both name the label first, and the join binds it to the session's one
-coordinate — the workspace, `$1` of the rig's bash — which everything after
-the join reads from the label-keyed LUTs. The words after the dir are the
-caller's own, announced with every attach and landing on `Shell::brought`. A
-script joining by hand spells any dir it can name: `${BC_SESSION%/*}` — the
-address names the workspace. A label nobody joined is an error by absence:
+coordinate — the workspace, baked into the rig's bash — which everything
+after the join reads from the label-keyed LUTs. The words after the dir are
+the caller's own, announced with every attach and landing on
+`Shell::brought`. A script joining by hand spells any dir it can name:
+`"$BC_SESSION"` under the tools' convention, which carries the workspace.
+A label nobody joined is an error by absence:
 `BC_INSTR: label NOPE is not joined at build.bash:42` on stderr, status 125.
 
 How a script joins — `JOINING`, printed by `bashprof run --help` and `bashcap
 run --help`:
 
 ```bash
-# A shell under a driven run finds the address in its environment; under
+# A shell under a driven run finds the workspace in its environment; under
 # --reach bash-env it is already joined, otherwise it joins where it likes:
-source "$BC_SESSION"
+source "$BC_SESSION/session.bash"
 
 # A script that starts the tool itself, as a coprocess:
 source lib/joining.bash
-BC_START bashprof serve --at prof.d --into build.times   # start, sync, join
+mkdir -p prof.d
+BC_START bashprof serve --at prof.d --into build.times   # start; nothing awaited
+until BC_UP prof.d; do sleep 0.01; done                  # the workspace shows it
+BC_ATTACH prof.d                                         # join by the same dir
 BC_LEAVE                                       # let go, wait, return its status
 
 # Only if there is a session:
-[[ -n ${BC_SESSION-} ]] && source "$BC_SESSION"
+[[ -n ${BC_SESSION-} ]] && source "$BC_SESSION/session.bash"
 
 # The words a client vendors, and the polyfill for when nothing is listening —
 # after the join, so a session's own hooks win:
@@ -119,21 +124,27 @@ pub trait Rig {
     /// What talks to one shell.
     type Reaction: Reacting;
 
-    /// The rig's own bash, sourced with the session's workspace as `$1`.
-    /// Joining is its own text — `BC_JOIN <LABEL> "$1" [word…]` — and
-    /// `stack::with_walk(&[…])` composes it where a walk is reported.
-    fn bash(&self) -> String;
+    /// The rig's own bash, generated with the settled workspace in hand and
+    /// sourced with no arguments — the coordinate is baked in, spelled with
+    /// `emit_scalar`. Joining is its own text — `BC_JOIN <LABEL> <dir>
+    /// [word…]` — and `stack::with_walk(&[…])` composes it where a walk is
+    /// reported.
+    fn bash(&self, at: &Layout) -> String;
 
     /// A shell has joined and everything about it is known. Build its reaction.
     /// Awaited in the accept loop: a slow `joined` delays the next join, nothing else.
     async fn joined(&self, at: &Layout, shell: Arc<Shell>) -> Result<Self::Reaction, Failure>;
 }
 
-/// Where the session's files ended up. `address` is `<dir>/session.bash` —
-/// text, because it crosses into bash; validated whole at open.
-pub struct Layout { pub dir: PathBuf, pub address: String }
+/// The workspace: the one coordinate — text, because it crosses into bash;
+/// validated at construction — and the model of the files in it. The
+/// constant names live nowhere else.
+pub struct Layout { /* dir: String */ }
 impl Layout {
-    /// The address, spelled for `BASH_ENV`: `("BASH_ENV", <address>)`.
+    pub fn path(&self) -> &Path;                    // the workspace, for Rust
+    pub fn text(&self) -> &str;                     // the same, for a rig's bash
+    pub fn session(&self) -> String;                // <dir>/session.bash
+    /// The session file, spelled for `BASH_ENV`.
     pub fn bash_env(&self) -> (OsString, OsString);
 }
 
@@ -170,27 +181,24 @@ pub trait Driving: Rig {
     async fn run<A, E>(&self, argv: &[A], environment: E) -> Result<Run<Kept<Self>>, Failure>
     where A: AsRef<OsStr>, E: FnOnce(&Layout) -> Vec<(OsString, OsString)>;
 
-    /// Provided. The caller's directory instead — created if missing, left
-    /// behind to read.
+    /// Provided. The caller's directory instead — it exists, and is the
+    /// caller's to have made — left behind to read.
     async fn run_at<A, E>(&self, at: &Path, argv: &[A], environment: E) -> Result<Run<Kept<Self>>, Failure>
     where A: AsRef<OsStr>, E: FnOnce(&Layout) -> Vec<(OsString, OsString)>;
 }
 
-/// Bash orchestrates: a running script named the workspace, started the
-/// server, and holds a handle.
+/// Bash orchestrates: a running script named and made the workspace,
+/// started the server, and holds a handle.
 pub trait Serving: Rig {
-    /// Provided. `at` is the workspace the client prescribed — required, no
-    /// fallback, created if missing, left behind — so the client knows the
-    /// address before this runs. `announce` is handed it once, after the
-    /// session is laid: the client's blocking read is what says it is ready.
-    /// Serving ends when the last holder of `held` lets go. A `Failure` still
-    /// sees the session out.
-    async fn serve<A>(&self, at: &Path, held: OwnedFd, announce: A)
-        -> Result<Served<Kept<Self>>, Failure>
-    where A: FnOnce(&str) -> Result<(), Failure>;
+    /// Provided. `at` is the workspace the client prescribed — required,
+    /// existing, left behind. Nothing is handed back: liveness is the
+    /// workspace's to show (the join fifo, `BC_UP`), and the client joins by
+    /// the same directory it gave the server. Serving ends when the last
+    /// holder of `held` lets go. A `Failure` still sees the session out.
+    async fn serve(&self, at: &Path, held: OwnedFd) -> Result<Served<Kept<Self>>, Failure>;
 
-    /// Provided. The client started this process as a coprocess: it holds our
-    /// stdin, and reads the address from our stdout. `BC_START` is the other half.
+    /// Provided. The client started this process as a coprocess: it holds
+    /// our stdin, and lets go to end the session. `BC_START` is the other half.
     async fn serve_coprocess(&self, at: &Path) -> Result<Served<Kept<Self>>, Failure>;
 }
 
@@ -279,9 +287,10 @@ impl Rig for Deploying {
     type Reaction = Told;
 
     /// A word the subject can say in every shell, joined under the label it
-    /// speaks: `$1` is the session's workspace.
-    fn bash(&self) -> String {
-        "STAGE() { BC_INSTR DEPLOY say STAGE \"$@\"; }\nBC_JOIN DEPLOY \"$1\"\n".into()
+    /// speaks; the workspace is baked in, quoted.
+    fn bash(&self, at: &Layout) -> String {
+        let dir = bash_strings::emit_scalar(at.text());
+        format!("STAGE() {{ BC_INSTR DEPLOY say STAGE \"$@\"; }}\nBC_JOIN DEPLOY {dir}\n")
     }
 
     /// The shell is a member from construction, never a parameter afterwards.
@@ -321,7 +330,7 @@ async fn main() -> Result<(), Failure> {
     // The closure's return is the subject's whole environment: the usual pair
     // has every non-interactive bash in the tree join as it starts.
     let ran = Deploying
-        .run(&["bash", "deploy.bash"], |at| vec![at.bc_session(), at.bash_env()])
+        .run(&["bash", "deploy.bash"], |at| vec![at.bash_env()])
         .await?
         .whole()?;   // one entry per shell
     for at in &ran.shells {
@@ -359,14 +368,17 @@ BC_LEAVE                           # let go, wait, the server's status
 
 Names in `src/rig/`: `session.rs`, `attend.rs`, `watch.rs`, `wire/`.
 
-1. **Open.** The workspace — a temporary one under `run`, the caller's under
-   `run_at` and `serve` — is made and canonicalised, the dir's spelling
-   validated, the control fifo `<dir>/join` made and held read-write (so it
-   never reaches end of input), and three files written: the generic
-   `prelude.bash`, `rig.bash` (`Rig::bash`), and the generated invocation
-   `session.bash` — which is `Layout::address`.
+1. **Open.** The workspace — a temporary one under `run`, made; the
+   caller's under `run_at` and `serve`, which must exist — is canonicalised
+   and its spelling validated (`Layout::new`); `<dir>/lock` is `flock`ed —
+   an occupied workspace is a refusal — and stale fifos of a killed
+   predecessor are swept; the control fifo `<dir>/join` is made and held
+   read-write (so it never reaches end of input); and three files are
+   written, the invocation last: the generic `prelude.bash`, `rig.bash`
+   (`Rig::bash(&Layout)`, the coordinate baked in), and the generated
+   `session.bash`.
 2. **A shell joins.** Sourcing the invocation sources the prelude, then the
-   rig's bash with the workspace as `$1`; its `BC_JOIN LABEL "$1" [word…]`
+   rig's bash, argumentless; its `BC_JOIN LABEL <dir> [word…]`
    binds the coordinate, keeps the words, and attaches: the shell takes its
    account (one array literal, its `$EPOCHREALTIME` first, the brought words
    last), makes `up.<token>`, writes token and account to `join` in frames of
@@ -386,8 +398,9 @@ Names in `src/rig/`: `session.rs`, `attend.rs`, `watch.rs`, `wire/`.
 5. **The end.** `Watch` is an `AsyncFd`: the subject's pidfd under `Driving`,
    the client's handle under `Serving`. When it fires, `Driving` kills the
    group and reaps; the session then closes: shells announced and not opened
-   are released, `join` unlinked, every task reads what its pipe still holds
-   and finishes.
+   are released, `join` unlinked (a guard removes it on unwind too, so its
+   presence stays a truthful liveness signal), every task reads what its
+   pipe still holds and finishes; the lock goes last.
 
 Guarantees a caller leans on: a message is a bash array literal on one line
 and arrives whole at any width (one writer per pipe); a shell that says one

@@ -54,8 +54,7 @@ pub struct Whole<K> {
 /// caller wanting a launcher puts one there: `env TARGET=staging -- bash
 /// x.bash` is the whole story. `environment` is handed the settled [`Layout`]
 /// and its return is the subject's **whole** environment delta — the core
-/// adds nothing; [`Layout::bc_session`] and [`Layout::bash_env`] are the two
-/// usual pairs.
+/// adds nothing; [`Layout::bash_env`] is the usual pair.
 ///
 /// | | |
 /// |---|---|
@@ -78,8 +77,9 @@ pub trait Driving: Rig {
         driven(self, None, argv, environment).await
     }
 
-    /// The caller's directory instead — created if missing, left behind: a
-    /// reading taken later may follow source paths into it.
+    /// The caller's directory instead — it exists, and is the caller's to
+    /// have made — left behind: a reading taken later may follow source
+    /// paths into it.
     async fn run_at<A, E>(
         &self,
         at: &Path,

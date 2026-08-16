@@ -31,7 +31,10 @@ mod transparency;
 mod transport;
 
 
+use std::ffi::OsString;
 use std::sync::Arc;
+
+use bash_strings::emit_scalar;
 
 use bash_interop::rig::{
     heard, Attended, Driving, Failure, Layout, Message, Rig, Shell, Whole,
@@ -43,8 +46,17 @@ use bash_interop::scratch::{bash, Scripts};
 pub const ENTRY: &str = "main.bash";
 
 /// The join the proofs' rigs state: `BC_INSTR KEEP say …` is how their
-/// scripts speak, and `$1` is the workspace the invocation hands the bash.
-pub const JOIN: &str = "BC_JOIN KEEP \"$1\"\n";
+/// scripts speak, and the workspace is baked in, quoted.
+pub fn join(at: &Layout) -> String {
+    format!("BC_JOIN KEEP {}\n", emit_scalar(at.text()))
+}
+
+/// The convention a by-hand client reads: the workspace as `BC_SESSION`,
+/// sourced as `"$BC_SESSION/session.bash"`. A client's spelling, not the
+/// core's: the core adds nothing to any environment.
+pub fn bc_session(at: &Layout) -> (OsString, OsString) {
+    (OsString::from("BC_SESSION"), OsString::from(at.text()))
+}
 
 /// Keeps every message, and answers nothing.
 pub struct Keeping;
@@ -53,8 +65,8 @@ impl Rig for Keeping {
     type Reaction = Vec<Message>;
 
     /// No words of its own in the subject's shells: only the join.
-    fn bash(&self) -> String {
-        JOIN.to_string()
+    fn bash(&self, at: &Layout) -> String {
+        join(at)
     }
 
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Vec<Message>, Failure> {

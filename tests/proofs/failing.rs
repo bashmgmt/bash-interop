@@ -12,7 +12,7 @@ use bash_interop::rig::{
 };
 
 use bash_interop::scratch::{bash, Scripts};
-use crate::{behind, gone, report, script, ENTRY, JOIN};
+use crate::{behind, gone, report, script, ENTRY};
 
 /// Fails the first time it is given a message of the kind it breaks on.
 struct Breaking {
@@ -27,8 +27,8 @@ struct Breaks {
 impl Rig for Breaking {
     type Reaction = Breaks;
 
-    fn bash(&self) -> String {
-        JOIN.to_string()
+    fn bash(&self, at: &Layout) -> String {
+        crate::join(at)
     }
 
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Breaks, Failure> {

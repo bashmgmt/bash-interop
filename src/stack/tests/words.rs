@@ -21,7 +21,6 @@ WALK() {
     __bc_stack __w 2
     BC_INSTR WALK say WALK "${__w[@]}"
 }
-BC_JOIN WALK "$1"
 "#;
 
 struct Walking;
@@ -36,8 +35,11 @@ struct Walks {
 impl Rig for Walking {
     type Reaction = Walks;
 
-    fn bash(&self) -> String {
-        stack::with_walk(&[BASH])
+    fn bash(&self, at: &Layout) -> String {
+        stack::with_walk(&[
+            BASH,
+            &format!("BC_JOIN WALK {}\n", bash_strings::emit_scalar(at.text())),
+        ])
     }
 
     async fn joined(&self, _at: &Layout, shell: Arc<Shell>) -> Result<Walks, Failure> {

@@ -72,9 +72,9 @@ rather than unbound.
 
 Under a driven run bash reads `BASH_ENV` while the shell is still starting,
 **before** the subject's own `set -u` line. Only function bodies run under it.
-A client that joins a session of its own has `set -u` on before it sources the
-address, so the top level of the invocation — the prelude, then the rig's own
-bash with its joins — runs under it too. Every `__BC__*` name is assigned
+A client that joins a session of its own has `set -u` on before it sources
+the session file, so the top level of the invocation — the prelude, then the
+rig's own bash with its joins — runs under it too. Every `__BC__*` name is assigned
 there before anything reads it, which is what makes the second case hold.
 
 ## `IFS` is the subject's, and `[*]` reads it

@@ -25,8 +25,11 @@ struct Attaching;
 impl Rig for Attaching {
     type Reaction = Vec<Message>;
 
-    fn bash(&self) -> String {
-        "TELL() { BC_INSTR TELL say TELL \"$@\"; }\nBC_JOIN TELL \"$1\"\n".to_string()
+    fn bash(&self, at: &Layout) -> String {
+        format!(
+            "TELL() {{ BC_INSTR TELL say TELL \"$@\"; }}\nBC_JOIN TELL {}\n",
+            bash_strings::emit_scalar(at.text()),
+        )
     }
 
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Vec<Message>, Failure> {
@@ -36,19 +39,25 @@ impl Rig for Attaching {
 
 impl Serving for Attaching {}
 
-/// The client's side of joining, as `BC_START` does it: the address into
-/// `BC_SESSION`, exported for the script's children, sourced; then on with its
-/// own script.
-const JOINING: &str = r#"export BC_SESSION="$1"; source "$BC_SESSION"; source "$2""#;
+/// The client's side, as the vendored words do it: probe the directory it
+/// named until the session is up, attach by sourcing the file laid there,
+/// export the coordinate for its children; then on with its own script.
+const JOINING: &str = r#"
+until [[ -p "$1/join" ]]; do sleep 0.01; done
+source "$1/session.bash"
+export BC_SESSION="$1"
+source "$2"
+"#;
 
 /// A shell of the initiator's own, holding the session's handle on its
 /// standard output — what a client holds when it started the server as a
 /// coprocess. It hangs up when the last shell holding it is gone, or when the
-/// client closes it deliberately.
-fn joining(address: &str, script: &Path, handle: OwnedFd) -> Child {
+/// client closes it deliberately. It is started before the server: nothing is
+/// read back, so the probe is what says the session is up.
+fn joining(dir: &Path, script: &Path, handle: OwnedFd) -> Child {
     Command::new("bash")
         .args(["-c", JOINING, "--"])
-        .arg(address)
+        .arg(dir)
         .arg(script)
         .stdout(Stdio::from(handle))
         .spawn()
@@ -56,28 +65,22 @@ fn joining(address: &str, script: &Path, handle: OwnedFd) -> Child {
 }
 
 /// Serve `scripts`' entry in a shell started for it — the workspace is the
-/// initiator's to name, so this side makes one, and the address is the file
-/// under it this side could already spell — and hand back the shells that
-/// joined beside how that shell ended.
+/// initiator's to name and make, and the same directory is all the client
+/// holds — and hand back the shells that joined beside how that shell ended.
+/// The join fifo brackets the session: absent before, present exactly while
+/// it serves, gone when it is over.
 async fn joined(scripts: &Scripts) -> (Vec<Attended<Vec<Message>>>, std::process::ExitStatus) {
     let workspace = tempfile::tempdir().expect("a workspace to prescribe");
     let (held, handle) = pipe().expect("a handle");
+    assert!(!workspace.path().join("join").exists(), "nothing serves yet");
 
-    let mut child = None;
-    let served = Attaching
-        .serve(workspace.path(), held.into(), |address| {
-            let expected = workspace.path().canonicalize().unwrap().join("session.bash");
-            assert_eq!(Path::new(address), expected, "the prescribed dir, as prescribed");
-
-            child = Some(joining(address, &scripts.at(ENTRY), handle.into()));
-            Ok(())
-        })
-        .await
-        .expect("the session");
+    let mut child = joining(workspace.path(), &scripts.at(ENTRY), handle.into());
+    let served = Attaching.serve(workspace.path(), held.into()).await.expect("the session");
 
     assert!(served.failed.is_none(), "the session closed up cleanly");
+    assert!(!workspace.path().join("join").exists(), "the liveness signal went with it");
 
-    let status = child.expect("the shell").wait().expect("reaping the shell");
+    let status = child.wait().expect("reaping the shell");
 
     (served.shells, status)
 }
@@ -133,8 +136,8 @@ async fn a_shell_the_session_outlived_is_left_to_its_own_devices() {
 }
 
 /// How far a joined session reaches is the client's decision. Exporting
-/// `BASH_ENV` to the address puts the session in every process the script
-/// starts, which is what a driven run does for the tree it creates.
+/// `BASH_ENV` to the session file puts the session in every process the
+/// script starts, which is what a driven run does for the tree it creates.
 #[tokio::test]
 async fn a_joined_shell_may_publish_the_address_to_its_children() {
     let scripts = Scripts::of(&[
@@ -142,7 +145,7 @@ async fn a_joined_shell_may_publish_the_address_to_its_children() {
             ENTRY,
             r#"
             TELL parent "$BASHPID"
-            export BASH_ENV="$BC_SESSION"
+            export BASH_ENV="$BC_SESSION/session.bash"
             bash "${BASH_SOURCE[0]%/*}/child.bash"
             "#,
         ),
@@ -165,7 +168,7 @@ async fn a_joined_shell_may_publish_the_address_to_its_children() {
 /// `BASH_ENV` for non-interactive shells alone, so an interactive one can join
 /// a session only by sourcing the address itself. Its code arrives on standard
 /// input, and standard output is the handle it holds.
-fn interactively(address: &str, handle: OwnedFd) -> Child {
+fn interactively(dir: &Path, handle: OwnedFd) -> Child {
     let mut shell = Command::new("bash")
         .args(["--norc", "--noprofile", "-i"])
         .stdin(Stdio::piped())
@@ -174,7 +177,10 @@ fn interactively(address: &str, handle: OwnedFd) -> Child {
         .spawn()
         .expect("an interactive shell");
 
-    let typed = format!("source \"{address}\"\nTELL at-the-prompt\n");
+    let dir = dir.display();
+    let typed = format!(
+        "until [[ -p \"{dir}/join\" ]]; do sleep 0.01; done\nsource \"{dir}/session.bash\"\nTELL at-the-prompt\n"
+    );
     shell.stdin.take().expect("its input").write_all(typed.as_bytes()).expect("typing at it");
 
     shell
@@ -192,16 +198,10 @@ async fn a_shell_says_what_it_is_rather_than_being_guessed_at() {
     let workspace = tempfile::tempdir().expect("a workspace to prescribe");
     let (held, handle) = pipe().expect("a handle");
 
-    let mut child = None;
-    let served = Attaching
-        .serve(workspace.path(), held.into(), |address| {
-            child = Some(interactively(address, handle.into()));
-            Ok(())
-        })
-        .await
-        .expect("the session");
+    let mut child = interactively(workspace.path(), handle.into());
+    let served = Attaching.serve(workspace.path(), held.into()).await.expect("the session");
 
-    child.expect("the shell").wait().expect("reaping the shell");
+    child.wait().expect("reaping the shell");
     assert!(served.failed.is_none(), "the session closed up cleanly");
 
     assert_eq!(behind(&served.shells, "TELL"), [["at-the-prompt"]], "{}", report(&served.shells));
@@ -221,26 +221,77 @@ async fn a_shell_says_what_it_is_rather_than_being_guessed_at() {
     assert!(shell.options.flags.has('i'));
 }
 
-/// A `Failure` before anything was served — the announcement itself — still
-/// sees the session out: the control fifo is unlinked, the three bash files
-/// remain, and the error is the announcer's own.
+/// A workspace is one session's at a time: the lock is taken before
+/// anything in it is touched, so a second server on the same directory is
+/// refused whole — no files rewritten, no fifo disturbed — while the first
+/// serves on.
 #[tokio::test]
-async fn a_failed_announcement_still_sees_the_session_out() {
+async fn an_occupied_workspace_is_refused() {
+    let workspace = tempfile::tempdir().unwrap();
+    let (held, handle) = pipe().expect("a handle");
+    let (second_held, _second_handle) = pipe().expect("a second handle");
+
+    let first = Attaching.serve(workspace.path(), held.into());
+    let second = async {
+        while !workspace.path().join("join").exists() {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        let refused = Attaching
+            .serve(workspace.path(), second_held.into())
+            .await
+            .err()
+            .expect("the second server must be refused");
+        assert!(refused.to_string().contains("already held by a live session"), "{refused}");
+        assert!(workspace.path().join("join").exists(), "the first session is undisturbed");
+
+        drop(handle);
+    };
+
+    let (served, ()) = tokio::join!(first, second);
+    assert!(served.expect("the first session").failed.is_none());
+}
+
+/// A predecessor that could not clean up — killed outright — leaves its
+/// fifos behind. The next session on that directory owns it the moment it
+/// holds the lock, sweeps them, and serves; when it is over, nothing of
+/// either is left but the bash files and the lock.
+#[tokio::test]
+async fn a_killed_predecessors_leavings_are_swept() {
     let temp = tempfile::tempdir().unwrap();
-    let at = temp.path().join("here");
-    let (held, _handle) = pipe().expect("a handle");
+    let at = temp.path();
+    for stale in ["join", "up.GHOST", "rep.GHOST"] {
+        nix::unistd::mkfifo(&at.join(stale), nix::sys::stat::Mode::S_IRWXU).unwrap();
+    }
 
-    let refused = Attaching
-        .serve(&at, held.into(), |_| Err(Failure::new("announcing", "the client is gone")))
-        .await
-        .err()
-        .expect("the announcer's failure must come back");
-    assert!(refused.to_string().contains("the client is gone"), "{refused}");
+    let scripts = Scripts::of(&[(ENTRY, "TELL revived\n")]);
+    let (held, handle) = pipe().expect("a handle");
+    let mut child = joining(at, &scripts.at(ENTRY), handle.into());
+    let served = Attaching.serve(at, held.into()).await.expect("the session");
+    child.wait().expect("reaping the shell");
 
-    let mut left: Vec<String> = std::fs::read_dir(&at)
+    assert_eq!(behind(&served.shells, "TELL"), [["revived"]], "{}", report(&served.shells));
+
+    let mut left: Vec<String> = std::fs::read_dir(at)
         .unwrap()
         .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
         .collect();
     left.sort();
-    assert_eq!(left, ["prelude.bash", "rig.bash", "session.bash"], "no fifo left behind");
+    assert_eq!(left, ["lock", "prelude.bash", "rig.bash", "session.bash"], "swept and closed");
+}
+
+/// A workspace nobody made is nobody's to invent: the prescribed directory
+/// must exist, and a missing one is a refusal that touches nothing.
+#[tokio::test]
+async fn a_missing_workspace_is_a_refusal() {
+    let temp = tempfile::tempdir().unwrap();
+    let at = temp.path().join("never-made");
+    let (held, _handle) = pipe().expect("a handle");
+
+    let refused = Attaching
+        .serve(&at, held.into())
+        .await
+        .err()
+        .expect("a missing workspace must be refused");
+    assert!(refused.to_string().contains("opening the prescribed workspace"), "{refused}");
+    assert!(!at.exists(), "and it was not invented");
 }

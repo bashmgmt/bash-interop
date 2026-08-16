@@ -58,10 +58,10 @@
 //!
 //! # #[tokio::main(flavor = "current_thread")]
 //! # async fn main() -> Result<(), Failure> {
-//! // The closure's return is the subject's whole environment: the usual pair
-//! // has every non-interactive bash in the tree join as it starts.
+//! // The closure's return is the subject's whole environment: the usual
+//! // pair has every non-interactive bash in the tree join as it starts.
 //! let ran = Deploying
-//!     .run(&["bash", "deploy.bash"], |at| vec![at.bc_session(), at.bash_env()])
+//!     .run(&["bash", "deploy.bash"], |at| vec![at.bash_env()])
 //!     .await?;
 //! for shell in ran.whole()?.shells {
 //!     println!("pid {} said {} things", shell.shell.pid, shell.kept.heard.len());
@@ -75,11 +75,12 @@
 //!
 //! | | who started the shells | how they find the address | what the session lasts for | what comes back |
 //! |---|---|---|---|---|
-//! | [`Driving`] | the run, in a process group of its own | exactly what the run's environment closure returned — [`Layout::bc_session`] and [`Layout::bash_env`] the usual pair | that process group | [`Run`], with the subject's [`ExitStatus`] |
-//! | [`Serving`] | a bash script, which named the workspace and started the server | its own choice: `<dir>/session.bash`, echoed back once the session is laid | whoever holds the handle | [`Served`] |
+//! | [`Driving`] | the run, in a process group of its own | exactly what the run's environment closure returned — [`Layout::bash_env`] the usual pair | that process group | [`Run`], with the subject's [`ExitStatus`] |
+//! | [`Serving`] | a bash script, which named and made the workspace and started the server | its own choice: it feeds the same directory to start, probe and attach | whoever holds the handle | [`Served`] |
 //!
-//! Either way, the address is the file a shell sources to join, and
-//! [`JOINING`] shows every way a script does that.
+//! Either way, the address is the workspace directory; a shell joins by
+//! sourcing the session file laid inside it, and [`JOINING`] shows every way
+//! a script does that.
 //!
 //! **A session lasts as long as anyone who could still speak.** Nothing inside
 //! a rig ends one.
@@ -125,7 +126,7 @@ pub use crate::failure::{Doing, Failure};
 /// ```
 pub const JOINING: &str = include_str!("joining.txt");
 
-/// The client half of the coprocess convention, as text: `BC_START` and
+/// The client's words, as text: `BC_START`, `BC_UP`, `BC_ATTACH`,
 /// `BC_LEAVE`. A client vendors it (`lib/joining.bash`); a crate carrying a
 /// vendored copy asserts it against this, so the two are the same bytes.
 pub const JOINING_BASH: &str = include_str!("../../assets/joining.bash");
@@ -138,7 +139,7 @@ pub const JOINING_BASH: &str = include_str!("../../assets/joining.bash");
 ///
 /// | it is handed | it produces |
 /// |---|---|
-/// | [`&Layout`](Layout) — `dir`, and `address`, what a shell sources | [`Self::Reaction`](Rig::Reaction) |
+/// | [`&Layout`](Layout) — the workspace, and the files in it | [`Self::Reaction`](Rig::Reaction) |
 /// | [`Arc<Shell>`](Shell) — `bash: Bash`, `options: Options`, `brought`, `joined: Stamp` | |
 ///
 /// The rig's bash is laid beside the protocol's own by the session;
@@ -149,10 +150,13 @@ pub trait Rig {
     /// What reacts to one shell.
     type Reaction: Reacting;
 
-    /// The rig's own bash. The invocation sources it with the session's
-    /// workspace as `$1`; joining — which labels, with which words, or none —
-    /// is this text's own business: `BC_JOIN <LABEL> "$1" [word…]`.
-    fn bash(&self) -> String;
+    /// The rig's own bash, generated with the settled workspace in hand.
+    /// The invocation sources it with no arguments — the subject's own `$@`
+    /// is visible, never to be written to — and the coordinate is baked in,
+    /// spelled with [`bash_strings::emit_scalar`]. Joining — which labels,
+    /// with which words, or none — is this text's own business:
+    /// `BC_JOIN <LABEL> <dir> [word…]`.
+    fn bash(&self, at: &Layout) -> String;
 
     /// A shell has joined, and everything about it is known. Awaited in the
     /// accept loop, so a slow `joined` delays the next join and nothing else.

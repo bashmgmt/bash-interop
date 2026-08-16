@@ -1,8 +1,12 @@
-# The client's side of a session it drives itself. A script sources this and
-# starts a server with it; from then on `BC_INSTR` is defined:
+# The client's words for a session it drives itself. A script sources this,
+# makes a workspace, starts a server on it and attaches; from then on
+# `BC_INSTR` is defined:
 #
 #     source lib/joining.bash
+#     mkdir -p prof.d
 #     BC_START bashprof serve --at prof.d --into build.times
+#     until BC_UP prof.d; do sleep 0.01; done
+#     BC_ATTACH prof.d
 #
 #     BC_INSTR BASHPROF say STEP compile
 #     BC_INSTR BASHPROF ask NEXT
@@ -13,31 +17,28 @@
 # and is what brings the protocol into the shell in the first place. Every
 # other way in is under `bashprof --help` and `bashcap --help`.
 #
-# The convention has a second half in Rust, `Serving::serve_coprocess`: the
-# client holds the server's standard input, and the server writes one line on
-# its standard output — the address, the file a shell sources to join. The
-# workspace is the client's to name (`--at`), so the address is known before
-# the server runs; reading the line is what says the session is laid and
-# ready.
-#
-# The session lasts as long as anyone holds that handle. A subshell inherits it
-# and keeps the session open for as long as it lives, because it can still
-# speak.
+# The client feeds the same directory to start, probe and attach; nothing is
+# read back from the server, which is a complete standalone program. The
+# session lasts as long as anyone holds the handle `coproc` gave: a subshell
+# inherits it and keeps the session open for as long as it lives.
 
-# $@ is the server's command line, program included. `coproc` gives the client
-# both ends at once: [0] is where the address arrives, [1] is the handle. NAME
-# is a literal in `coproc`'s grammar, so there is one server per shell.
-#
-# The address lands in BC_SESSION, exported, so this shell's children find it
-# where a driven run's shells do. 125 is what the protocol's own words return
-# when they could not do their job; a server that died before announcing gives
-# end of input instead of a line.
+# $@ is the server's command line, program included, and the workspace is in
+# there as the server's own argument — this word does not know it. NAME is a
+# literal in `coproc`'s grammar, so there is one server per shell.
 BC_START() {
     coproc BC_SERVER { "$@"; }
+}
 
-    IFS= read -r BC_SESSION <&"${BC_SERVER[0]}" || return 125
-    export BC_SESSION
-    source "$BC_SESSION"
+# Is a session serving at $1? The join fifo is present exactly while one is:
+# the server locks the workspace, removes its fifos on every failure it can
+# observe, and sweeps a killed predecessor's leavings when it opens.
+BC_UP() {
+    [[ -p "$1/join" ]]
+}
+
+# Join the session at $1: source the file its server laid.
+BC_ATTACH() {
+    source "$1/session.bash"
 }
 
 # Let go, and wait for what the client started. Whoever initiates cleans up;

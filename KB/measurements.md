@@ -189,7 +189,7 @@ mechanism that cannot be checked by reading the source. One file per subject.
 | `a_label_nobody_joined_is_an_error_by_absence` | `BC_INSTR NOPE …` names the label and the call site, returns 125, and the run knows nothing |
 | `an_account_of_any_size_arrives_whole` | a `bash -c` with a 21 KB command of `€` — six frames, cut inside characters — reads back byte for byte as `Invocation::command` |
 | `many_shells_announce_at_once` | 16 shells with 6 KB commands announce together; every account whole and its own |
-| `the_words_a_join_brings_are_on_the_shell` | `BC_JOIN KEEP "$1" role worker …` lands verbatim on `Shell::brought`, in the fork too; `field` reads the pairs |
+| `the_words_a_join_brings_are_on_the_shell` | `BC_JOIN KEEP <dir> role worker …` lands verbatim on `Shell::brought`, in the fork too; `field` reads the pairs |
 
 | `transport.rs` | establishes |
 |---|---|
@@ -214,19 +214,21 @@ mechanism that cannot be checked by reading the source. One file per subject.
 |---|---|
 | `the_closures_return_is_the_subjects_whole_environment` | `Rig::bash` puts the rig's word in the subject and a child it starts; so does a variable from the run's closure, and one set with `env` on the command line; `BC_SESSION`, which the closure did not return, is absent in both — the core adds nothing |
 | `the_command_line_is_run_as_asked` | the run starts the program the argv names, with nothing appended |
-| `a_subject_may_join_by_hand_where_it_chooses` | a rig whose `environment` is empty: `source "$BC_SESSION"` where the script says; children that sourced nothing are not shells |
+| `a_subject_may_join_by_hand_where_it_chooses` | a rig whose `environment` is only the client's own `BC_SESSION` pair: `source "$BC_SESSION/session.bash"` where the script says; children that sourced nothing are not shells |
 
 | `serving.rs` | establishes |
 |---|---|
-| `a_shell_that_joined_is_heard_until_it_lets_go` | a client's words and its subshell's arrive; the session ends with the handle; the client's status is its own. Every serving proof asserts the address is `<at>/session.bash`, at the announce |
+| `a_shell_that_joined_is_heard_until_it_lets_go` | a client's words and its subshell's arrive; the session ends with the handle; the client's status is its own. Every serving proof gates on the join fifo and joins by the directory it named; the fifo brackets the session |
 | `a_shell_the_session_outlived_is_left_to_its_own_devices` | a client that released the handle while running has `parted: None`, and its next word takes `SIGPIPE` |
-| `a_joined_shell_may_publish_the_address_to_its_children` | `export BASH_ENV="$BC_SESSION"` reaches a child process |
+| `a_joined_shell_may_publish_the_address_to_its_children` | `export BASH_ENV="$BC_SESSION/session.bash"` reaches a child process |
 | `a_shell_says_what_it_is_rather_than_being_guessed_at` | an interactive shell joins by sourcing, and says `-i`, `-s`, no command line |
-| `a_failed_announcement_still_sees_the_session_out` | a `Failure` from `announce` comes back with the control fifo unlinked and only the three bash files left |
+| `an_occupied_workspace_is_refused` | the lock is taken before anything is touched: a second server on the same directory is refused whole while the first serves on |
+| `a_killed_predecessors_leavings_are_swept` | stale fifos in a prescribed workspace are removed under the lock at open; the session serves and closes clean |
+| `a_missing_workspace_is_a_refusal` | a prescribed directory nobody made is refused and not invented |
 
 | `owning.rs` | establishes |
 |---|---|
-| `a_named_workspace_is_left_behind_without_its_fifos` | `run_at` lays the session where the caller said and leaves the three bash files, nothing that was a pipe — the fifo of an announcement that never finished included |
+| `a_named_workspace_is_left_behind_without_its_fifos` | `run_at` lays the session where the caller said and leaves the three bash files and the lock, nothing that was a pipe — the fifo of an announcement that never finished included |
 | `a_shell_left_asking_does_not_outlive_the_run` | the run does not wait for a straggler, and the straggler does not survive it |
 | `a_shell_outside_the_group_is_heard_and_never_signalled` | a `setsid` shell is heard, has `parted: None`, and is alive after the run |
 | `a_panicking_answer_kills_the_subject` | the panic propagates out of `run`, and the blocked subject is gone |

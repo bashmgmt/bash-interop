@@ -1,17 +1,22 @@
-# The address of a session is the file a shell sources to join it. A shell
-# under a driven run finds it in its environment as BC_SESSION; under
-# --reach bash-env every shell has already sourced it, and otherwise a shell
-# joins where its script says so:
-source "$BC_SESSION"
+# The address of a session is its workspace directory, and joining is
+# sourcing the session file laid inside it. A shell under a driven run finds
+# the directory in its environment as BC_SESSION; under --reach bash-env
+# every shell has already sourced the file, and otherwise a shell joins
+# where its script says so:
+source "$BC_SESSION/session.bash"
 
-# A script that starts the tool itself, as a coprocess, names the session's
-# workspace, holds the session open for as long as it runs and joins as above:
+# A script that starts the tool itself, as a coprocess: it names and makes
+# the workspace, probes the same directory until the session is up, attaches,
+# and holds the session open for as long as it runs:
 source lib/joining.bash
-BC_START bashprof serve --at prof.d --into build.times   # start, sync, join
+mkdir -p prof.d
+BC_START bashprof serve --at prof.d --into build.times
+until BC_UP prof.d; do sleep 0.01; done
+BC_ATTACH prof.d
 BC_LEAVE                                       # let go, wait, return its status
 
 # Only if there is a session — a script that runs the same with or without one:
-[[ -n ${BC_SESSION-} ]] && source "$BC_SESSION"
+[[ -n ${BC_SESSION-} ]] && source "$BC_SESSION/session.bash"
 
 # The words a client vendors, and the polyfill for when nothing is listening —
 # after the join, so a session's own hooks win:

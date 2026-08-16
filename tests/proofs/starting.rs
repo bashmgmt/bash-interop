@@ -13,8 +13,11 @@ struct Deploying;
 impl Rig for Deploying {
     type Reaction = Vec<Message>;
 
-    fn bash(&self) -> String {
-        "TELL() { BC_INSTR TELL say TELL \"$@\"; }\nBC_JOIN TELL \"$1\"\n".to_string()
+    fn bash(&self, at: &Layout) -> String {
+        format!(
+            "TELL() {{ BC_INSTR TELL say TELL \"$@\"; }}\nBC_JOIN TELL {}\n",
+            bash_strings::emit_scalar(at.text()),
+        )
     }
 
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Vec<Message>, Failure> {
@@ -104,7 +107,7 @@ async fn a_subject_may_join_by_hand_where_it_chooses() {
             ENTRY,
             r#"
             bash "${BASH_SOURCE[0]%/*}/other.bash"
-            source "$BC_SESSION"
+            source "$BC_SESSION/session.bash"
             BC_INSTR KEEP say REC by-hand
             bash "${BASH_SOURCE[0]%/*}/other.bash"
             "#,
@@ -113,7 +116,7 @@ async fn a_subject_may_join_by_hand_where_it_chooses() {
     ]);
 
     let ran = Keeping
-        .run(&bash(scripts.at(ENTRY)), |at| vec![at.bc_session()])
+        .run(&bash(scripts.at(ENTRY)), |at| vec![crate::bc_session(at)])
         .await
         .unwrap()
         .whole()

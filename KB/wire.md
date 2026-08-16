@@ -30,10 +30,11 @@ label nobody joined is an error by absence: named on stderr at the call site,
 status 125.
 
 `DIR` is the session's workspace — the one coordinate, bound to the label by
-the join and read from `__BC__DIR` by everything after it; `rig.bash` gets it
-as `$1`, so joining a second label is a second `BC_JOIN OTHER "$1"`. A subject
-script joining by hand spells any dir it can name — `${BC_SESSION%/*}`, the
-address's own dirname. `BC_JOIN` refuses a relative dir, a label that will
+the join and read from `__BC__DIR` by everything after it. The rig's text has
+it baked in, quoted, so joining a second label is a second `BC_JOIN OTHER
+<dir>` with the same literal. A subject script joining by hand spells any dir
+it can name — `"$BC_SESSION"` under the tools' convention, which carries the
+workspace itself. `BC_JOIN` refuses a relative dir, a label that will
 not name a file, and a label already joined. The words after `DIR` are the
 caller's, kept per label (`__BC__META`, `@Q`-quoted) and announced with every
 attach — a fork's reattach carries its label's words — landing verbatim on
@@ -56,36 +57,47 @@ BC_INSTR() {
 }
 ```
 
-## Three files
+## Three files, a lock, and the fifos — one model
 
-```rust
-fn lay(dir: &Path, bash: &str) -> Result<String, Failure>;   // returns the address
-```
+`Layout` is where every name in the workspace lives; nothing else spells one.
+`lay(&Layout, bash)` writes the three files, the invocation last — once it is
+there, the session is sourceable:
 
 ```
 <dir>/prelude.bash   generic, shipped verbatim: BC_JOIN, BC_INSTR, the internals
-<dir>/rig.bash       Rig::bash — the rig's words, effects and joins
-<dir>/session.bash   generated: the invocation, and the address
+<dir>/rig.bash       Rig::bash(&Layout) — the rig's words, effects and joins, dir baked in
+<dir>/session.bash   generated: the invocation — what a shell sources to join
+<dir>/lock           flock()ed for the session's life; the kernel releases it on any death
 ```
 
-The invocation is the one generated file, and the one place the coordinate is
-spelled — label and dir quoted through `emit_scalar`, so a hostile path still
-joins:
+The invocation is two argumentless lines, quoted through `emit_scalar`, so a
+hostile path still sources:
 
 ```bash
 source '<dir>/prelude.bash'
-source '<dir>/rig.bash' '<dir>'
+source '<dir>/rig.bash'
 ```
 
-It is self-contained — correct with an empty environment — and it passes the
-coordinate as the rig's bash's `$1`: `source file args…` binds positionals
-for the sourced file's duration. `lay` validates the dir as one line of UTF-8
-text, since the address goes into `BC_SESSION`, onto the announce line, and
-into this file; the label is bash's to check, at the join. `dir` must be
-absolute, which is why the session canonicalises it. Re-sourcing the
-invocation in a child process re-runs the joins, which is how `BASH_ENV`
-reaches a tree; re-sourcing it in a shell already joined is refused by
-`BC_JOIN` (`already joined`, 125).
+It is self-contained — correct with an empty environment — and it passes
+nothing: the rig's text carries the coordinate itself, spelled with
+`emit_scalar` where its author needed it. Sourced without arguments, the
+rig's text runs with the subject's own `$@` visible — usable on a join line,
+never written to. `Layout::new` validates the dir as one line of UTF-8 text,
+since it crosses into bash and onto the announce line; the label is bash's to
+check, at the join. `dir` must be absolute, which is why the session
+canonicalises it. Re-sourcing the invocation in a child process re-runs the
+joins, which is how `BASH_ENV` reaches a tree; re-sourcing it in a shell
+already joined is refused by `BC_JOIN` (`already joined`, 125).
+
+The session owns the directory: the lock is taken before anything in it is
+touched — a second session on an occupied workspace is refused whole — and
+held until the fifos are gone, so the join fifo's presence is a truthful
+liveness signal (`BC_UP` is one file test), every observed failure removes
+it (a `Drop` guard covers unwind), and a killed predecessor's stale fifos
+are swept, under the lock, at the next open. The one boundary: after
+`SIGKILL` nothing removes the fifo until that next open or the directory's
+removal. A prescribed workspace must already exist; only the session-owned
+temporary is ever created.
 
 ## Three fifos
 

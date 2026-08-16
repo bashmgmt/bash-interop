@@ -9,18 +9,32 @@
 
 use std::collections::HashMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
+use super::super::Layout;
 use super::lines::{Lines, Raw};
 use super::message::Account;
 use crate::failure::{Doing, Failure};
 
 pub(crate) struct Control {
     lines: Lines,
-    dir: PathBuf,
+    at: Layout,
+    _guard: JoinFifo,
 
     /// Announcements begun and not yet ended, by token.
     partial: HashMap<String, Vec<u8>>,
+}
+
+/// The join fifo on disk: the liveness signal, present exactly while a
+/// session serves. [`Control::close`] removes it deliberately and reports;
+/// removal on drop is the backstop for unwinding, and it must not outlive
+/// the session either way.
+struct JoinFifo(String);
+
+impl Drop for JoinFifo {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
 }
 
 /// One shell, announced whole.
@@ -30,11 +44,12 @@ pub(crate) struct Announced {
 }
 
 impl Control {
-    pub(crate) fn open(dir: &Path) -> Result<Self, Failure> {
-        let join = super::join(dir);
-        super::mkfifo(&join)?;
+    pub(crate) fn open(at: Layout) -> Result<Self, Failure> {
+        let join = at.join();
+        super::mkfifo(Path::new(&join))?;
+        let _guard = JoinFifo(join.clone());
 
-        Ok(Self { lines: Lines::open_read_write(&join)?, dir: dir.to_path_buf(), partial: HashMap::new() })
+        Ok(Self { lines: Lines::open_read_write(Path::new(&join))?, at, _guard, partial: HashMap::new() })
     }
 
     /// The next shell announced whole. Never end of input: the fifo is held
@@ -63,18 +78,18 @@ impl Control {
     pub(crate) fn close(mut self) -> Result<(), Failure> {
         for raw in self.lines.drain()? {
             if let Some(Announced { token, .. }) = self.frame(raw)? {
-                let up = super::up(&self.dir, &token);
+                let up = self.at.up(&token);
 
-                drop(Lines::open(&up)?);
-                fs::remove_file(&up).doing(|| format!("removing {}", up.display()))?;
+                drop(Lines::open(Path::new(&up))?);
+                fs::remove_file(&up).doing(|| format!("removing {up}"))?;
             }
         }
         for token in self.partial.keys() {
-            let up = super::up(&self.dir, token);
-            fs::remove_file(&up).doing(|| format!("removing {}", up.display()))?;
+            let up = self.at.up(token);
+            fs::remove_file(&up).doing(|| format!("removing {up}"))?;
         }
-        let join = super::join(&self.dir);
-        fs::remove_file(&join).doing(|| format!("removing {}", join.display()))?;
+        let join = self.at.join();
+        fs::remove_file(&join).doing(|| format!("removing {join}"))?;
 
         self.lines.finish()
     }
@@ -149,7 +164,8 @@ mod tests {
     #[tokio::test]
     async fn frames_reassemble_per_token_and_in_bytes() {
         let dir = tempfile::tempdir().unwrap();
-        let mut control = Control::open(dir.path()).unwrap();
+        let at = Layout::new(dir.path().to_path_buf()).unwrap();
+        let mut control = Control::open(at).unwrap();
 
         let (one, two) = (account("€uro.bash"), account("plain.bash"));
         let split = one.find('€').unwrap() + 1;

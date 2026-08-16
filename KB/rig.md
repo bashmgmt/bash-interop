@@ -29,10 +29,12 @@ trait that extends `Rig` and carries its own orchestration.
 pub trait Rig {
     type Reaction: Reacting;
 
-    /// The rig's own bash. The invocation sources it with the session's
-    /// workspace as `$1`; joining — which labels, with which words, or none —
-    /// is this text's own business: `BC_JOIN <LABEL> "$1" [word…]`.
-    fn bash(&self) -> String;
+    /// The rig's own bash, generated with the settled workspace in hand.
+    /// The invocation sources it with no arguments — the subject's own `$@`
+    /// is visible, never to be written to — and the coordinate is baked in,
+    /// spelled with `emit_scalar`. Joining — which labels, with which words,
+    /// or none — is this text's own business: `BC_JOIN <LABEL> <dir> [word…]`.
+    fn bash(&self, at: &Layout) -> String;
 
     /// A shell has joined, and everything about it is known. Awaited in the
     /// accept loop, so a slow `joined` delays the next join and nothing else.
@@ -106,11 +108,16 @@ Owning a reaction is the whole proof that its shell announced itself. A
 message reaches a reaction only down that shell's own pipe, so no path through
 the session can hold a message whose shell is unknown.
 
-`Layout { dir, address }` is where the session's files ended up — the
-workspace, and the address: `<dir>/session.bash`, the generated invocation a
-shell sources to join, held as text because it crosses into bash and onto the
-announce line (validated whole at open). `Layout::bash_env()` is that address
-spelled as the `("BASH_ENV", <address>)` pair.
+`Layout` is the workspace: the one coordinate — held as text, validated at
+construction, because it crosses into bash — and the model of the files in
+it. The constant names (`session.bash`, `prelude.bash`, `rig.bash`, `join`,
+`up.<tok>`, `rep.<tok>`, `lock`) live nowhere else; `Layout::text()` is what
+a rig splices into its bash through `emit_scalar`, `Layout::session()` the
+file a shell sources, `Layout::bash_env()` that file spelled as the
+`("BASH_ENV", …)` pair. The session holds `<dir>/lock` `flock`ed from before
+it touches the directory until after its fifos are gone: an occupied
+workspace is refused, a killed predecessor's fifos are swept at the next
+open, and the kernel releases the hold on any death.
 
 **Nothing in a rig ends a session.** A rig reacts; when the conversation is
 over is decided by whoever started the shells. A `Failure` is the only thing a
@@ -155,8 +162,9 @@ pub trait Driving: Rig {
     async fn run<A, E>(&self, argv: &[A], environment: E) -> Result<Run<Kept<Self>>, Failure>
     where A: AsRef<OsStr>, E: FnOnce(&Layout) -> Vec<(OsString, OsString)>;
 
-    /// The caller's directory instead — created if missing, left behind: a
-    /// reading taken later may follow source paths into it.
+    /// The caller's directory instead — it exists, and is the caller's to
+    /// have made — left behind: a reading taken later may follow source
+    /// paths into it.
     async fn run_at<A, E>(&self, at: &Path, argv: &[A], environment: E) -> Result<Run<Kept<Self>>, Failure>
     where A: AsRef<OsStr>, E: FnOnce(&Layout) -> Vec<(OsString, OsString)>;
 }
@@ -172,10 +180,11 @@ pub struct Whole<K> { pub shells: Vec<Attended<K>>, pub subject: ExitStatus }   
 `rig.run(&["bash", "x.bash"], |at| …)`, and a caller wanting a launcher
 writes one into the argv: `&["env", "TARGET=staging", "bash", "x.bash"]`. The
 subject's environment is exactly the closure's return, built from the settled
-`Layout`: `vec![at.bc_session(), at.bash_env()]` is the usual pair — the
-handle a script sources, and the join of every non-interactive bash in the
-tree; `vec![at.bc_session()]` leaves joining to the scripts; `vec![]` and any
-variable of the caller's own are equally legitimate sentences.
+`Layout`: `vec![at.bash_env()]` is the usual pair — the join of every
+non-interactive bash in the tree; a `("BC_SESSION", at.text())` pair of the
+caller's own spelling leaves joining to the scripts (the tools' by-hand
+convention); `vec![]` and any variable of the caller's own are equally
+legitimate sentences.
 `tests/proofs/starting.rs` proves the strong side: a variable the closure did
 not return is absent.
 
@@ -193,9 +202,7 @@ sees end of input. `Drop` does the same if `run` left by any other path.
 
 ```rust
 pub trait Serving: Rig {
-    async fn serve<A>(&self, at: &Path, held: OwnedFd, announce: A)
-        -> Result<Served<Kept<Self>>, Failure>
-    where A: FnOnce(&str) -> Result<(), Failure>;
+    async fn serve(&self, at: &Path, held: OwnedFd) -> Result<Served<Kept<Self>>, Failure>;
 
     async fn serve_coprocess(&self, at: &Path) -> Result<Served<Kept<Self>>, Failure>;
 }
@@ -203,26 +210,29 @@ pub trait Serving: Rig {
 pub struct Served<K> { pub shells: Vec<Attended<K>>, pub failed: Option<Failure> }
 ```
 
-A script that is already running names the workspace, starts the server, and
-lets go when it is done. Nothing on this side starts a process or ends one.
-`at` is required with no fallback: the client prescribed the directory, so it
-knows the address — `<at>/session.bash` — before the server has done anything.
-The directory is created if missing and left behind; a reading taken later may
-follow source paths into it, and removing it is the client's, like everything
-else it initiated.
+A script that is already running names **and makes** the workspace, starts
+the server, and lets go when it is done. Nothing on this side starts a
+process or ends one. `at` is required with no fallback and must exist: the
+client prescribed the directory, so it holds the address — the directory
+itself — before the server has done anything. It is left behind; a reading
+taken later may follow source paths into it, and removing it is the
+client's, like everything else it initiated.
 
-What remains of the announcement is the rendezvous: `coproc` returns before
-the server has parsed its argv or written a file, so the client must not
-source before the session is laid. `announce` is called once, after
-`Session::open` returned and before anything is served, with the address as
-one line — a value the client's own choice already fixed. The blocking read on
-the client's side is the barrier, and end of input is how a server that died
-before ready (unwritable `--at`, bad flag) is told apart from a slow one. The
-client puts the line where a driven shell would find it and sources it:
+Nothing is written back: a serving application is a complete standalone
+program, and there is no channel through which the core could hand a client
+a value — `serve(at, held)` has no hook. Whether the session is up is the
+workspace's to show: the join fifo is present exactly while one serves,
+which the lock and the sweep keep truthful, so the client gates on the same
+directory it named:
 
 ```bash
-export BC_SESSION="$line"; source "$BC_SESSION"
+until BC_UP prof.d; do sleep 0.01; done
+BC_ATTACH prof.d
 ```
+
+The one boundary is a server killed outright — `SIGKILL` removes nothing —
+whose stale fifo stands until its directory is next opened (swept) or
+removed; the host that killed its own server owns that directory anyway.
 
 A `Failure` while serving still sees the session out — every shell released
 or finished, the fifos gone — before it is returned.
@@ -235,23 +245,25 @@ into a fifo whose reader is gone and takes `SIGPIPE`.
 
 ### The coprocess convention
 
-**The client holds the server's standard input, and the server writes the
-address on its standard output.**
+**The client holds the server's standard input, and reads nothing back.**
 
 ```bash
 source lib/joining.bash
 
-BC_START bashprof serve --at prof.d --into build.times   # start it, sync, join
+mkdir -p prof.d
+BC_START bashprof serve --at prof.d --into build.times   # start; nothing awaited
+until BC_UP prof.d; do sleep 0.01; done                  # the workspace shows it
+BC_ATTACH prof.d                                         # join by the same dir
 BC_INSTR BASHPROF say STEP compile
 BC_LEAVE                                     # release, wait, return its status
 ```
 
 `assets/joining.bash` is the bash half; `Serving::serve_coprocess` is the Rust
 half. `coproc` takes a literal NAME, so the server's fds live in `BC_SERVER`
-and there is one server per shell; `BC_START` reads the address into
-`BC_SESSION`, exports it, and sources it. `BC_LEAVE` returns the server's
-status, so a client under `set -e` stops on a server that failed, and by the
-time it returns whatever the server writes is written.
+and there is one server per shell; the client feeds the same directory to
+start, probe and attach, and `BC_UP` is one file test. `BC_LEAVE` returns the
+server's status, so a client under `set -e` stops on a server that failed,
+and by the time it returns whatever the server writes is written.
 
 `JOINING` (`rig/joining.txt`) is the whole list — driven and already joined,
 by hand, started as a coprocess, only if there is a session, the vendored words

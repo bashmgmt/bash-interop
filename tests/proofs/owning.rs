@@ -10,17 +10,19 @@ use bash_interop::rig::{
 };
 
 use bash_interop::scratch::{bash, Scripts};
-use crate::{behind, gone, lines, report, script, Keeping, ENTRY, JOIN};
+use crate::{behind, gone, lines, report, script, Keeping, ENTRY};
 
-/// A workspace the caller named is left where it was told to, holding the
-/// session's three bash files and none of the fifos: the control fifo goes
-/// when the session closes, a shell's two when it parts, and even the fifo of
-/// an announcement that never finished — staged here as the protocol would
-/// have left it — is removed, since its token names it.
+/// A workspace the caller named and made is left where it was told to,
+/// holding the session's three bash files, the lock file, and none of the
+/// fifos: the control fifo goes when the session closes, a shell's two when
+/// it parts, and even the fifo of an announcement that never finished —
+/// staged here as the protocol would have left it — is removed, since its
+/// token names it.
 #[tokio::test]
 async fn a_named_workspace_is_left_behind_without_its_fifos() {
     let temp = tempfile::tempdir().unwrap();
     let at = temp.path().join("under").join("here");
+    std::fs::create_dir_all(&at).unwrap();
     let scripts = Scripts::of(&[
         (
             ENTRY,
@@ -28,8 +30,8 @@ async fn a_named_workspace_is_left_behind_without_its_fifos() {
             for i in 1 2 3; do BC_INSTR KEEP ask step "$i"; done
             bash "${BASH_SOURCE[0]%/*}/other.bash"
             ( BC_INSTR KEEP say REC fork )
-            mkfifo "${BC_SESSION%/*}/up.GHOST"
-            printf 'GHOST + half\n' >"${BC_SESSION%/*}/join"
+            mkfifo "$BC_SESSION/up.GHOST"
+            printf 'GHOST + half\n' >"$BC_SESSION/join"
             exit 0
             "#,
         ),
@@ -43,7 +45,7 @@ async fn a_named_workspace_is_left_behind_without_its_fifos() {
     ]);
 
     let ran = Keeping
-        .run_at(&at, &bash(scripts.at(ENTRY)), |at| vec![at.bc_session(), at.bash_env()])
+        .run_at(&at, &bash(scripts.at(ENTRY)), |at| vec![crate::bc_session(at), at.bash_env()])
         .await
         .unwrap()
         .whole()
@@ -63,7 +65,7 @@ async fn a_named_workspace_is_left_behind_without_its_fifos() {
     left.sort();
     assert_eq!(
         left,
-        ["prelude.bash", "rig.bash", "session.bash"],
+        ["lock", "prelude.bash", "rig.bash", "session.bash"],
         "the bash, and nothing that was a pipe"
     );
 }
@@ -133,8 +135,8 @@ struct Boom;
 impl Rig for Exploding {
     type Reaction = Boom;
 
-    fn bash(&self) -> String {
-        JOIN.to_string()
+    fn bash(&self, at: &Layout) -> String {
+        crate::join(at)
     }
 
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Boom, Failure> {

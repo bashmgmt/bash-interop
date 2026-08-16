@@ -1,40 +1,107 @@
 //! Where a session puts its files, and what a run hands back.
 
 use std::ffi::OsString;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serde::Serialize;
 
 use super::{Message, Micros, Reacting, Rig, Shell};
+use crate::failure::Failure;
 
-/// Where the session's files ended up. Handed to every reaction at
-/// construction, since the instrument's own frames name a file in here.
+/// The session's workspace: the one coordinate, and the model of the files
+/// in it. Construction proves what every user needs: the directory exists
+/// (canonical), and is one line of text — it crosses into bash. Handed to
+/// every reaction at construction, since the instrument's own frames name a
+/// file in here.
 #[derive(Clone, Debug)]
 pub struct Layout {
-    pub dir: PathBuf,
-
-    /// The session's only address: `<dir>/session.bash`, the file a shell
-    /// sources to join, and what `BC_SESSION` carries in a driven subject's
-    /// environment. Text, because it crosses into bash and onto the announce
-    /// line — validated whole at open. Its dirname is the workspace, so any
-    /// shell holding the address knows the coordinate: `${BC_SESSION%/*}`.
-    pub address: String,
+    dir: String,
 }
 
+/// What a shell sources to join, inside the workspace.
+const SESSION: &str = "session.bash";
+/// The protocol's half, laid verbatim.
+const PRELUDE: &str = "prelude.bash";
+/// The rig's half, laid from [`super::Rig::bash`].
+const RIG: &str = "rig.bash";
+/// The control fifo: present exactly while a session serves.
+const JOIN: &str = "join";
+/// Held `flock`ed for the session's life; the kernel releases it on any death.
+const LOCK: &str = "lock";
+
 impl Layout {
-    /// The address, spelled for `BASH_ENV`: reaches every non-interactive bash
-    /// in the tree the subject creates.
-    pub fn bash_env(&self) -> (OsString, OsString) {
-        (OsString::from("BASH_ENV"), self.address.clone().into())
+    /// `dir` is canonical when handed in; what is proven here is that it can
+    /// cross: one line of text.
+    pub(super) fn new(dir: PathBuf) -> Result<Self, Failure> {
+        let display = dir.display().to_string();
+        let dir = dir
+            .into_os_string()
+            .into_string()
+            .ok()
+            .filter(|dir| !dir.contains('\n'))
+            .ok_or_else(|| {
+                Failure::new(
+                    format!("opening the workspace {display}"),
+                    "the path is not one line of text",
+                )
+            })?;
+
+        Ok(Self { dir })
     }
 
-    /// The address, spelled as the conventional handle a script sources —
-    /// `source "$BC_SESSION"` — and both tools' spelling. The core consults
-    /// neither this pair nor any other: a run's environment is whatever its
-    /// closure returns.
-    pub fn bc_session(&self) -> (OsString, OsString) {
-        (OsString::from("BC_SESSION"), self.address.clone().into())
+    /// The workspace: the session's address.
+    pub fn path(&self) -> &Path {
+        Path::new(&self.dir)
+    }
+
+    /// The workspace as text — what a rig splices into its bash, spelled
+    /// through [`bash_strings::emit_scalar`].
+    pub fn text(&self) -> &str {
+        &self.dir
+    }
+
+    /// The file a shell sources to join.
+    pub fn session(&self) -> String {
+        self.file(SESSION)
+    }
+
+    pub(crate) fn prelude(&self) -> String {
+        self.file(PRELUDE)
+    }
+
+    pub(crate) fn rig(&self) -> String {
+        self.file(RIG)
+    }
+
+    pub(crate) fn join(&self) -> String {
+        self.file(JOIN)
+    }
+
+    pub(crate) fn lock(&self) -> String {
+        self.file(LOCK)
+    }
+
+    /// One shell's pipe, made by the shell; the token names it.
+    pub(crate) fn up(&self, token: &str) -> String {
+        self.file(&format!("up.{token}"))
+    }
+
+    /// One shell's reply pipe, made by the run before the shell can ask.
+    pub(crate) fn rep(&self, token: &str) -> String {
+        self.file(&format!("rep.{token}"))
+    }
+
+    fn file(&self, name: &str) -> String {
+        format!("{}/{name}", self.dir)
+    }
+
+    /// The session file, spelled for `BASH_ENV`: reaches every
+    /// non-interactive bash in the tree the subject creates. The core
+    /// consults neither this pair nor any other: a run's environment is
+    /// whatever its closure returns.
+    pub fn bash_env(&self) -> (OsString, OsString) {
+        (OsString::from("BASH_ENV"), self.session().into())
     }
 }
 

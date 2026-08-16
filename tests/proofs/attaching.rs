@@ -58,8 +58,9 @@ struct Twice;
 impl Rig for Twice {
     type Reaction = Vec<Message>;
 
-    fn bash(&self) -> String {
-        "BC_JOIN ONE \"$1\"\nBC_JOIN TWO \"$1\"\n".to_string()
+    fn bash(&self, at: &Layout) -> String {
+        let dir = bash_strings::emit_scalar(at.text());
+        format!("BC_JOIN ONE {dir}\nBC_JOIN TWO {dir}\n")
     }
 
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Vec<Message>, Failure> {
@@ -177,8 +178,11 @@ struct Bringing;
 impl Rig for Bringing {
     type Reaction = Vec<Message>;
 
-    fn bash(&self) -> String {
-        "BC_JOIN KEEP \"$1\" role worker note 'two words'\n".to_string()
+    fn bash(&self, at: &Layout) -> String {
+        format!(
+            "BC_JOIN KEEP {} role worker note 'two words'\n",
+            bash_strings::emit_scalar(at.text()),
+        )
     }
 
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Vec<Message>, Failure> {

@@ -15,10 +15,12 @@ use tokio::sync::Notify;
 use bash_interop::scratch::{bash, sourcing, Scripts};
 use crate::{beginning, behind, report, ENTRY};
 
-const SOAK_BASH: &str = r#"
-NOTE() { BC_INSTR SOAK say NOTE "$@"; }
-BC_JOIN SOAK "$1"
-"#;
+fn soak_bash(at: &Layout) -> String {
+    format!(
+        "NOTE() {{ BC_INSTR SOAK say NOTE \"$@\"; }}\nBC_JOIN SOAK {}\n",
+        bash_strings::emit_scalar(at.text()),
+    )
+}
 
 /// Answers each question a different way, cycling through every form.
 struct Answering {
@@ -44,8 +46,8 @@ impl Rig for Answering {
     type Reaction = Soak;
 
     /// `NOTE` is this rig's own word, called back by several of the answers.
-    fn bash(&self) -> String {
-        SOAK_BASH.to_string()
+    fn bash(&self, at: &Layout) -> String {
+        soak_bash(at)
     }
 
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Soak, Failure> {
@@ -184,8 +186,8 @@ struct Gate {
 impl Rig for Gated {
     type Reaction = Gate;
 
-    fn bash(&self) -> String {
-        "BC_JOIN GATE \"$1\"\n".to_string()
+    fn bash(&self, at: &Layout) -> String {
+        format!("BC_JOIN GATE {}\n", bash_strings::emit_scalar(at.text()))
     }
 
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Gate, Failure> {

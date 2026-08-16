@@ -1,6 +1,6 @@
-//! bash orchestrates: a script that is already running names the workspace,
-//! starts the server, joins at the address its own choice fixed, and lets go
-//! when it is done.
+//! bash orchestrates: a script that is already running names and makes the
+//! workspace, starts the server, joins at the coordinate its own choice
+//! fixed, and lets go when it is done.
 //!
 //! Nothing here starts a process or ends one. What the client started, the
 //! client cleans up, which is why the only thing this side watches is the
@@ -34,36 +34,31 @@ pub struct Served<K> {
 ///
 /// | | |
 /// |---|---|
-/// | who chose the workspace | the client: `at` is required, so it knows the address before the server runs |
-/// | what the client is handed | the address — `<at>/session.bash`, one line, after the files are down |
+/// | who chose the workspace | the client: `at` is required, exists, and is the address |
+/// | what the client is handed | nothing — liveness is the workspace's to show: the join fifo is present exactly while the session serves |
 /// | what ends it | the handle the initiator holds, watched and never closed here |
 /// | what comes back | [`Served`] |
 ///
-/// `at` is the workspace the client prescribed — created if missing, left
-/// behind: a reading taken later may follow source paths into it. `held` is a
+/// `at` is the workspace the client prescribed and made — left behind: a
+/// reading taken later may follow source paths into it. `held` is a
 /// descriptor the initiator holds open for as long as it wants the session:
-/// serving ends when the last holder has let go. `announce` is handed the
-/// address once, after the session is laid and before anything is served — the
-/// read on the client's side is what says the session is ready; the client
-/// puts the line in `BC_SESSION` and runs `source "$BC_SESSION"` — see
-/// [`JOINING`](super::JOINING).
+/// serving ends when the last holder has let go.
 ///
-/// What the address reaches is the client's decision. Sourcing it instruments
-/// that shell, its functions, its subshells and what it sources; exporting
-/// `BASH_ENV` to the same path instruments the processes it starts.
+/// A serving application is a complete standalone program: it owes nobody a
+/// byte on any channel. A client that wants to know the session is up asks
+/// the workspace — `BC_UP` in [`JOINING_BASH`](super::JOINING_BASH) — and
+/// joins by sourcing `<at>/session.bash`, its own spelling of the same
+/// coordinate it gave the server. What the session reaches is the client's
+/// decision: sourcing instruments that shell, its functions, its subshells
+/// and what it sources; exporting `BASH_ENV` to the same file instruments
+/// the processes it starts.
 ///
-/// A `Failure` while serving still sees the session out: every shell released
-/// or finished, the workspace's fifos gone.
+/// A `Failure` while serving still sees the session out: every shell
+/// released or finished, the workspace's fifos gone.
 #[expect(async_fn_in_trait, reason = "single-threaded by design: no Send bound")]
 pub trait Serving: Rig {
-    async fn serve<A>(
-        &self,
-        at: &Path,
-        held: OwnedFd,
-        announce: A,
-    ) -> Result<Served<Kept<Self>>, Failure>
+    async fn serve(&self, at: &Path, held: OwnedFd) -> Result<Served<Kept<Self>>, Failure>
     where
-        A: FnOnce(&str) -> Result<(), Failure>,
         Self: Sized,
     {
         LocalSet::new()
@@ -72,7 +67,6 @@ pub trait Serving: Rig {
 
                 let served = async {
                     let watch = Watch::held(held)?;
-                    announce(&session.layout.address)?;
                     session.serve(&watch).await
                 }
                 .await;
@@ -84,9 +78,9 @@ pub trait Serving: Rig {
             .await
     }
 
-    /// Serve the client that started this process as a coprocess: it holds this
-    /// process's standard input, and reads the address from its standard
-    /// output. `BC_START` in `assets/joining.bash` is the other half.
+    /// Serve the client that started this process as a coprocess: it holds
+    /// this process's standard input, and lets go to end the session.
+    /// `BC_START` in `assets/joining.bash` is the other half.
     async fn serve_coprocess(&self, at: &Path) -> Result<Served<Kept<Self>>, Failure>
     where
         Self: Sized,
@@ -96,13 +90,6 @@ pub trait Serving: Rig {
             .try_clone_to_owned()
             .doing(|| "taking hold of the handle the client kept".into())?;
 
-        // `println!` is line-buffered: the newline that ends the address is
-        // what puts it on the pipe the client is blocked on.
-        self.serve(at, held, |address| {
-            println!("{address}");
-
-            Ok(())
-        })
-        .await
+        self.serve(at, held).await
     }
 }
