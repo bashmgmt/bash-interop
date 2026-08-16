@@ -5,7 +5,7 @@ shape, the whole public surface as code, one complete rig, what the session
 does underneath, and the two tools built on it. Everything named here exists
 under `bash_interop::rig` unless a path says otherwise. The layer-by-layer
 reference is [README.md](README.md); the design above it is
-[architecture/bash-instrumentation.md](../architecture/bash-instrumentation.md).
+[architecture.md](architecture.md).
 
 ## What it is
 

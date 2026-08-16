@@ -370,4 +370,4 @@ every use is `Display` or `source()`.
 - [shell.md](shell.md) — what a shell is
 - [stack.md](stack.md) — the frame walk any instrument can reuse
 - [vendoring.md](vendoring.md) — the words a client ships, and the hooks behind them
-- [bashcap.md](bashcap.md) — a rig that streams instead of keeping
+- `bashcap/KB/bashcap.md` — a rig that streams instead of keeping

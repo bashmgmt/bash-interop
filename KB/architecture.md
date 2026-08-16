@@ -1,7 +1,7 @@
 # The bash instrumentation toolkit — design
 
 What `src/` is, what each layer is allowed to know, and the decisions the
-shape follows from. Per-directory reference is [`../bash/`](../bash/README.md);
+shape follows from. Per-directory reference is [`README.md`](README.md);
 this document is the level above it.
 
 ## What it is for
@@ -71,7 +71,7 @@ cannot display survive without a length prefix, an escape scheme, or a
 dependency on either side's idea of encoding.
 
 `value` therefore stands on nothing and is usable on its own — see
-[values.md](../bash/values.md).
+`bash-strings/KB/values.md`.
 
 ### 3. One coordinate, passed; the core exports the address and decides nothing else
 
@@ -238,7 +238,7 @@ Neither is privileged. Both ship the words a call site says as a file that is
 *both* injected and vendored, so a client's copy and the tool's cannot drift —
 the words name a hook, and only the hook exists twice. A script with the words
 and no tool runs unprofiled; the same script under the tool measures itself. See
-[vendoring.md](../bash/vendoring.md).
+[vendoring.md](vendoring.md).
 
 ## What is deliberately absent
 
@@ -255,8 +255,8 @@ and no tool runs unprofiled; the same script under the tool measures itself. See
 
 ## See also
 
-- [`../bash/README.md`](../bash/README.md) — the layer-by-layer reference
-- [`../bash/rig.md`](../bash/rig.md) — `Rig`, `Reacting`, and the two roles
-- [`../bash/wire.md`](../bash/wire.md) — the protocol, line by line
-- [`../bash/measurements.md`](../bash/measurements.md) — every number above
-- [`../bash/scoping.md`](../bash/scoping.md) — where a name binds in the shipped bash
+- [`README.md`](README.md) — the layer-by-layer reference
+- [`rig.md`](rig.md) — `Rig`, `Reacting`, and the two roles
+- [`wire.md`](wire.md) — the protocol, line by line
+- [`measurements.md`](measurements.md) — every number above
+- [`scoping.md`](scoping.md) — where a name binds in the shipped bash

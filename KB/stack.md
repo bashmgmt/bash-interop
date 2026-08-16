@@ -16,7 +16,7 @@ BASH_ARGV    ('2' 'walk' 'x')            one flat stack, groups reversed
 ```
 
 `BASH_ARGC` and `BASH_ARGV` exist only under `extdebug` — see
-[bashcap.md](bashcap.md) for how that is turned on. Expanding an unset array is
+`bashcap/KB/bashcap.md` for how that is turned on. Expanding an unset array is
 not an error, including under `set -u`, so an instrument writes all five
 unconditionally.
 
@@ -56,7 +56,7 @@ write** rather than failing.
 one.
 
 Each section is a bash array literal, read back with `parse_array` — see
-[values.md](values.md).
+`bash-strings/KB/values.md`.
 
 ## The reader
 
@@ -248,7 +248,7 @@ bash in `Rig::bash`.
 
 ## See also
 
-- [values.md](values.md) — `parse_array`, the shape each section is
-- [bashcap.md](bashcap.md) — `extdebug`, and what else a snapshot carries
+- `bash-strings/KB/values.md` — `parse_array`, the shape each section is
+- `bashcap/KB/bashcap.md` — `extdebug`, and what else a snapshot carries
 - [scoping.md](scoping.md) — why the nameref rather than a global
 - [measurements.md](measurements.md) — what a snapshot costs

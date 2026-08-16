@@ -135,6 +135,6 @@ bashcap-demo` diffs against the asset.
 
 ## See also
 
-- [bashcap.md](bashcap.md#the-clients-side) — the words a client calls
-- [bashprof.md](bashprof.md#the-tool) — the same, for measurements
+- `bashcap/KB/bashcap.md#the-clients-side` — the words a client calls
+- `bashprof/KB/bashprof.md#the-tool` — the same, for measurements
 - [scoping.md](scoping.md) — what `BASH_ENV` reaches, and when

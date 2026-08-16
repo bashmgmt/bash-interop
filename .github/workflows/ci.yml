@@ -9,6 +9,11 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+# Sibling deps are wildcard versions the dev workspace patches to
+# local paths. A standalone clone falls through to crates.io, where
+# nothing is published yet - CI stays red until the publish chain
+# reaches this crate.
+
 jobs:
   check:
     name: check + clippy + doc
