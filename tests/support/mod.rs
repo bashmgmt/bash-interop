@@ -13,7 +13,7 @@ use mb_resolver::bash::rig::{Answer, Failure};
 mod scripts;
 
 #[allow(unused_imports)]
-pub use scripts::{bash, Scripts};
+pub use scripts::{bash, logging, Scripts};
 
 /// Write bash of your own and answer with a command to source it.
 pub fn sourcing(path: &Path, body: &str) -> Result<Answer, Failure> {

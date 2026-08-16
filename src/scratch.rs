@@ -37,3 +37,12 @@ impl Scripts {
 pub fn bash(script: PathBuf) -> Vec<OsString> {
     vec!["bash".into(), script.into()]
 }
+
+/// Test logging, initialised once per binary: `RUST_LOG` filters, `info` by
+/// default, captured with each test and shown under `--nocapture`.
+#[allow(dead_code)] // shared support: each test binary uses its own subset
+pub fn logging() {
+    let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+        .is_test(true)
+        .try_init();
+}
