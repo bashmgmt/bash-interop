@@ -36,10 +36,8 @@ impl Rig for Walking {
     type Reaction = Walks;
 
     fn bash(&self, at: &Layout) -> String {
-        stack::with_walk(&[
-            BASH,
-            &format!("BC_JOIN WALK {}\n", bash_strings::emit_scalar(at.text())),
-        ])
+        let dir = bash_strings::emit_scalar(at.text());
+        stack::with_walk(&[BASH, &format!("BC_JOIN WALK {dir}\n")])
     }
 
     async fn joined(&self, _at: &Layout, shell: Arc<Shell>) -> Result<Walks, Failure> {
@@ -97,7 +95,13 @@ async fn walks(files: &[(&str, &str)]) -> (Scripts, Vec<Stack>) {
 async fn bashs_own_words_for_a_frame_come_back_as_what_they_are() {
     let (_scripts, seen) = walks(&[
         ("lib.bash", "WALK\n"),
-        ("main.bash", "source \"$(dirname \"${BASH_SOURCE[0]}\")/lib.bash\"\nWALK\n"),
+        (
+            "main.bash",
+            r#"
+            source "$(dirname "${BASH_SOURCE[0]}")/lib.bash"
+            WALK
+            "#,
+        ),
     ])
     .await;
 
@@ -155,10 +159,12 @@ async fn a_relative_source_comes_back_absolute() {
         ("lib.bash", "where() { WALK; }\n"),
         (
             "main.bash",
-            "cd \"$(dirname \"${BASH_SOURCE[0]}\")\"\n\
-             mkdir -p sub\n\
-             source ./sub/../lib.bash\n\
-             where\n",
+            r#"
+            cd "$(dirname "${BASH_SOURCE[0]}")"
+            mkdir -p sub
+            source ./sub/../lib.bash
+            where
+            "#,
         ),
     ])
     .await;
@@ -185,10 +191,12 @@ async fn a_subject_that_moved_leaves_a_source_that_is_not_there() {
         ("lib.bash", "where() { WALK; }\n"),
         (
             "main.bash",
-            "cd \"$(dirname \"${BASH_SOURCE[0]}\")\"\n\
-             source ./lib.bash\n\
-             cd /\n\
-             where\n",
+            r#"
+            cd "$(dirname "${BASH_SOURCE[0]}")"
+            source ./lib.bash
+            cd /
+            where
+            "#,
         ),
     ])
     .await;

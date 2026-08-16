@@ -14,9 +14,12 @@ impl Rig for Deploying {
     type Reaction = Vec<Message>;
 
     fn bash(&self, at: &Layout) -> String {
+        let dir = bash_strings::emit_scalar(at.text());
         format!(
-            "TELL() {{ BC_INSTR TELL say TELL \"$@\"; }}\nBC_JOIN TELL {}\n",
-            bash_strings::emit_scalar(at.text()),
+            r#"
+            TELL() {{ BC_INSTR TELL say TELL "$@"; }}
+            BC_JOIN TELL {dir}
+            "#
         )
     }
 

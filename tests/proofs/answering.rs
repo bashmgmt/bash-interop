@@ -16,9 +16,12 @@ use bash_interop::scratch::{bash, sourcing, Scripts};
 use crate::{beginning, behind, report, ENTRY};
 
 fn soak_bash(at: &Layout) -> String {
+    let dir = bash_strings::emit_scalar(at.text());
     format!(
-        "NOTE() {{ BC_INSTR SOAK say NOTE \"$@\"; }}\nBC_JOIN SOAK {}\n",
-        bash_strings::emit_scalar(at.text()),
+        r#"
+        NOTE() {{ BC_INSTR SOAK say NOTE "$@"; }}
+        BC_JOIN SOAK {dir}
+        "#
     )
 }
 
@@ -187,7 +190,12 @@ impl Rig for Gated {
     type Reaction = Gate;
 
     fn bash(&self, at: &Layout) -> String {
-        format!("BC_JOIN GATE {}\n", bash_strings::emit_scalar(at.text()))
+        let dir = bash_strings::emit_scalar(at.text());
+        format!(
+            r#"
+            BC_JOIN GATE {dir}
+            "#
+        )
     }
 
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Gate, Failure> {

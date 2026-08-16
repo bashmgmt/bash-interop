@@ -60,7 +60,12 @@ impl Rig for Twice {
 
     fn bash(&self, at: &Layout) -> String {
         let dir = bash_strings::emit_scalar(at.text());
-        format!("BC_JOIN ONE {dir}\nBC_JOIN TWO {dir}\n")
+        format!(
+            r#"
+            BC_JOIN ONE {dir}
+            BC_JOIN TWO {dir}
+            "#
+        )
     }
 
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Vec<Message>, Failure> {
@@ -179,9 +184,11 @@ impl Rig for Bringing {
     type Reaction = Vec<Message>;
 
     fn bash(&self, at: &Layout) -> String {
+        let dir = bash_strings::emit_scalar(at.text());
         format!(
-            "BC_JOIN KEEP {} role worker note 'two words'\n",
-            bash_strings::emit_scalar(at.text()),
+            r#"
+            BC_JOIN KEEP {dir} role worker note 'two words'
+            "#
         )
     }
 

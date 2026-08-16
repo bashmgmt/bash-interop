@@ -64,7 +64,8 @@ impl Reacting for Breaks {
 
 /// The subject reports its own pid before the message that breaks the rig, so
 /// a proof can ask whether it outlived the run.
-const REPORTING: &str = r#"echo $BASHPID > "${BASH_SOURCE[0]%/*}/pid"
+const REPORTING: &str = r#"
+    echo $BASHPID > "${BASH_SOURCE[0]%/*}/pid"
 "#;
 
 fn blocked(scripts: &Scripts) -> i32 {

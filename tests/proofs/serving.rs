@@ -26,9 +26,12 @@ impl Rig for Attaching {
     type Reaction = Vec<Message>;
 
     fn bash(&self, at: &Layout) -> String {
+        let dir = bash_strings::emit_scalar(at.text());
         format!(
-            "TELL() {{ BC_INSTR TELL say TELL \"$@\"; }}\nBC_JOIN TELL {}\n",
-            bash_strings::emit_scalar(at.text()),
+            r#"
+            TELL() {{ BC_INSTR TELL say TELL "$@"; }}
+            BC_JOIN TELL {dir}
+            "#
         )
     }
 
@@ -44,9 +47,9 @@ impl Serving for Attaching {}
 /// then on with its own script — which is handed the same coordinate as its
 /// `$1`, explicitly, the way everything else receives it.
 const JOINING: &str = r#"
-until [[ -p "$1/join" ]]; do sleep 0.01; done
-source "$1/session.bash"
-source "$2" "$1"
+    until [[ -p "$1/join" ]]; do sleep 0.01; done
+    source "$1/session.bash"
+    source "$2" "$1"
 "#;
 
 /// A shell of the initiator's own, holding the session's handle on its
@@ -149,7 +152,12 @@ async fn a_joined_shell_may_publish_the_address_to_its_children() {
             bash "${BASH_SOURCE[0]%/*}/child.bash"
             "#,
         ),
-        ("child.bash", "TELL child \"$BASHPID\"\n"),
+        (
+            "child.bash",
+            r#"
+            TELL child "$BASHPID"
+            "#,
+        ),
     ]);
 
     let (shells, status) = joined(&scripts).await;
@@ -179,7 +187,11 @@ fn interactively(dir: &Path, handle: OwnedFd) -> Child {
 
     let dir = dir.display();
     let typed = format!(
-        "until [[ -p \"{dir}/join\" ]]; do sleep 0.01; done\nsource \"{dir}/session.bash\"\nTELL at-the-prompt\n"
+        r#"
+        until [[ -p "{dir}/join" ]]; do sleep 0.01; done
+        source "{dir}/session.bash"
+        TELL at-the-prompt
+        "#
     );
     shell.stdin.take().expect("its input").write_all(typed.as_bytes()).expect("typing at it");
 

@@ -48,7 +48,12 @@ pub const ENTRY: &str = "main.bash";
 /// The join the proofs' rigs state: `BC_INSTR KEEP say …` is how their
 /// scripts speak, and the workspace is baked in, quoted.
 pub fn join(at: &Layout) -> String {
-    format!("BC_JOIN KEEP {}\n", emit_scalar(at.text()))
+    let dir = emit_scalar(at.text());
+    format!(
+        r#"
+        BC_JOIN KEEP {dir}
+        "#
+    )
 }
 
 /// The convention a by-hand client reads: the workspace as `BC_SESSION`,
