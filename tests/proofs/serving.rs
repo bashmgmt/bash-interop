@@ -39,8 +39,8 @@ impl Rig for Attaching {
 
 impl Serving for Attaching {}
 
-/// The client's side, as the vendored words do it: probe the directory it
-/// named until the session is up, load the laid definitions, initiate its
+/// The client's side: probe the directory it named until the session is
+/// up, load the laid definitions, initiate its
 /// own channel, then on with its own script — which is handed the same
 /// coordinate as its `$1`, explicitly, the way everything else receives it.
 const JOINING: &str = r#"

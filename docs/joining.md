@@ -75,18 +75,15 @@ holds only for a shell that does not *call* the tool's words. If
 loudly — `label BASHPROF is not joined`, status 125, at its own call site,
 *before* running the wrapped command — so under `set -e` the helper would
 stop there. This is deliberate: a call site asked for a measurement, and
-silently measuring into nowhere would be worse. (It also differs from the
-vendored-words standalone story of [vendoring.md](vendoring.md), where a
-script guards in no-op hooks and genuinely runs unprofiled — here the real
-hooks exist everywhere, so that guard installs nothing.) A helper that
-legitimately shares the tool's words joins too, or is left as it is.
+silently measuring into nowhere would be worse. A helper that legitimately
+shares the tool's words joins too, or is left as it is.
 
 ## A coprocess client — this script owns the session
 
 Started by nobody: it starts the server itself, on a workspace it names
-and makes, and holds the session open for as long as it runs. Nothing is
-vendored — `coproc` is bash's own keyword, the probe is one file test, and
-the only files ever sourced are the two the session laid:
+and makes, and holds the session open for as long as it runs. Everything
+here is bash's own — `coproc` is a keyword, the probe is one file test —
+and the only files ever sourced are the two the session laid:
 
 ```bash
 #!/usr/bin/env bash
@@ -127,8 +124,8 @@ the `wait` returns — is in
 #!/usr/bin/env bash
 # Started as:  bash join-and-speak.bash <workspace>
 #
-# Nothing vendored, no environment: the two laid files are everything,
-# and the coordinate arrives as argv. The same load as above, without a
+# No environment and no words of our own: the two laid files are
+# everything, and the coordinate arrives as argv. The same load as above, without a
 # server to start — and the rig's init function is a raw BC_JOIN here.
 set -euo pipefail
 declare -- workspace="${1:?the session workspace}"

@@ -17,7 +17,6 @@ two session setups work, and where each responsibility lies.
 | [shell.md](shell.md) | a shell's account of itself |
 | [stack.md](stack.md) | the frame walk, both halves |
 | [scoping.md](scoping.md) | where names bind in the shipped bash |
-| [vendoring.md](vendoring.md) | what a client vendors, and why the copies cannot drift |
 | [measurements.md](measurements.md) | the kernel and bash facts the transport stands on |
 
 Code quoted from the tree is anchored: a fenced block preceded by an HTML

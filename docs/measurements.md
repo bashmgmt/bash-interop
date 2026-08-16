@@ -254,6 +254,9 @@ the shipped text instead, and live beside it: the protocol's in
 
 ## Bash constraints that bound the design
 
+**The floor is bash 5.0.** From the changelog rather than measured here:
+`$EPOCHREALTIME`, which stamps every message and every account.
+
 **Traps do not compose.** Bash allows one handler per signal, so contributing
 an `EXIT`/`ERR`/`DEBUG` fragment means adopting whatever handler the client
 installed. This is why provenance and exit are carried by lines and by the

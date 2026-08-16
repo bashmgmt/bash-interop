@@ -250,11 +250,11 @@ of which a tool implements again:
 | `bashcap` | the walk, plus `BASHCAP`'s effect | one JSON object per snapshot, streamed |
 | `bashprof` | the walk, plus `BASHPROF_TIMETHIS`'s effect | three passes: records, tree, timings |
 
-Neither is privileged. Both ship the words a call site says as a file that is
-*both* injected and vendored, so a client's copy and the tool's cannot drift —
-the words name a hook, and only the hook exists twice. A script with the words
-and no tool runs unprofiled; the same script under the tool measures itself. See
-[vendoring.md](vendoring.md).
+Neither is privileged, and neither ships a file to a client: the words
+arrive with the session's own bash, like everything else. A committed call
+site therefore makes its tool a dependency of the script that says it —
+outside a session the word is a missing command, loudly, which is the same
+deliberate loudness as an unjoined label's 125.
 
 ## What is deliberately absent
 
