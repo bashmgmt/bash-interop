@@ -137,10 +137,9 @@ the role opt-in — and state the environment at the call:
 each reaction it builds — an `Rc<RefCell<_>>` is enough, and its borrow is
 never held across an `.await`.
 
-Nothing on either trait defaults, so an `impl` block is the whole contract.
-What a default used to decide is a named value instead: `Answer::unknown()` is
-the `return 127` for a word a rig has no answer for, `Answer::ok()` the quiet
-yes.
+What a default used to decide is a named value instead: `Answer::unknown()`
+is the `return 127` for a word a rig has no answer for; any other yes or no
+is `Answer::status(code)`.
 
 `tests/examples/` is worked rigs against the public API alone, meant to be read
 top to bottom, and `tests/joined/` is the same from bash's side: a fixture

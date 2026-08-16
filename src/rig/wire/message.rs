@@ -187,11 +187,6 @@ impl Answer {
     pub fn unknown() -> Self {
         Self::status(127)
     }
-
-    /// Ran, and nothing to say about it.
-    pub fn ok() -> Self {
-        Self::status(0)
-    }
 }
 
 /// One line, whatever it carries: the bash array literal a shell reads back
