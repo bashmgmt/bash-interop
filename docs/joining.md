@@ -24,14 +24,14 @@ difference. Throughout, `bashprof` stands in for any program built on the
 core: its `--reach bash-env|by-hand` flags are that tool's spelling of
 the two provisioning choices below, and each tool prints this same list in
 its own words under `run --help` and `serve --help`. The three
-bashprof-driven scripts are quoted from `bashprof/__fixtures/book/`, where
-its cli suite runs them byte for byte as printed; the two tool-free ones
-are the shapes `tests/proofs/serving.rs` proves.
+bashprof-driven scripts also live in `bashprof/__fixtures/book/`, where
+its cli suite runs them as printed; the two tool-free ones are the shapes
+`tests/proofs/serving.rs` proves.
 
 ## Driven, provisioned to join — the subject knows nothing
 
-<!-- quote: ../bashprof/__fixtures/book/provisioned.bash anchor=script -->
 ```bash
+#!/usr/bin/env bash
 # Started as:  bashprof run --into build.times -- bash provisioned.bash
 #
 # The provisioned bash_env.bash defined the words and said the join in
@@ -53,8 +53,8 @@ startup (`BASH_ENV` reaches them all), but no shell is joined until *its
 own code* says so. The script below joins itself and deliberately leaves
 its helper out — that choice is the whole point of the mode.
 
-<!-- quote: ../bashprof/__fixtures/book/by-hand.bash anchor=script -->
 ```bash
+#!/usr/bin/env bash
 # Started as:  bashprof run --reach by-hand --into build.times -- bash by-hand.bash
 set -euo pipefail
 declare -- workspace="${BASHPROF_SESSION:?the workspace, from the tool}"
@@ -88,8 +88,8 @@ and makes, and holds the session open for as long as it runs. Everything
 here is bash's own — `coproc` is a keyword, the probe is one file test —
 and the only files ever sourced are the two the session laid:
 
-<!-- quote: ../bashprof/__fixtures/book/coproc.bash anchor=script -->
 ```bash
+#!/usr/bin/env bash
 # Owns the session: names the workspace, starts the server, probes, loads,
 # initiates — and leaves by closing the handle coproc left it.
 set -euo pipefail

@@ -114,7 +114,6 @@ impl Layout {
     }
 }
 
-// ANCHOR: provision
 /// What the provisioned file does about the channel — the first thing a
 /// [`Layout::bash_env`] caller states.
 #[derive(Copy, Clone, Debug)]
@@ -129,7 +128,6 @@ pub enum Provision<'a> {
     /// if its scripts need it.
     Definitions,
 }
-// ANCHOR_END: provision
 
 /// What one shell's reaction leaves behind, for a given rig.
 pub type Kept<R> = <<R as Rig>::Reaction as Reacting>::Kept;

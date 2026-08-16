@@ -62,11 +62,11 @@ client keeps the server's stdin as the handle, and reads nothing** —
 `serve_coprocess` is the server half, taking its own stdin as `held`.
 
 The client's half is four moves of plain bash — start, probe, load and
-initiate, let go. The whole script (quoted from `bashprof/__fixtures/book/`,
-where the tool's cli suite runs it as printed):
+initiate, let go. The whole script (it also lives in `bashprof/__fixtures/book/`, where
+the tool's cli suite runs it as printed):
 
-<!-- quote: ../bashprof/__fixtures/book/coproc.bash anchor=script -->
 ```bash
+#!/usr/bin/env bash
 # Owns the session: names the workspace, starts the server, probes, loads,
 # initiates — and leaves by closing the handle coproc left it.
 set -euo pipefail

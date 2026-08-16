@@ -27,10 +27,9 @@ it releases it. It is not a `Message` and cannot become one: it is what *makes*
 a shell, and a `Message` presupposes one.
 
 The account is built by one prelude function — read it as a checklist of
-everything a shell states about itself (anchored; these are the shipped
+everything a shell states about itself (these are the shipped
 bytes):
 
-<!-- quote: src/rig/wire/prelude.bash anchor=account -->
 ```bash
 __bc_account() {
     local __bc_out=$1 IFS=' '

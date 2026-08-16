@@ -9,8 +9,8 @@ material).
 `overview.md` the way in, `measurements.md` holds the kernel and bash facts
 the transport stands on: check there before proposing a transport change;
 `design.md` is the design above the code. Do not restate any of it in code
-comments. Code quotes in the book are anchored — after changing an anchored
-region run `docs/sync-quotes.bash`; CI checks with `--check`.
+comments. Code blocks in the book are hand copies of the tree — when
+touching either side, check the other.
 
 ```bash
 cargo test --lib -- --test-threads=1

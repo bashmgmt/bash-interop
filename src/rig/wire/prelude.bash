@@ -31,7 +31,6 @@ __bc_complain() {
 # own. Binds the name to the coordinate for this shell, keeps the words, and
 # attaches this process; a fork inherits the entries and attaches itself on
 # its first word, announcing the same words.
-# ANCHOR: bc-join
 BC_JOIN() {
     __BC__at="${BASH_SOURCE[1]:-?}:${BASH_LINENO[0]:-?}"
     __BC__word=${FUNCNAME[0]}
@@ -49,10 +48,8 @@ BC_JOIN() {
     __BC__META[$__bc_label]="${*@Q}"
     __bc_attach "$__bc_label"
 }
-# ANCHOR_END: bc-join
 
 # $1 the label, $2 the verb, the rest the client's words.
-# ANCHOR: bc-instr
 BC_INSTR() {
     __BC__at="${BASH_SOURCE[1]:-?}:${BASH_LINENO[0]:-?}"
     __BC__word=${FUNCNAME[0]}
@@ -67,7 +64,6 @@ BC_INSTR() {
         *)   __bc_complain "unknown verb ${2-}"; return "$__BC__FAILED" ;;
     esac
 }
-# ANCHOR_END: bc-instr
 
 # $1 the label. This process's pipe: make it, announce it with the account,
 # open it — the open completes when the run has it in hand, and the run makes
@@ -75,7 +71,6 @@ BC_INSTR() {
 #
 # `>` would create a regular file where no fifo is, so the control fifo is
 # checked before it is written: a session that closed unlinked it.
-# ANCHOR: attach
 __bc_attach() {
     local __bc_dir=${__BC__DIR[$1]}
     local __bc_tok="$1::$BASHPID.${EPOCHREALTIME#*[.,]}.${SRANDOM:-$RANDOM$RANDOM}"
@@ -92,7 +87,6 @@ __bc_attach() {
     __BC__REP[$1]=$__bc_rep
     __BC__OWNER[$1]=$BASHPID
 }
-# ANCHOR_END: attach
 
 # $1 the label. A fork inherited its parent's descriptors; it drops them and
 # takes its own, so a parent's pipe is held only by processes that could write
@@ -109,7 +103,6 @@ __bc_reattach() {
 # brought ride as one nested literal, the shape `versinfo` takes. `IFS` is
 # local so `[*]` joins with a space whatever the subject's is, and the
 # subject's — unset included — is back on return.
-# ANCHOR: account
 __bc_account() {
     local __bc_out=$1 IFS=' '
     local -a __bc_meta="(${__BC__META[$2]-})"
@@ -127,14 +120,12 @@ __bc_account() {
         brought   "(${__bc_meta[*]@Q})"
     printf -v "$__bc_out" '(%s)' "${*@Q}"
 }
-# ANCHOR_END: account
 
 # $1 the token, $2 the account; standard output is the control fifo. Every
 # shell writes there and a write is atomic up to PIPE_BUF, so the account goes
 # in frames that each fit it whole: `<token> + <bytes>` for one with more to
 # come, `<token> . <bytes>` for the last. Under `LC_ALL=C` `${#2}` and
 # `${2:a:b}` count bytes; `local` puts the subject's locale back on return.
-# ANCHOR: announce
 __bc_announce() {
     local LC_ALL=C
     local __bc_room=$(( 4096 - ${#1} - 4 )) __bc_from=0
@@ -144,23 +135,19 @@ __bc_announce() {
     done
     printf '%s . %s\n' "$1" "${2:__bc_from}" || __BC_THROW
 }
-# ANCHOR_END: announce
 
 # $1 the label, $2 the verb, the rest the words. One line, one printf: the
 # pipe has one writer, so the size of the line does not matter.
-# ANCHOR: send
 __bc_send() {
     local IFS=' ' __bc_fd=${__BC__FD[$1]}
     set -- "$2" "at=$EPOCHREALTIME" "${@:3}"
     printf '(%s)\n' "${*@Q}" >&"$__bc_fd" || __BC_THROW
 }
-# ANCHOR_END: send
 
 # $1 the label, the rest the question. The reply pipe was opened at attach and
 # is read-write, so the read waits for an answer rather than seeing end of
 # input. The answer is one command, as a bash array literal; running it is the
 # result the caller gets.
-# ANCHOR: ask
 __bc_ask() {
     __bc_send "$1" ASK "${@:2}" || __BC_BAIL
 
@@ -170,4 +157,3 @@ __bc_ask() {
     local -a __bc_answer="$__bc_line"
     "${__bc_answer[@]}"
 }
-# ANCHOR_END: ask

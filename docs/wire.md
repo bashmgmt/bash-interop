@@ -4,8 +4,8 @@ This is the bottom of the stack: the protocol everything above stands on.
 Read it when you want to know *exactly* what crosses between a shell and
 the session — to debug a run, to extend a tool, or to convince yourself
 the guarantees in [overview.md](overview.md) are real. Nothing here is
-API; the chapter quotes the shipped bash itself (anchored, so the quotes
-cannot drift from the files).
+API; the chapter quotes the shipped bash itself, in hand copies of
+`src/rig/wire/prelude.bash` and its neighbours.
 
 Where things live:
 
@@ -42,7 +42,6 @@ own free payload — kept per label, `@Q`-quoted, announced with every
 attach, and landing verbatim on `Shell::brought`. The protocol reserves no
 word in them and never self-locates. Here is the word as shipped:
 
-<!-- quote: src/rig/wire/prelude.bash anchor=bc-join -->
 ```bash
 BC_JOIN() {
     __BC__at="${BASH_SOURCE[1]:-?}:${BASH_LINENO[0]:-?}"
@@ -69,7 +68,6 @@ messages name), and the `__BC__OWNER` check is how a **fork** — which
 inherited the arrays but not a pipe of its own — attaches itself on its
 first word:
 
-<!-- quote: src/rig/wire/prelude.bash anchor=bc-instr -->
 ```bash
 BC_INSTR() {
     __BC__at="${BASH_SOURCE[1]:-?}:${BASH_LINENO[0]:-?}"
@@ -152,7 +150,6 @@ bytes whatever the text holds — and the subject's locale is back on
 return. A frame may therefore end *inside* a multibyte character, which
 is fine, because reassembly happens in bytes:
 
-<!-- quote: src/rig/wire/prelude.bash anchor=announce -->
 ```bash
 __bc_announce() {
     local LC_ALL=C
@@ -188,7 +185,6 @@ drops an announcement left in the middle, and unlinks `join` last.
 The attach is the one choreographed moment, so read it as choreography.
 The shell's side:
 
-<!-- quote: src/rig/wire/prelude.bash anchor=attach -->
 ```bash
 __bc_attach() {
     local __bc_dir=${__BC__DIR[$1]}
@@ -277,7 +273,6 @@ itself writes up front.
 
 A `say` is one write:
 
-<!-- quote: src/rig/wire/prelude.bash anchor=send -->
 ```bash
 __bc_send() {
     local IFS=' ' __bc_fd=${__BC__FD[$1]}
@@ -292,7 +287,6 @@ the full scoping story is [scoping.md](scoping.md).)
 An `ask` is a write, a blocking read, and then something unusual — the
 reply is *executed*:
 
-<!-- quote: src/rig/wire/prelude.bash anchor=ask -->
 ```bash
 __bc_ask() {
     __bc_send "$1" ASK "${@:2}" || __BC_BAIL

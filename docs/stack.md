@@ -22,10 +22,9 @@ unconditionally.
 
 ## The instrument
 
-The whole instrument, as shipped (anchored — `src/stack/stack.bash`; its
-header comment carries the contract):
+The whole instrument, as shipped (`src/stack/stack.bash`; its header
+comment carries the contract):
 
-<!-- quote: src/stack/stack.bash anchor=walk -->
 ```bash
 __bc_stack() {
     local -n __bc_stack_out="$1"

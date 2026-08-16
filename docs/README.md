@@ -19,8 +19,7 @@ two session setups work, and where each responsibility lies.
 | [scoping.md](scoping.md) | where names bind in the shipped bash |
 | [measurements.md](measurements.md) | the kernel and bash facts the transport stands on |
 
-Code quoted from the tree is anchored: a fenced block preceded by an HTML
-comment declaring `quote: <file> anchor=<name>` is the region between
-`ANCHOR: <name>` and `ANCHOR_END: <name>` in that file, kept identical by
-[`sync-quotes.bash`](sync-quotes.bash) — run it after changing an anchored
-region; CI runs it with `--check`.
+Code blocks are hand copies of the tree, named by the file they copy —
+when touching either side, check the other. The complete client scripts
+also live as fixtures in `bashprof/__fixtures/book/`, where that crate's
+cli suite runs them as printed.
