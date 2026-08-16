@@ -232,13 +232,21 @@ microsecond); the random tail is defence in depth. A collision fails at
 ## What a line is
 
 Every line on every fifo is a **bash array literal**, with the protocol's
-words in front:
+words in front — but the shapes never share a channel:
 
 ```
-('at=1786786563.138850' 'pid' '4711' 'shlvl' '2' … 'command' '')   the account: no verb, clock first
-('SAY'  'at=1786786563.138912' 'REC' 'compiled' 'x.rs')            a message on the shell's pipe
-('ASK'  'at=…' 'which' 'target')                                   the other verb; there is no third
+('at=1786786563.138850' 'pid' '4711' … 'command' '')      the account: no verb, clock first —
+                                                          once per shell, framed on the control
+                                                          fifo, at the join
+('SAY'  'at=1786786563.138912' 'REC' 'compiled' 'x.rs')   a message — the shell's own pipe
+('ASK'  'at=…' 'which' 'target')                          the other verb; there is no third
 ```
+
+Session setup and conversation cannot mix, and each reader enforces its
+side: `Account::read` refuses a line with a verb where the clock goes, and
+a pipe line whose first word is not `SAY` or `ASK` is refused as
+"`…` is not a verb". Once a shell is admitted, nothing about it travels
+again — its pipe speaks only the two verbs.
 
 Bash's own quoted forms are the codec — `${*@Q}` on the way out,
 `local -a x="$line"` or `bash-strings`' `parse_array` on the way in — so
