@@ -65,8 +65,8 @@ pub fn provisioned<R: Rig>(
 }
 
 /// The convention a by-hand client reads: the workspace as `BC_SESSION`,
-/// sourced as `"$BC_SESSION/session.bash"`. A client's spelling, not the
-/// core's: the core adds nothing to any environment.
+/// the laid files sourced from it. A client's spelling, not the core's:
+/// the core adds nothing to any environment.
 pub fn bc_session(at: &Layout) -> (OsString, OsString) {
     (OsString::from("BC_SESSION"), OsString::from(at.text()))
 }
