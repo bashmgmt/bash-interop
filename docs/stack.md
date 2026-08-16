@@ -56,7 +56,7 @@ write** rather than failing.
 one.
 
 Each section is a bash array literal, read back with `parse_array` — see
-`bash-strings/KB/values.md`.
+`bash-strings/docs/values.md`.
 
 ## The reader
 
@@ -248,7 +248,7 @@ bash in `Rig::bash`.
 
 ## See also
 
-- `bash-strings/KB/values.md` — `parse_array`, the shape each section is
+- `bash-strings/docs/values.md` — `parse_array`, the shape each section is
 - `bashcap/KB/bashcap.md` — `extdebug`, and what else a snapshot carries
 - [scoping.md](scoping.md) — why the nameref rather than a global
 - [measurements.md](measurements.md) — what a snapshot costs

@@ -71,7 +71,7 @@ cannot display survive without a length prefix, an escape scheme, or a
 dependency on either side's idea of encoding.
 
 `value` therefore stands on nothing and is usable on its own — see
-`bash-strings/KB/values.md`.
+`bash-strings/docs/values.md`.
 
 ### 3. One coordinate, owned; the core decides nothing else
 
