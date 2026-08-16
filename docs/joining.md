@@ -17,35 +17,105 @@ line) or only defines (`Provision::Definitions`). That file is what
 tree as it starts — the only way to join subjects that have never heard of
 the session, and the fringe where auto-initiation lives.
 
-Every way a script joins — `JOINING`, printed by both tools under `--help`:
+Every way in reaches the same end state — the words defined, the channel
+open — from a different starting situation. Each is one whole script below;
+the body of work is the same on purpose, so the prologues carry the whole
+difference. (`JOINING`, printed by both tools under `--help`, is the
+condensed card of the same list.)
+
+## Driven, `--reach bash-env` — the subject knows nothing
 
 ```bash
-# A shell under a driven run with --reach bash-env needs nothing: the
-# provisioned file defined and joined it as it started. Under --reach
-# by-hand the file only defined, the workspace is in BC_SESSION, and the
-# script initiates where it says so:
-BASHPROF_INIT "$BC_SESSION"
+#!/usr/bin/env bash
+# Started as:  bashprof run --into build.times -- bash build.bash
+#
+# The provisioned bash_env.bash defined the words and said the join in
+# every shell of this tree as it started. Nothing of the protocol appears
+# here — this is the way in for programs that never heard of the session.
+set -euo pipefail
 
-# A script that starts the tool itself, as a coprocess:
-source lib/joining.bash
-mkdir -p prof.d
-BC_START bashprof serve --at prof.d --into build.times
-until BC_UP prof.d; do sleep 0.01; done
-BC_LOAD prof.d
-BASHPROF_INIT prof.d
-BC_LEAVE
+build() { sleep 0.1; }
+BASHPROF_TIMETHIS build build
+```
 
-# From the pieces, told the workspace as an argument — no vendored words,
-# no environment:
-source "$1/prelude.bash"
-source "$1/rig.bash"
-BC_JOIN TELL "$1"
+## Driven, `--reach by-hand` — defined everywhere, joined where it says
 
-# Publishing to child processes is the client's own: it writes its own
-# startup file and exports BASH_ENV to it —
+```bash
+#!/usr/bin/env bash
+# Started as:  bashprof run --reach by-hand --into build.times -- bash build.bash
+#
+# The provisioned file only defined; BC_SESSION carries the workspace.
+# Nothing is joined until this script's own line — shells it starts before
+# that are not shells of the run.
+set -euo pipefail
+declare -- workspace="${BC_SESSION:?the workspace, from the tool}"
+
+bash prepare.bash          # before the join: defined, but not a shell of the run
+
+BASHPROF_INIT "$workspace"
+
+build() { sleep 0.1; }
+BASHPROF_TIMETHIS build build
+```
+
+## A coprocess client — this script owns the session
+
+```bash
+#!/usr/bin/env bash
+# Started by nobody: it starts the server itself, on a workspace it names
+# and makes, and holds the session open for as long as it runs.
+set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/lib/joining.bash"   # the vendored words
+
+declare -- workspace=prof.d
+mkdir -p "$workspace"
+BC_START bashprof serve --at "$workspace" --into build.times
+until BC_UP "$workspace"; do sleep 0.01; done
+BC_LOAD "$workspace"
+BASHPROF_INIT "$workspace"
+
+build() { sleep 0.1; }
+BASHPROF_TIMETHIS build build
+
+BC_LEAVE                   # let go, wait, take the server's status
+```
+
+## From the pieces — told the workspace as an argument
+
+```bash
+#!/usr/bin/env bash
+# Started as:  bash join-and-speak.bash <workspace>
+#
+# No vendored words, no environment: the two laid files are everything,
+# and the coordinate arrives as argv. This is what BC_LOAD does, spelled
+# out — and the rig's init function is a raw BC_JOIN here.
+set -euo pipefail
+declare -- workspace="${1:?the session workspace}"
+
+source "$workspace/prelude.bash"
+source "$workspace/rig.bash"
+BC_JOIN TELL "$workspace"
+
+BC_INSTR TELL say STEP joined-from-the-pieces
+```
+
+## Publishing to child processes — the client authors the startup file
+
+```bash
+#!/usr/bin/env bash
+# Already joined (any way above); wants the processes it starts joined
+# too. No laid file initiates, so it writes its own startup file —
+# %q is bash's own quoting — and points BASH_ENV at it: bash sources
+# that file in every non-interactive child as it starts.
+set -euo pipefail
+declare -- workspace="${1:?the session workspace}"
+
+declare -- own="${BASH_SOURCE[0]%/*}/own.bash"
 printf 'source %q\nsource %q\nBC_JOIN TELL %q\n' \
-    "$workspace/prelude.bash" "$workspace/rig.bash" "$workspace" > own.bash
-export BASH_ENV="$PWD/own.bash"
+    "$workspace/prelude.bash" "$workspace/rig.bash" "$workspace" > "$own"
+export BASH_ENV="$own"
+
+bash child.bash            # a fresh bash: sources $BASH_ENV, joins, speaks
 ```
 
 Which shells the session reaches is therefore always a decision with an
