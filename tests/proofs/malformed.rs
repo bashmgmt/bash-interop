@@ -9,7 +9,7 @@
 use bash_interop::rig::{Driving, ExitStatus};
 
 use bash_interop::scratch::{bash, Scripts};
-use crate::{behind, report, script, Keeping, ENTRY};
+use crate::{behind, provisioned, report, script, Keeping, ENTRY};
 
 /// A shell that goes leaving a line without its newline is a fault, and it is
 /// reported where the run stands: while the run is being served, it ends it.
@@ -25,7 +25,7 @@ async fn a_line_cut_short_by_a_shell_that_left_ends_the_run() {
     )]);
 
     let failure = Keeping
-        .run(&bash(scripts.at(ENTRY)), |at| vec![at.bash_env()])
+        .run(&bash(scripts.at(ENTRY)), provisioned(&Keeping))
         .await
         .err()
         .expect("the half-read line must be reported");
@@ -46,7 +46,7 @@ async fn a_line_cut_short_at_the_end_is_reported_beside_the_subjects_status() {
         "#,
     )]);
     let ran = Keeping
-        .run(&bash(scripts.at(ENTRY)), |at| vec![at.bash_env()])
+        .run(&bash(scripts.at(ENTRY)), provisioned(&Keeping))
         .await
         .unwrap();
 
@@ -73,7 +73,7 @@ async fn a_line_that_will_not_read_ends_the_run() {
     )]);
 
     let failure = Keeping
-        .run(&bash(scripts.at(ENTRY)), |at| vec![at.bash_env()])
+        .run(&bash(scripts.at(ENTRY)), provisioned(&Keeping))
         .await
         .err()
         .expect("a line that will not read must end the run");
@@ -96,7 +96,7 @@ async fn a_frame_the_protocol_did_not_write_ends_the_run() {
     )]);
 
     let failure = Keeping
-        .run(&bash(scripts.at(ENTRY)), |at| vec![at.bash_env()])
+        .run(&bash(scripts.at(ENTRY)), provisioned(&Keeping))
         .await
         .err()
         .expect("a line that is not a frame must end the run");

@@ -25,14 +25,15 @@ struct Attaching;
 impl Rig for Attaching {
     type Reaction = Vec<Message>;
 
-    fn bash(&self, at: &Layout) -> String {
-        let dir = bash_strings::emit_scalar(at.text());
-        format!(
-            r#"
-            TELL() {{ BC_INSTR TELL say TELL "$@"; }}
-            BC_JOIN TELL {dir}
-            "#
-        )
+    fn bash(&self, _at: &Layout) -> String {
+        r#"
+        TELL() { BC_INSTR TELL say TELL "$@"; }
+        "#
+        .to_string()
+    }
+
+    fn joining(&self, at: &Layout) -> String {
+        format!("BC_JOIN TELL {}\n", bash_strings::emit_scalar(at.text()))
     }
 
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Vec<Message>, Failure> {
@@ -43,13 +44,18 @@ impl Rig for Attaching {
 impl Serving for Attaching {}
 
 /// The client's side, as the vendored words do it: probe the directory it
-/// named until the session is up, attach by sourcing the file laid there,
-/// then on with its own script — which is handed the same coordinate as its
-/// `$1`, explicitly, the way everything else receives it.
+/// named until the session is up, load the laid definitions, initiate its
+/// own channel, then on with its own script — which is handed the same
+/// coordinate as its `$1`, explicitly, the way everything else receives it.
 const JOINING: &str = r#"
-    until [[ -p "$1/join" ]]; do sleep 0.01; done
-    source "$1/session.bash"
-    source "$2" "$1"
+    declare -- workspace="${1:?the session workspace}"
+    declare -- entry="${2:?the client script}"
+
+    until [[ -p "$workspace/join" ]]; do sleep 0.01; done
+    source "$workspace/prelude.bash"
+    source "$workspace/rig.bash"
+    BC_JOIN TELL "$workspace"
+    source "$entry" "$workspace"
 "#;
 
 /// A shell of the initiator's own, holding the session's handle on its
@@ -138,17 +144,24 @@ async fn a_shell_the_session_outlived_is_left_to_its_own_devices() {
     assert_eq!(status.signal(), Some(libc::SIGPIPE), "the word after the session took SIGPIPE");
 }
 
-/// How far a joined session reaches is the client's decision. Exporting
-/// `BASH_ENV` to the session file puts the session in every process the
-/// script starts, which is what a driven run does for the tree it creates.
+/// How far a session reaches is the client's decision — the startup file
+/// included. Nothing laid in the workspace initiates, so a client that
+/// wants its child processes joined writes its own `BASH_ENV` file — the
+/// two sources and its initiation, `%q`-spelled, in its own directory —
+/// and bash does the rest at every child's startup.
 #[tokio::test]
-async fn a_joined_shell_may_publish_the_address_to_its_children() {
+async fn a_joined_shell_may_publish_to_its_children() {
     let scripts = Scripts::of(&[
         (
             ENTRY,
             r#"
+            declare -- workspace="${1:?the session workspace}"
             TELL parent "$BASHPID"
-            export BASH_ENV="$1/session.bash"
+
+            declare -- own="${BASH_SOURCE[0]%/*}/own.bash"
+            printf 'source %q\nsource %q\nBC_JOIN TELL %q\n' \
+                "$workspace/prelude.bash" "$workspace/rig.bash" "$workspace" > "$own"
+            export BASH_ENV="$own"
             bash "${BASH_SOURCE[0]%/*}/child.bash"
             "#,
         ),
@@ -167,6 +180,43 @@ async fn a_joined_shell_may_publish_the_address_to_its_children() {
     assert_eq!(said.len(), 2, "the script and the bash it started: {}", report(&shells));
     assert_eq!(said[0][0], "parent");
     assert_eq!(said[1][0], "child", "{}", report(&shells));
+    assert_ne!(said[0][1], said[1][1], "a process of its own");
+}
+
+/// The coordinate travels only as an argument, and initiation is the
+/// child's own: handed the workspace on its command line, it loads the
+/// definitions and says the join itself. It names the `BASH_ENV` it does
+/// not have.
+#[tokio::test]
+async fn a_child_may_be_told_the_workspace_as_an_argument() {
+    let scripts = Scripts::of(&[
+        (
+            ENTRY,
+            r#"
+            declare -- workspace="${1:?the session workspace}"
+            TELL parent "$BASHPID"
+            bash "${BASH_SOURCE[0]%/*}/child.bash" "$workspace"
+            "#,
+        ),
+        (
+            "child.bash",
+            r#"
+            declare -- workspace="${1:?the session workspace}"
+            source "$workspace/prelude.bash"
+            source "$workspace/rig.bash"
+            BC_JOIN TELL "$workspace"
+            TELL child "$BASHPID" "${BASH_ENV-unset}"
+            "#,
+        ),
+    ]);
+
+    let (shells, status) = joined(&scripts).await;
+    let said = behind(&shells, "TELL");
+
+    assert_eq!(status.code(), Some(0), "{}", report(&shells));
+    assert_eq!(said.len(), 2, "{}", report(&shells));
+    assert_eq!(said[1][0], "child", "{}", report(&shells));
+    assert_eq!(said[1][2], "unset", "no environment carried anything");
     assert_ne!(said[0][1], said[1][1], "a process of its own");
 }
 
@@ -189,7 +239,9 @@ fn interactively(dir: &Path, handle: OwnedFd) -> Child {
     let typed = format!(
         r#"
         until [[ -p "{dir}/join" ]]; do sleep 0.01; done
-        source "{dir}/session.bash"
+        source "{dir}/prelude.bash"
+        source "{dir}/rig.bash"
+        BC_JOIN TELL "{dir}"
         TELL at-the-prompt
         "#
     );
@@ -288,7 +340,7 @@ async fn a_killed_predecessors_leavings_are_swept() {
         .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
         .collect();
     left.sort();
-    assert_eq!(left, ["lock", "prelude.bash", "rig.bash", "session.bash"], "swept and closed");
+    assert_eq!(left, ["lock", "prelude.bash", "rig.bash"], "swept and closed");
 }
 
 /// A workspace nobody made is nobody's to invent: the prescribed directory

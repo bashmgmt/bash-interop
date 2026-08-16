@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use crate::rig::{
-    Answer, Driving, Failure, Layout, Message, Reacting, Rig, Shell,
+    Answer, Driving, Failure, Layout, Message, Provision, Reacting, Rig, Shell,
 };
 use crate::stack::{self, Columns, Site, Source, Stack};
 use crate::scratch::{bash, Scripts};
@@ -35,9 +35,12 @@ struct Walks {
 impl Rig for Walking {
     type Reaction = Walks;
 
-    fn bash(&self, at: &Layout) -> String {
-        let dir = bash_strings::emit_scalar(at.text());
-        stack::with_walk(&[BASH, &format!("BC_JOIN WALK {dir}\n")])
+    fn bash(&self, _at: &Layout) -> String {
+        stack::with_walk(&[BASH])
+    }
+
+    fn joining(&self, at: &Layout) -> String {
+        format!("BC_JOIN WALK {}\n", bash_strings::emit_scalar(at.text()))
     }
 
     async fn joined(&self, _at: &Layout, shell: Arc<Shell>) -> Result<Walks, Failure> {
@@ -72,7 +75,7 @@ impl Driving for Walking {}
 /// Every walk a command line produced, shell by shell in the order they joined.
 async fn walks_in<A: AsRef<std::ffi::OsStr>>(argv: &[A]) -> Vec<Stack> {
     let ran = Walking
-        .run(argv, |at| vec![at.bash_env()])
+        .run(argv, |at| Ok(vec![at.bash_env(Provision::Joining(&Walking.joining(at)))?]))
         .await
         .unwrap_or_else(|e| panic!("{e}"));
 

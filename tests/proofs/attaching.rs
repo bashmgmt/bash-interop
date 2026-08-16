@@ -7,7 +7,7 @@ use std::sync::Arc;
 use bash_interop::rig::{field, Driving, ExitStatus, Failure, Layout, Message, Rig, Shell};
 
 use bash_interop::scratch::{bash, Scripts};
-use crate::{behind, report, running, script, Keeping, ENTRY};
+use crate::{behind, provisioned, report, running, script, Keeping, ENTRY};
 
 /// The blocking open is the rendezvous: a shell that joins, says one thing and
 /// exits within microseconds loses nothing, because it cannot write before the
@@ -58,7 +58,11 @@ struct Twice;
 impl Rig for Twice {
     type Reaction = Vec<Message>;
 
-    fn bash(&self, at: &Layout) -> String {
+    fn bash(&self, _at: &Layout) -> String {
+        String::new()
+    }
+
+    fn joining(&self, at: &Layout) -> String {
         let dir = bash_strings::emit_scalar(at.text());
         format!(
             r#"
@@ -87,7 +91,7 @@ async fn two_labels_in_one_process_are_two_shells() {
     )]);
 
     let ran = Twice
-        .run(&bash(scripts.at(ENTRY)), |at| vec![at.bash_env()])
+        .run(&bash(scripts.at(ENTRY)), provisioned(&Twice))
         .await
         .unwrap()
         .whole()
@@ -138,7 +142,7 @@ async fn an_account_of_any_size_arrives_whole() {
         ),
     )]);
 
-    let ran = Keeping.run(&bash(scripts.at(ENTRY)), |at| vec![at.bash_env()]).await.unwrap().whole().unwrap();
+    let ran = Keeping.run(&bash(scripts.at(ENTRY)), provisioned(&Keeping)).await.unwrap().whole().unwrap();
 
     assert_eq!(behind(&ran.shells, "REC"), [["done"]], "{}", report(&ran.shells));
     let child = ran.shells.iter().find(|at| at.shell.bash.invocation.command.is_some()).unwrap();
@@ -166,7 +170,7 @@ async fn many_shells_announce_at_once() {
         ),
     )]);
 
-    let ran = Keeping.run(&bash(scripts.at(ENTRY)), |at| vec![at.bash_env()]).await.unwrap().whole().unwrap();
+    let ran = Keeping.run(&bash(scripts.at(ENTRY)), provisioned(&Keeping)).await.unwrap().whole().unwrap();
 
     assert_eq!(ran.shells.len(), 17, "the script and sixteen children{}", report(&ran.shells));
     for at in ran.shells.iter().filter(|at| at.shell.bash.invocation.command.is_some()) {
@@ -183,7 +187,11 @@ struct Bringing;
 impl Rig for Bringing {
     type Reaction = Vec<Message>;
 
-    fn bash(&self, at: &Layout) -> String {
+    fn bash(&self, _at: &Layout) -> String {
+        String::new()
+    }
+
+    fn joining(&self, at: &Layout) -> String {
         let dir = bash_strings::emit_scalar(at.text());
         format!(
             r#"
@@ -214,7 +222,7 @@ async fn the_words_a_join_brings_are_on_the_shell() {
     )]);
 
     let ran = Bringing
-        .run(&bash(scripts.at(ENTRY)), |at| vec![at.bash_env()])
+        .run(&bash(scripts.at(ENTRY)), provisioned(&Bringing))
         .await
         .unwrap()
         .whole()

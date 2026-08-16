@@ -1,12 +1,13 @@
 # The client's words for a session it drives itself. A script sources this,
-# makes a workspace, starts a server on it and attaches; from then on
-# `BC_INSTR` is defined:
+# makes a workspace, starts a server on it, loads the definitions and
+# initiates its own channel; from then on `BC_INSTR` is defined:
 #
 #     source lib/joining.bash
 #     mkdir -p prof.d
 #     BC_START bashprof serve --at prof.d --into build.times
 #     until BC_UP prof.d; do sleep 0.01; done
-#     BC_ATTACH prof.d
+#     BC_LOAD prof.d
+#     BASHPROF_INIT prof.d
 #
 #     BC_INSTR BASHPROF say STEP compile
 #     BC_INSTR BASHPROF ask NEXT
@@ -17,8 +18,9 @@
 # and is what brings the protocol into the shell in the first place. Every
 # other way in is under `bashprof --help` and `bashcap --help`.
 #
-# The client feeds the same directory to start, probe and attach; nothing is
-# read back from the server, which is a complete standalone program. The
+# The client feeds the same directory to every step and reads nothing back;
+# the server is a complete standalone program. Loading defines; initiation is
+# the client's own line — the rig's init function, or a raw `BC_JOIN`. The
 # session lasts as long as anyone holds the handle `coproc` gave: a subshell
 # inherits it and keeps the session open for as long as it lives.
 
@@ -33,12 +35,16 @@ BC_START() {
 # the server locks the workspace, removes its fifos on every failure it can
 # observe, and sweeps a killed predecessor's leavings when it opens.
 BC_UP() {
-    [[ -p "$1/join" ]]
+    [[ -p "${1:?the session workspace}/join" ]]
 }
 
-# Join the session at $1: source the file its server laid.
-BC_ATTACH() {
-    source "$1/session.bash"
+# Bring the session's definitions into this shell: the protocol's words, then
+# the rig's. Nothing joins — that is the caller's next line.
+BC_LOAD() {
+    local __bc_dir="${1:?the session workspace}"
+
+    source "$__bc_dir/prelude.bash"
+    source "$__bc_dir/rig.bash"
 }
 
 # Let go, and wait for what the client started. Whoever initiates cleans up;
@@ -46,7 +52,7 @@ BC_ATTACH() {
 # seen the session out and written whatever it writes, and its status is this
 # word's.
 BC_LEAVE() {
-    local __bc_handle="${BC_SERVER[1]}"
+    local __bc_handle="${BC_SERVER[1]:?no server was started}"
     exec {__bc_handle}>&-
 
     wait "$BC_SERVER_PID"

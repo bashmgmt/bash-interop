@@ -15,7 +15,9 @@
 //!
 //! ```no_run
 //! use std::sync::Arc;
-//! use bash_interop::rig::{Answer, Driving, Failure, Layout, Message, Reacting, Rig, Shell};
+//! use bash_interop::rig::{
+//!     Answer, Driving, Failure, Layout, Message, Provision, Reacting, Rig, Shell,
+//! };
 //!
 //! /// Keeps what one shell said, and tells it to use staging.
 //! struct Deploying;
@@ -25,10 +27,16 @@
 //! impl Rig for Deploying {
 //!     type Reaction = Told;
 //!
-//!     /// A word the subject's scripts can call, in every shell, joined under
-//!     /// the label it speaks: `$1` is the session's workspace.
-//!     fn bash(&self) -> String {
-//!         "STAGE() { BC_INSTR DEPLOY say STAGE \"$@\"; }\nBC_JOIN DEPLOY \"$1\"\n".to_string()
+//!     /// A word the subject's scripts can call. Definitions only:
+//!     /// sourcing this joins nothing.
+//!     fn bash(&self, _at: &Layout) -> String {
+//!         "STAGE() { BC_INSTR DEPLOY say STAGE \"$@\"; }\n".to_string()
+//!     }
+//!
+//!     /// The standard initiation — data; run only where a client or a
+//!     /// provisioned file says so.
+//!     fn joining(&self, at: &Layout) -> String {
+//!         format!("BC_JOIN DEPLOY {}\n", bash_strings::emit_scalar(at.text()))
 //!     }
 //!
 //!     async fn joined(&self, _at: &Layout, shell: Arc<Shell>) -> Result<Told, Failure> {
@@ -58,10 +66,13 @@
 //!
 //! # #[tokio::main(flavor = "current_thread")]
 //! # async fn main() -> Result<(), Failure> {
-//! // The closure's return is the subject's whole environment: the usual
-//! // pair has every non-interactive bash in the tree join as it starts.
+//! // The closure's return is the subject's whole environment. Provisioning
+//! // a joining file is the one auto-initiation there is, and it is stated
+//! // here, at the fringe — every other shell's initiation is its own code.
 //! let ran = Deploying
-//!     .run(&["bash", "deploy.bash"], |at| vec![at.bash_env()])
+//!     .run(&["bash", "deploy.bash"], |at| {
+//!         Ok(vec![at.bash_env(Provision::Joining(&Deploying.joining(at)))?])
+//!     })
 //!     .await?;
 //! for shell in ran.whole()?.shells {
 //!     println!("pid {} said {} things", shell.shell.pid, shell.kept.heard.len());
@@ -75,12 +86,13 @@
 //!
 //! | | who started the shells | how they find the address | what the session lasts for | what comes back |
 //! |---|---|---|---|---|
-//! | [`Driving`] | the run, in a process group of its own | exactly what the run's environment closure returned — [`Layout::bash_env`] the usual pair | that process group | [`Run`], with the subject's [`ExitStatus`] |
-//! | [`Serving`] | a bash script, which named and made the workspace and started the server | its own choice: it feeds the same directory to start, probe and attach | whoever holds the handle | [`Served`] |
+//! | [`Driving`] | the run, in a process group of its own | exactly what the run's environment closure returned — [`Layout::bash_env`] with a stated [`Provision`] the usual pair | that process group | [`Run`], with the subject's [`ExitStatus`] |
+//! | [`Serving`] | a bash script, which named and made the workspace and started the server | its own choice: it feeds the same directory to start, probe, load and initiate | whoever holds the handle | [`Served`] |
 //!
-//! Either way, the address is the workspace directory; a shell joins by
-//! sourcing the session file laid inside it, and [`JOINING`] shows every way
-//! a script does that.
+//! Either way, the address is the workspace directory. Loading its laid
+//! files defines; initiation is the client's own line — except where a
+//! provisioned `bash_env.bash` states [`Provision::Joining`], the one
+//! auto-initiation there is. [`JOINING`] shows every way a script joins.
 //!
 //! **A session lasts as long as anyone who could still speak.** Nothing inside
 //! a rig ends one.
@@ -109,7 +121,7 @@ pub(crate) mod wire;
 
 use std::sync::Arc;
 
-pub use attended::{heard, Attended, Kept, Layout, Said};
+pub use attended::{heard, Attended, Kept, Layout, Provision, Said};
 pub use driving::{Driving, ExitStatus, Run, Whole};
 pub use serving::{Served, Serving};
 
@@ -126,7 +138,7 @@ pub use crate::failure::{Doing, Failure};
 /// ```
 pub const JOINING: &str = include_str!("joining.txt");
 
-/// The client's words, as text: `BC_START`, `BC_UP`, `BC_ATTACH`,
+/// The client's words, as text: `BC_START`, `BC_UP`, `BC_LOAD`,
 /// `BC_LEAVE`. A client vendors it (`lib/joining.bash`); a crate carrying a
 /// vendored copy asserts it against this, so the two are the same bytes.
 pub const JOINING_BASH: &str = include_str!("../../assets/joining.bash");
@@ -150,13 +162,18 @@ pub trait Rig {
     /// What reacts to one shell.
     type Reaction: Reacting;
 
-    /// The rig's own bash, generated with the settled workspace in hand.
-    /// The invocation sources it with no arguments — the subject's own `$@`
-    /// is visible, never to be written to — and the coordinate is baked in,
-    /// spelled with [`bash_strings::emit_scalar`]. Joining — which labels,
-    /// with which words, or none — is this text's own business:
-    /// `BC_JOIN <LABEL> <dir> [word…]`.
+    /// The rig's own bash: **definitions only**. Its words, and at most a
+    /// channel-init function; sourcing it has no effect on a shell beyond
+    /// names coming into being, so it is inert, re-sourceable, and free of
+    /// the coordinate unless its author bakes one in.
     fn bash(&self, at: &Layout) -> String;
+
+    /// The rig's standard initiation, as a line of bash ending in a newline
+    /// — `BASHPROF_INIT '<dir>'`, or a raw `BC_JOIN <LABEL> <dir> [word…]`.
+    /// Data: the core never runs it. [`Layout::bash_env`] writes it into the
+    /// provisioned file under [`Provision::Joining`]; every other shell's
+    /// initiation is its own code.
+    fn joining(&self, at: &Layout) -> String;
 
     /// A shell has joined, and everything about it is known. Awaited in the
     /// accept loop, so a slow `joined` delays the next join and nothing else.

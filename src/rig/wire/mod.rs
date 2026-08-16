@@ -9,7 +9,6 @@ mod pipe;
 use std::fs;
 use std::path::Path;
 
-use bash_strings::emit_scalar;
 use super::Layout;
 use crate::failure::{Doing, Failure};
 
@@ -26,15 +25,12 @@ pub(crate) fn mkfifo(path: &Path) -> Result<(), Failure> {
         .doing(|| format!("making the fifo {}", path.display()))
 }
 
-/// Lays the session's bash into the workspace — the protocol's, the rig's,
-/// and the generated invocation naming both, written last: once it is there,
-/// the session is sourceable. The rig's text bakes the coordinate itself,
-/// so the invocation passes nothing.
+/// Lays the session's bash into the workspace: the protocol's half and the
+/// rig's definitions. Nothing laid here initiates — a client sources the two
+/// files and says its own joining, and the one file that may say it instead,
+/// `bash_env.bash`, is [`Layout::bash_env`]'s to write when provisioned.
 pub(crate) fn lay(at: &Layout, bash: &str) -> Result<(), Failure> {
-    let invocation =
-        format!("source {}\nsource {}\n", emit_scalar(&at.prelude()), emit_scalar(&at.rig()));
-
-    for (file, body) in [(at.prelude(), PRELUDE), (at.rig(), bash), (at.session(), &invocation)] {
+    for (file, body) in [(at.prelude(), PRELUDE), (at.rig(), bash)] {
         fs::write(&file, body).doing(|| format!("writing {file}"))?;
     }
 
@@ -94,26 +90,31 @@ mod tests {
         }
     }
 
-    /// The invocation names the two files, quoted: a workspace path bash
-    /// would split or expand still sources. The rig's text is laid as given —
-    /// the coordinate is already baked into it.
+    /// `lay` writes the two definition files as given and nothing more; the
+    /// provisioned file is [`Layout::bash_env`]'s, names both, quoted — a
+    /// workspace path bash would split or expand still sources — and ends
+    /// with the joining line exactly when one is provisioned.
     #[test]
-    fn the_invocation_names_the_session_s_files() {
+    fn what_is_laid_defines_and_what_is_provisioned_states_its_joining() {
         let temp = tempfile::tempdir().unwrap();
         let dir = temp.path().join("it's $HERE");
         std::fs::create_dir(&dir).unwrap();
         let at = Layout::new(dir.clone()).unwrap();
 
         lay(&at, "words\n").unwrap();
-
         let dir = dir.to_str().unwrap();
-        assert_eq!(
-            std::fs::read_to_string(at.session()).unwrap(),
-            format!(
-                "source '{q}/prelude.bash'\nsource '{q}/rig.bash'\n",
-                q = dir.replace('\'', r"'\''"),
-            ),
-        );
         assert_eq!(std::fs::read_to_string(format!("{dir}/rig.bash")).unwrap(), "words\n");
+        assert!(!std::path::Path::new(&format!("{dir}/bash_env.bash")).exists());
+
+        let sources = format!(
+            "source '{q}/prelude.bash'\nsource '{q}/rig.bash'\n",
+            q = dir.replace('\'', r"'\''"),
+        );
+        let (name, file) = at.bash_env(crate::rig::Provision::Definitions).unwrap();
+        assert_eq!(name, "BASH_ENV");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), sources);
+
+        let (_, file) = at.bash_env(crate::rig::Provision::Joining("JOIN 'it'\n")).unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), format!("{sources}JOIN 'it'\n"));
     }
 }

@@ -2,10 +2,10 @@
 
 use std::sync::Arc;
 
-use bash_interop::rig::{Driving, ExitStatus, Failure, Layout, Message, Rig, Shell};
+use bash_interop::rig::{Driving, ExitStatus, Failure, Layout, Message, Provision, Rig, Shell};
 
 use bash_interop::scratch::{bash, Scripts};
-use crate::{behind, report, Keeping, ENTRY};
+use crate::{behind, provisioned, report, Keeping, ENTRY};
 
 /// Hands the subject a word of its own, and a variable of its own.
 struct Deploying;
@@ -13,14 +13,15 @@ struct Deploying;
 impl Rig for Deploying {
     type Reaction = Vec<Message>;
 
-    fn bash(&self, at: &Layout) -> String {
-        let dir = bash_strings::emit_scalar(at.text());
-        format!(
-            r#"
-            TELL() {{ BC_INSTR TELL say TELL "$@"; }}
-            BC_JOIN TELL {dir}
-            "#
-        )
+    fn bash(&self, _at: &Layout) -> String {
+        r#"
+        TELL() { BC_INSTR TELL say TELL "$@"; }
+        "#
+        .to_string()
+    }
+
+    fn joining(&self, at: &Layout) -> String {
+        format!("BC_JOIN TELL {}\n", bash_strings::emit_scalar(at.text()))
     }
 
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Vec<Message>, Failure> {
@@ -59,7 +60,12 @@ async fn the_closures_return_is_the_subjects_whole_environment() {
     argv.extend(bash(scripts.at(ENTRY)).iter().map(|word| word.to_string_lossy().to_string()));
 
     let ran = Deploying
-        .run(&argv, |at| vec![at.bash_env(), ("DEPLOY_STAGE".into(), "canary".into())])
+        .run(&argv, |at| {
+            Ok(vec![
+                at.bash_env(Provision::Joining(&Deploying.joining(at)))?,
+                ("DEPLOY_STAGE".into(), "canary".into()),
+            ])
+        })
         .await
         .unwrap()
         .whole()
@@ -85,7 +91,7 @@ async fn the_closures_return_is_the_subjects_whole_environment() {
 async fn the_command_line_is_run_as_asked() {
     let scripts = Scripts::of(&[(ENTRY, "BC_INSTR KEEP say REC \"$0\" \"$#\"")]);
     let ran = Keeping
-        .run(&bash(scripts.at(ENTRY)), |at| vec![at.bash_env()])
+        .run(&bash(scripts.at(ENTRY)), provisioned(&Keeping))
         .await
         .unwrap()
         .whole()
@@ -109,8 +115,12 @@ async fn a_subject_may_join_by_hand_where_it_chooses() {
         (
             ENTRY,
             r#"
+            declare -- workspace="${BC_SESSION:?the workspace, from the run closure}"
+
             bash "${BASH_SOURCE[0]%/*}/other.bash"
-            source "$BC_SESSION/session.bash"
+            source "$workspace/prelude.bash"
+            source "$workspace/rig.bash"
+            BC_JOIN KEEP "$workspace"
             BC_INSTR KEEP say REC by-hand
             bash "${BASH_SOURCE[0]%/*}/other.bash"
             "#,
@@ -119,7 +129,7 @@ async fn a_subject_may_join_by_hand_where_it_chooses() {
     ]);
 
     let ran = Keeping
-        .run(&bash(scripts.at(ENTRY)), |at| vec![crate::bc_session(at)])
+        .run(&bash(scripts.at(ENTRY)), |at| Ok(vec![crate::bc_session(at)]))
         .await
         .unwrap()
         .whole()
@@ -127,4 +137,39 @@ async fn a_subject_may_join_by_hand_where_it_chooses() {
 
     assert_eq!(behind(&ran.shells, "REC"), [["by-hand"]], "{}", report(&ran.shells));
     assert_eq!(ran.shells.len(), 1, "the children never joined{}", report(&ran.shells));
+}
+
+/// `Provision::Definitions` — the words exist in every shell, and nothing is
+/// joined until a script says so itself; the file carries no coordinate, so
+/// the closure states one beside it. The word said before the join went
+/// nowhere and complained on stderr; only what follows the script's own
+/// initiation is heard.
+#[tokio::test]
+async fn a_definitions_file_leaves_initiation_to_the_script() {
+    let scripts = Scripts::of(&[(
+        ENTRY,
+        r#"
+        declare -- workspace="${BC_SESSION:?the workspace, from the run closure}"
+
+        TELL defined-but-quiet 2>/dev/null
+        BC_JOIN TELL "$workspace"
+        TELL joined-by-choice
+        "#,
+    )]);
+
+    let ran = Deploying
+        .run(&bash(scripts.at(ENTRY)), |at| {
+            Ok(vec![at.bash_env(Provision::Definitions)?, crate::bc_session(at)])
+        })
+        .await
+        .unwrap()
+        .whole()
+        .unwrap();
+
+    assert_eq!(
+        behind(&ran.shells, "TELL"),
+        [["joined-by-choice"]],
+        "the word before the join went nowhere: {}",
+        report(&ran.shells)
+    );
 }

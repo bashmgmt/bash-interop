@@ -12,7 +12,7 @@ use bash_interop::rig::{
 };
 
 use bash_interop::scratch::{bash, Scripts};
-use crate::{behind, gone, report, script, ENTRY};
+use crate::{behind, gone, provisioned, report, script, ENTRY};
 
 /// Fails the first time it is given a message of the kind it breaks on.
 struct Breaking {
@@ -27,7 +27,11 @@ struct Breaks {
 impl Rig for Breaking {
     type Reaction = Breaks;
 
-    fn bash(&self, at: &Layout) -> String {
+    fn bash(&self, _at: &Layout) -> String {
+        String::new()
+    }
+
+    fn joining(&self, at: &Layout) -> String {
         crate::join(at)
     }
 
@@ -83,8 +87,9 @@ fn blocked(scripts: &Scripts) -> i32 {
 async fn a_rig_that_cannot_answer_ends_the_run_and_kills_the_subject() {
     let scripts = Scripts::of(&[(ENTRY, &format!("{REPORTING}BC_INSTR KEEP ask anything"))]);
 
-    let failure = Breaking { on: Verb::Ask }
-        .run(&bash(scripts.at(ENTRY)), |at| vec![at.bash_env()])
+    let breaking = Breaking { on: Verb::Ask };
+    let failure = breaking
+        .run(&bash(scripts.at(ENTRY)), provisioned(&breaking))
         .await
         .err()
         .expect("the run must end in the rig's failure");
@@ -111,8 +116,9 @@ async fn a_failure_while_hearing_ends_the_run_and_kills_the_subject() {
     )]);
 
     let started = Instant::now();
-    let failure = Breaking { on: Verb::Say }
-        .run(&bash(scripts.at(ENTRY)), |at| vec![at.bash_env()])
+    let breaking = Breaking { on: Verb::Say };
+    let failure = breaking
+        .run(&bash(scripts.at(ENTRY)), provisioned(&breaking))
         .await
         .err()
         .expect("the run must end in the rig's failure");

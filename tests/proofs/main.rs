@@ -37,7 +37,7 @@ use std::sync::Arc;
 use bash_strings::emit_scalar;
 
 use bash_interop::rig::{
-    heard, Attended, Driving, Failure, Layout, Message, Rig, Shell, Whole,
+    heard, Attended, Driving, Failure, Layout, Message, Provision, Rig, Shell, Whole,
 };
 
 use bash_interop::scratch::{bash, Scripts};
@@ -56,6 +56,14 @@ pub fn join(at: &Layout) -> String {
     )
 }
 
+/// The usual driven environment: a provisioned file that initiates with the
+/// rig's own joining — the one auto-join there is, stated at each run.
+pub fn provisioned<R: Rig>(
+    rig: &R,
+) -> impl Fn(&Layout) -> Result<Vec<(OsString, OsString)>, Failure> + '_ {
+    |at| Ok(vec![at.bash_env(Provision::Joining(&rig.joining(at)))?])
+}
+
 /// The convention a by-hand client reads: the workspace as `BC_SESSION`,
 /// sourced as `"$BC_SESSION/session.bash"`. A client's spelling, not the
 /// core's: the core adds nothing to any environment.
@@ -69,8 +77,12 @@ pub struct Keeping;
 impl Rig for Keeping {
     type Reaction = Vec<Message>;
 
-    /// No words of its own in the subject's shells: only the join.
-    fn bash(&self, at: &Layout) -> String {
+    /// No words of its own in the subject's shells.
+    fn bash(&self, _at: &Layout) -> String {
+        String::new()
+    }
+
+    fn joining(&self, at: &Layout) -> String {
         join(at)
     }
 
@@ -88,7 +100,7 @@ pub type Ran = Whole<Vec<Message>>;
 pub async fn running(files: &[(&str, &str)]) -> Ran {
     let scripts = Scripts::of(files);
     let ran = Keeping
-        .run(&bash(scripts.at(ENTRY)), |at| vec![at.bash_env()])
+        .run(&bash(scripts.at(ENTRY)), provisioned(&Keeping))
         .await
         .unwrap_or_else(|error| panic!("{error}"));
 

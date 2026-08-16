@@ -13,17 +13,7 @@ use bash_interop::rig::{
 use tokio::sync::Notify;
 
 use bash_interop::scratch::{bash, sourcing, Scripts};
-use crate::{beginning, behind, report, ENTRY};
-
-fn soak_bash(at: &Layout) -> String {
-    let dir = bash_strings::emit_scalar(at.text());
-    format!(
-        r#"
-        NOTE() {{ BC_INSTR SOAK say NOTE "$@"; }}
-        BC_JOIN SOAK {dir}
-        "#
-    )
-}
+use crate::{beginning, behind, provisioned, report, ENTRY};
 
 /// Answers each question a different way, cycling through every form.
 struct Answering {
@@ -49,8 +39,15 @@ impl Rig for Answering {
     type Reaction = Soak;
 
     /// `NOTE` is this rig's own word, called back by several of the answers.
-    fn bash(&self, at: &Layout) -> String {
-        soak_bash(at)
+    fn bash(&self, _at: &Layout) -> String {
+        r#"
+        NOTE() { BC_INSTR SOAK say NOTE "$@"; }
+        "#
+        .to_string()
+    }
+
+    fn joining(&self, at: &Layout) -> String {
+        format!("BC_JOIN SOAK {}\n", bash_strings::emit_scalar(at.text()))
     }
 
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Soak, Failure> {
@@ -135,8 +132,9 @@ async fn a_session_survives_every_way_of_answering() {
         ),
     ]);
 
-    let ran = Answering { steps: scripts.dir().to_path_buf() }
-        .run(&bash(scripts.at(ENTRY)), |at| vec![at.bash_env()])
+    let answering = Answering { steps: scripts.dir().to_path_buf() };
+    let ran = answering
+        .run(&bash(scripts.at(ENTRY)), provisioned(&answering))
         .await
         .and_then(Run::whole)
         .unwrap_or_else(|error| panic!("{error}"));
@@ -189,13 +187,12 @@ struct Gate {
 impl Rig for Gated {
     type Reaction = Gate;
 
-    fn bash(&self, at: &Layout) -> String {
-        let dir = bash_strings::emit_scalar(at.text());
-        format!(
-            r#"
-            BC_JOIN GATE {dir}
-            "#
-        )
+    fn bash(&self, _at: &Layout) -> String {
+        String::new()
+    }
+
+    fn joining(&self, at: &Layout) -> String {
+        format!("BC_JOIN GATE {}\n", bash_strings::emit_scalar(at.text()))
     }
 
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Gate, Failure> {
@@ -245,7 +242,7 @@ async fn an_answer_may_wait_on_another_shells_word() {
     let gated = Gated { open: Rc::new(Notify::new()) };
     let argv = bash(scripts.at(ENTRY));
 
-    let ran = tokio::time::timeout(Duration::from_secs(10), gated.run(&argv, |at| vec![at.bash_env()]))
+    let ran = tokio::time::timeout(Duration::from_secs(10), gated.run(&argv, provisioned(&gated)))
         .await
         .expect("served concurrently, or this would never return")
         .unwrap();

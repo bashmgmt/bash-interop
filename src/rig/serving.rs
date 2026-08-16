@@ -46,12 +46,13 @@ pub struct Served<K> {
 ///
 /// A serving application is a complete standalone program: it owes nobody a
 /// byte on any channel. A client that wants to know the session is up asks
-/// the workspace — `BC_UP` in [`JOINING_BASH`](super::JOINING_BASH) — and
-/// joins by sourcing `<at>/session.bash`, its own spelling of the same
-/// coordinate it gave the server. What the session reaches is the client's
-/// decision: sourcing instruments that shell, its functions, its subshells
-/// and what it sources; exporting `BASH_ENV` to the same file instruments
-/// the processes it starts.
+/// the workspace — `BC_UP` in [`JOINING_BASH`](super::JOINING_BASH) — loads
+/// the laid definitions (`BC_LOAD`) and initiates its own channel, feeding
+/// every step the same coordinate it gave the server. What the session
+/// reaches is the client's decision: joining instruments that shell, its
+/// functions, its subshells and what it sources; a client that wants its
+/// child processes reached writes its own startup file and exports
+/// `BASH_ENV` to it.
 ///
 /// A `Failure` while serving still sees the session out: every shell
 /// released or finished, the workspace's fifos gone.

@@ -54,7 +54,9 @@ pub struct Whole<K> {
 /// caller wanting a launcher puts one there: `env TARGET=staging -- bash
 /// x.bash` is the whole story. `environment` is handed the settled [`Layout`]
 /// and its return is the subject's **whole** environment delta — the core
-/// adds nothing; [`Layout::bash_env`] is the usual pair.
+/// adds nothing. Fallible, because provisioning writes a file:
+/// [`Layout::bash_env`] with a stated [`Provision`](super::Provision) is the
+/// usual pair.
 ///
 /// | | |
 /// |---|---|
@@ -71,7 +73,7 @@ pub trait Driving: Rig {
     async fn run<A, E>(&self, argv: &[A], environment: E) -> Result<Run<Kept<Self>>, Failure>
     where
         A: AsRef<OsStr>,
-        E: FnOnce(&Layout) -> Vec<(OsString, OsString)>,
+        E: FnOnce(&Layout) -> Result<Vec<(OsString, OsString)>, Failure>,
         Self: Sized,
     {
         driven(self, None, argv, environment).await
@@ -88,7 +90,7 @@ pub trait Driving: Rig {
     ) -> Result<Run<Kept<Self>>, Failure>
     where
         A: AsRef<OsStr>,
-        E: FnOnce(&Layout) -> Vec<(OsString, OsString)>,
+        E: FnOnce(&Layout) -> Result<Vec<(OsString, OsString)>, Failure>,
         Self: Sized,
     {
         driven(self, Some(at), argv, environment).await
@@ -105,7 +107,7 @@ async fn driven<R, A, E>(
 where
     R: Rig,
     A: AsRef<OsStr>,
-    E: FnOnce(&Layout) -> Vec<(OsString, OsString)>,
+    E: FnOnce(&Layout) -> Result<Vec<(OsString, OsString)>, Failure>,
 {
     LocalSet::new()
         .run_until(async {
@@ -114,7 +116,7 @@ where
             // The subject lives inside the block: however it leaves, the
             // group is killed and reaped before the session releases files.
             let subject = async {
-                let environment = environment(&session.layout);
+                let environment = environment(&session.layout)?;
                 let mut subject = Subject::spawn(argv, environment)?;
 
                 session.serve(&Watch::process(subject.pid())?).await?;

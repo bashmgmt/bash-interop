@@ -7,7 +7,7 @@ use std::sync::Arc;
 use serde::Serialize;
 
 use super::{Message, Micros, Reacting, Rig, Shell};
-use crate::failure::Failure;
+use crate::failure::{Doing, Failure};
 
 /// The session's workspace: the one coordinate, and the model of the files
 /// in it. Construction proves what every user needs: the directory exists
@@ -19,8 +19,8 @@ pub struct Layout {
     dir: String,
 }
 
-/// What a shell sources to join, inside the workspace.
-const SESSION: &str = "session.bash";
+/// The provisioned startup file: written only by [`Layout::bash_env`].
+const BASH_ENV: &str = "bash_env.bash";
 /// The protocol's half, laid verbatim.
 const PRELUDE: &str = "prelude.bash";
 /// The rig's half, laid from [`super::Rig::bash`].
@@ -61,11 +61,6 @@ impl Layout {
         &self.dir
     }
 
-    /// The file a shell sources to join.
-    pub fn session(&self) -> String {
-        self.file(SESSION)
-    }
-
     pub(crate) fn prelude(&self) -> String {
         self.file(PRELUDE)
     }
@@ -96,13 +91,41 @@ impl Layout {
         format!("{}/{name}", self.dir)
     }
 
-    /// The session file, spelled for `BASH_ENV`: reaches every
-    /// non-interactive bash in the tree the subject creates. The core
+    /// The one owner of `<dir>/bash_env.bash`: writes it — the two sources,
+    /// then the joining line iff provisioned — and yields the
+    /// `("BASH_ENV", <file>)` pair. Every non-interactive bash in the tree
+    /// the subject creates sources that file as it starts; whether that
+    /// initiates the channel is `provision`, stated by the caller. The core
     /// consults neither this pair nor any other: a run's environment is
     /// whatever its closure returns.
-    pub fn bash_env(&self) -> (OsString, OsString) {
-        (OsString::from("BASH_ENV"), self.session().into())
+    pub fn bash_env(&self, provision: Provision<'_>) -> Result<(OsString, OsString), Failure> {
+        let file = self.file(BASH_ENV);
+        let mut content = format!(
+            "source {}\nsource {}\n",
+            bash_strings::emit_scalar(&self.prelude()),
+            bash_strings::emit_scalar(&self.rig()),
+        );
+        if let Provision::Joining(line) = provision {
+            content.push_str(line);
+        }
+        std::fs::write(&file, content).doing(|| format!("provisioning {file}"))?;
+
+        Ok((OsString::from("BASH_ENV"), file.into()))
     }
+}
+
+/// What the provisioned file does about the channel — the first thing a
+/// [`Layout::bash_env`] caller states.
+#[derive(Copy, Clone, Debug)]
+pub enum Provision<'a> {
+    /// The file ends with this line, [`super::Rig::joining`]'s
+    /// usually: subjects with no prior knowledge join as their shells start.
+    Joining(&'a str),
+
+    /// Definitions only: the client code initiates its own channel, and the
+    /// file carries no coordinate — the caller states one beside this pair
+    /// if its scripts need it.
+    Definitions,
 }
 
 /// What one shell's reaction leaves behind, for a given rig.

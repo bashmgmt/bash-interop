@@ -6,11 +6,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bash_interop::rig::{
-    Answer, Driving, Failure, Layout, Message, Reacting, Rig, Shell, Verb,
+    Answer, Driving, Failure, Layout, Message, Provision, Reacting, Rig, Shell, Verb,
 };
 
 use bash_interop::scratch::{bash, Scripts};
-use crate::{behind, gone, lines, report, script, Keeping, ENTRY};
+use crate::{behind, gone, lines, provisioned, report, script, Keeping, ENTRY};
 
 /// A workspace the caller named and made is left where it was told to,
 /// holding the session's three bash files, the lock file, and none of the
@@ -30,8 +30,9 @@ async fn a_named_workspace_is_left_behind_without_its_fifos() {
             for i in 1 2 3; do BC_INSTR KEEP ask step "$i"; done
             bash "${BASH_SOURCE[0]%/*}/other.bash"
             ( BC_INSTR KEEP say REC fork )
-            mkfifo "$BC_SESSION/up.GHOST"
-            printf 'GHOST + half\n' >"$BC_SESSION/join"
+            declare -- workspace="${BC_SESSION:?the workspace, from the run closure}"
+            mkfifo "$workspace/up.GHOST"
+            printf 'GHOST + half\n' >"$workspace/join"
             exit 0
             "#,
         ),
@@ -45,7 +46,12 @@ async fn a_named_workspace_is_left_behind_without_its_fifos() {
     ]);
 
     let ran = Keeping
-        .run_at(&at, &bash(scripts.at(ENTRY)), |at| vec![crate::bc_session(at), at.bash_env()])
+        .run_at(&at, &bash(scripts.at(ENTRY)), |at| {
+            Ok(vec![
+                crate::bc_session(at),
+                at.bash_env(Provision::Joining(&crate::join(at)))?,
+            ])
+        })
         .await
         .unwrap()
         .whole()
@@ -65,7 +71,7 @@ async fn a_named_workspace_is_left_behind_without_its_fifos() {
     left.sort();
     assert_eq!(
         left,
-        ["lock", "prelude.bash", "rig.bash", "session.bash"],
+        ["bash_env.bash", "lock", "prelude.bash", "rig.bash"],
         "the bash, and nothing that was a pipe"
     );
 }
@@ -135,7 +141,11 @@ struct Boom;
 impl Rig for Exploding {
     type Reaction = Boom;
 
-    fn bash(&self, at: &Layout) -> String {
+    fn bash(&self, _at: &Layout) -> String {
+        String::new()
+    }
+
+    fn joining(&self, at: &Layout) -> String {
         crate::join(at)
     }
 
@@ -180,7 +190,7 @@ fn a_panicking_answer_kills_the_subject() {
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        runtime.block_on(Exploding.run(&argv, |at| vec![at.bash_env()]))
+        runtime.block_on(Exploding.run(&argv, provisioned(&Exploding)))
     }));
     std::panic::set_hook(previous);
 
