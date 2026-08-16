@@ -23,13 +23,16 @@ the body of work is the same on purpose, so the prologues carry the whole
 difference. Throughout, `bashprof` stands in for any program built on the
 core: its `--reach bash-env|by-hand` flags are that tool's spelling of
 the two provisioning choices below, and each tool prints this same list in
-its own words under `run --help` and `serve --help`.
+its own words under `run --help` and `serve --help`. The three
+bashprof-driven scripts are quoted from `bashprof/__fixtures/book/`, where
+its cli suite runs them byte for byte as printed; the two tool-free ones
+are the shapes `tests/proofs/serving.rs` proves.
 
 ## Driven, provisioned to join — the subject knows nothing
 
+<!-- quote: ../bashprof/__fixtures/book/provisioned.bash anchor=script -->
 ```bash
-#!/usr/bin/env bash
-# Started as:  bashprof run --into build.times -- bash build.bash
+# Started as:  bashprof run --into build.times -- bash provisioned.bash
 #
 # The provisioned bash_env.bash defined the words and said the join in
 # every shell of this tree as it started. Nothing of the protocol appears
@@ -50,9 +53,9 @@ startup (`BASH_ENV` reaches them all), but no shell is joined until *its
 own code* says so. The script below joins itself and deliberately leaves
 its helper out — that choice is the whole point of the mode.
 
+<!-- quote: ../bashprof/__fixtures/book/by-hand.bash anchor=script -->
 ```bash
-#!/usr/bin/env bash
-# Started as:  bashprof run --reach by-hand --into build.times -- bash build.bash
+# Started as:  bashprof run --reach by-hand --into build.times -- bash by-hand.bash
 set -euo pipefail
 declare -- workspace="${BASHPROF_SESSION:?the workspace, from the tool}"
 
@@ -60,7 +63,7 @@ declare -- workspace="${BASHPROF_SESSION:?the workspace, from the tool}"
 # protocol. Like every shell in the tree it wakes up with the words
 # defined; nobody initiates in it, so it stays outside the session: it
 # runs exactly as it would unwrapped, and nothing it does is heard.
-bash fetch-deps.bash
+bash "${BASH_SOURCE[0]%/*}/fetch-deps.bash"
 
 # From here on, THIS shell is part of the run.
 BASHPROF_INIT "$workspace"
@@ -85,8 +88,8 @@ and makes, and holds the session open for as long as it runs. Everything
 here is bash's own — `coproc` is a keyword, the probe is one file test —
 and the only files ever sourced are the two the session laid:
 
+<!-- quote: ../bashprof/__fixtures/book/coproc.bash anchor=script -->
 ```bash
-#!/usr/bin/env bash
 # Owns the session: names the workspace, starts the server, probes, loads,
 # initiates — and leaves by closing the handle coproc left it.
 set -euo pipefail

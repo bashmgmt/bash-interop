@@ -56,8 +56,11 @@ would choose, because a nameref pointing at itself **warns and discards the
 write** rather than failing.
 
 `$2` is how many leading frames belong to the instrument, counting
-`__bc_stack`'s own. Both current callers pass 2: their own function and this
-one.
+`__bc_stack`'s own. Each caller passes what it is: bashcap's
+`__bc_capture` forwards the number the word gave it — 3 under `BASHCAP`
+(the word, the capture, the walk), 2 under `WITH_BASHCAP`, whose own
+frame is the call site — and bashprof's `__bp_begin` passes 3 plus the
+shift a wrapper declared.
 
 Each section is a bash array literal, read back with `parse_array` — see
 `bash-strings/docs/values.md`.

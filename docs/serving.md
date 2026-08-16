@@ -62,23 +62,31 @@ client keeps the server's stdin as the handle, and reads nothing** —
 `serve_coprocess` is the server half, taking its own stdin as `held`.
 
 The client's half is four moves of plain bash — start, probe, load and
-initiate, let go — reading top to bottom:
+initiate, let go. The whole script (quoted from `bashprof/__fixtures/book/`,
+where the tool's cli suite runs it as printed):
 
+<!-- quote: ../bashprof/__fixtures/book/coproc.bash anchor=script -->
 ```bash
-declare -- workspace="$PWD/prof.d"                      # the address, absolute
-mkdir -p "$workspace"                                   # …and the client makes it
+# Owns the session: names the workspace, starts the server, probes, loads,
+# initiates — and leaves by closing the handle coproc left it.
+set -euo pipefail
+
+declare -- workspace="$PWD/prof.d"   # an address is absolute — initiation refuses else
+mkdir -p "$workspace"
+
 coproc SERVER { bashprof serve --at "$workspace" --into build.times; }
-until [[ -p "$workspace/join" ]]; do sleep 0.01; done   # the workspace shows readiness
+until [[ -p "$workspace/join" ]]; do sleep 0.01; done   # up exactly while serving
 
-source "$workspace/prelude.bash"                        # definitions, by the same dir
-source "$workspace/rig.bash"
-BASHPROF_INIT "$workspace"                              # the client's own initiation
+source "$workspace/prelude.bash"    # the protocol's words
+source "$workspace/rig.bash"        # the rig's
+BASHPROF_INIT "$workspace"
 
-BC_INSTR BASHPROF say STEP compile                      # …the instrumented work…
+build() { sleep 0.1; }
+BASHPROF_TIMETHIS build build
 
 declare -- handle="${SERVER[1]}"
-exec {handle}>&-                                        # let go: close the held write end
-wait "$SERVER_PID"                                      # …and take the server's status
+exec {handle}>&-    # let go: what was held is the server's standard input
+wait "$SERVER_PID"  # it sees the session out; its status is this script's
 ```
 
 Details a careful reader asks about here:

@@ -142,8 +142,9 @@ of three, BEGIN payload in bytes by how many measured calls enclose it:
 
 **What costs this is a layer that is still on the stack while the measured call
 runs.** `__bp_begin` sends the BEGIN and returns before `"$@"`, so it stands in
-its own walk and in nobody else's — ~77 bytes and one frame per level. Two
-extra calls per measurement cost ~1.0 µs each.
+its own walk and in nobody else's — ~77 bytes and one frame per level. The
+one extra call per measurement (the END is inline in the word) costs
+~1.0 µs.
 
 ## What a callee's frame gives back
 

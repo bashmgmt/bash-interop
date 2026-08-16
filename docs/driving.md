@@ -53,30 +53,38 @@ subject's whole environment delta. It receives the settled `Layout`
 (workspace made, files laid) and is fallible, because provisioning writes a
 file.
 
-The three usual sentences, each a complete answer:
+The three usual sentences, each a complete answer — compiled in
+`tests/book.rs`, the target that keeps every such block building:
 
+<!-- quote: tests/book.rs anchor=env-joining -->
 ```rust
-// Blanket: provision a joining startup file. Every non-interactive bash
-// in the subject's tree joins as it starts — the right default for
-// subjects that know nothing of the session. The line is the wrapper's
-// own statement (rigs.md: the sketch's deploy_join).
-|at| Ok(vec![at.bash_env(Provision::Joining(&deploy_join(at)))?])
+// Blanket: provision a joining startup file. Every non-interactive
+// bash in the subject's tree joins as it starts — the right default
+// for subjects that know nothing of the session. The line is the
+// wrapper's own statement (rigs.md: the sketch's deploy_join).
+|at| Ok(vec![at.bash_env(Provision::Joining(&deploy_join(at)))?]),
 ```
 
+<!-- quote: tests/book.rs anchor=env-definitions -->
 ```rust
-// Chosen: provision definitions only, and hand the coordinate to the
-// scripts under a name of YOUR convention — they initiate where they say.
-// (bashprof spells this BASHPROF_SESSION, bashcap BASHCAP_SESSION.)
-|at| Ok(vec![
-    at.bash_env(Provision::Definitions)?,
-    ("DEPLOY_SESSION".into(), at.text().into()),
-])
+// Chosen: provision definitions only, and hand the coordinate to
+// the scripts under a name of YOUR convention — they initiate where
+// they say. (bashprof spells this BASHPROF_SESSION, bashcap
+// BASHCAP_SESSION.)
+|at| {
+    Ok(vec![
+        at.bash_env(Provision::Definitions)?,
+        ("DEPLOY_SESSION".into(), at.text().into()),
+    ])
+},
 ```
 
+<!-- quote: tests/book.rs anchor=env-nothing -->
 ```rust
-// Nothing: the subject runs with no additions at all. Shells can still
-// join by hand if some script knows the workspace by other means.
-|at| Ok(vec![])
+// Nothing: the subject runs with no additions at all. Shells can
+// still join by hand if some script knows the workspace by other
+// means.
+|_at| Ok(vec![]),
 ```
 
 Any further variables of your own ride along in the same vector. The strong
