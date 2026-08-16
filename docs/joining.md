@@ -45,18 +45,35 @@ BASHPROF_TIMETHIS build build
 # Started as:  bashprof run --reach by-hand --into build.times -- bash build.bash
 #
 # The provisioned file only defined; BC_SESSION carries the workspace.
-# Nothing is joined until this script's own line — shells it starts before
-# that are not shells of the run.
+# BASH_ENV reaches EVERY shell of this tree, so every shell has the words
+# defined — but joining is per shell, and happens only where a script
+# says so.
 set -euo pipefail
 declare -- workspace="${BC_SESSION:?the workspace, from the tool}"
 
-bash prepare.bash          # before the join: defined, but not a shell of the run
+# prepare.bash runs before this shell joins. It has the words defined
+# like everything else in the tree; it never initiates, so it is not a
+# shell of the run and nothing it does is heard. If it called a tool
+# word anyway, that word would refuse loudly — "label BASHPROF is not
+# joined", status 125 — rather than silently measure into nowhere.
+bash prepare.bash
 
 BASHPROF_INIT "$workspace"
 
 build() { sleep 0.1; }
 BASHPROF_TIMETHIS build build
 ```
+
+Two consequences of the `Definitions` arm worth knowing before choosing
+it. First, "defined but unjoined" is a **loud** state: the real hooks are
+present everywhere, so a tool word called before initiation refuses with
+status 125 at its own call site — and `BASHPROF_TIMETHIS` refuses *before*
+running the wrapped command, so under `set -e` the script stops there.
+This is deliberate: the caller asked for a measurement, and silently not
+measuring would be worse. Second, it differs from the *vendored-words*
+standalone story ([vendoring.md](vendoring.md)): there a script defines
+no-op hooks behind a guard and genuinely runs unprofiled; here the guard
+would find the real hooks already defined and install nothing.
 
 ## A coprocess client — this script owns the session
 
