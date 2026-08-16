@@ -39,10 +39,6 @@ impl Rig for Walking {
         stack::with_walk(&[BASH])
     }
 
-    fn joining(&self, at: &Layout) -> String {
-        format!("BC_JOIN WALK {}\n", bash_strings::emit_scalar(at.text()))
-    }
-
     async fn joined(&self, _at: &Layout, shell: Arc<Shell>) -> Result<Walks, Failure> {
         Ok(Walks { shell, seen: Vec::new() })
     }
@@ -209,4 +205,10 @@ async fn a_subject_that_moved_leaves_a_source_that_is_not_there() {
     assert_eq!(source, &Source::File("/lib.bash".into()), "joined onto the $PWD it now has");
     assert!(source.found().is_none(), "and there is nothing there");
     assert_eq!(source.missing(), Some(std::path::Path::new("/lib.bash")));
+}
+
+impl Walking {
+    fn joining(&self, at: &Layout) -> String {
+        format!("BC_JOIN WALK {}\n", bash_strings::emit_scalar(at.text()))
+    }
 }

@@ -46,10 +46,6 @@ impl Rig for Answering {
         .to_string()
     }
 
-    fn joining(&self, at: &Layout) -> String {
-        format!("BC_JOIN SOAK {}\n", bash_strings::emit_scalar(at.text()))
-    }
-
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Soak, Failure> {
         Ok(Soak { steps: self.steps.clone(), heard: Vec::new(), answered: 0 })
     }
@@ -191,10 +187,6 @@ impl Rig for Gated {
         String::new()
     }
 
-    fn joining(&self, at: &Layout) -> String {
-        format!("BC_JOIN GATE {}\n", bash_strings::emit_scalar(at.text()))
-    }
-
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Gate, Failure> {
         Ok(Gate { open: Rc::clone(&self.open) })
     }
@@ -250,4 +242,16 @@ async fn an_answer_may_wait_on_another_shells_word() {
     assert_eq!(ran.subject, ExitStatus::Code(0));
     assert_eq!(ran.shells.len(), 2, "the asker in its subshell, and the script");
     assert!(ran.failed.is_none());
+}
+
+impl crate::Joins for Answering {
+    fn joining(&self, at: &Layout) -> String {
+        format!("BC_JOIN SOAK {}\n", bash_strings::emit_scalar(at.text()))
+    }
+}
+
+impl crate::Joins for Gated {
+    fn joining(&self, at: &Layout) -> String {
+        format!("BC_JOIN GATE {}\n", bash_strings::emit_scalar(at.text()))
+    }
 }

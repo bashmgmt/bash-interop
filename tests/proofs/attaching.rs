@@ -62,16 +62,6 @@ impl Rig for Twice {
         String::new()
     }
 
-    fn joining(&self, at: &Layout) -> String {
-        let dir = bash_strings::emit_scalar(at.text());
-        format!(
-            r#"
-            BC_JOIN ONE {dir}
-            BC_JOIN TWO {dir}
-            "#
-        )
-    }
-
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Vec<Message>, Failure> {
         Ok(Vec::new())
     }
@@ -191,15 +181,6 @@ impl Rig for Bringing {
         String::new()
     }
 
-    fn joining(&self, at: &Layout) -> String {
-        let dir = bash_strings::emit_scalar(at.text());
-        format!(
-            r#"
-            BC_JOIN KEEP {dir} role worker note 'two words'
-            "#
-        )
-    }
-
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Vec<Message>, Failure> {
         Ok(Vec::new())
     }
@@ -237,5 +218,28 @@ async fn the_words_a_join_brings_are_on_the_shell() {
             at.shell.pid
         );
         assert_eq!(field(&at.shell.brought, "role"), Some("worker"));
+    }
+}
+
+impl crate::Joins for Twice {
+    fn joining(&self, at: &Layout) -> String {
+        let dir = bash_strings::emit_scalar(at.text());
+        format!(
+            r#"
+            BC_JOIN ONE {dir}
+            BC_JOIN TWO {dir}
+            "#
+        )
+    }
+}
+
+impl crate::Joins for Bringing {
+    fn joining(&self, at: &Layout) -> String {
+        let dir = bash_strings::emit_scalar(at.text());
+        format!(
+            r#"
+            BC_JOIN KEEP {dir} role worker note 'two words'
+            "#
+        )
     }
 }

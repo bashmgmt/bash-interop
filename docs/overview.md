@@ -185,7 +185,7 @@ The terms above, and the Rust name each maps to:
 | **session** | one run: a workspace, a control fifo, a pipe and a task per shell, until the watch fires |
 | **workspace** | the session's directory and address, locked for its life; modelled by `Layout` |
 | **label** | the bash-side key binding a name to a joined workspace; Rust never sees it |
-| **rig** | your description: definitions, standard initiation, how a reaction is built; `Rig` |
+| **rig** | your description: definitions, and how a reaction is built; `Rig` |
 | **reaction** | your per-shell counterpart, run as a task of its own; `Reacting` |
 | **message / answer** | one arglist a shell shipped / one command a blocked shell runs; `Message`, `Answer` |
 | **account** | what a shell says of itself when announcing; becomes `Shell` |

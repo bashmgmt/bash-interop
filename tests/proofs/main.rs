@@ -56,9 +56,15 @@ pub fn join(at: &Layout) -> String {
     )
 }
 
+/// A test rig's standard initiation — the harness's convention, deliberately
+/// not the core's: the core takes the line as data, never as a method.
+pub trait Joins {
+    fn joining(&self, at: &Layout) -> String;
+}
+
 /// The usual driven environment: a provisioned file that initiates with the
 /// rig's own joining — the one auto-join there is, stated at each run.
-pub fn provisioned<R: Rig>(
+pub fn provisioned<R: Joins>(
     rig: &R,
 ) -> impl Fn(&Layout) -> Result<Vec<(OsString, OsString)>, Failure> + '_ {
     |at| Ok(vec![at.bash_env(Provision::Joining(&rig.joining(at)))?])
@@ -80,10 +86,6 @@ impl Rig for Keeping {
     /// No words of its own in the subject's shells.
     fn bash(&self, _at: &Layout) -> String {
         String::new()
-    }
-
-    fn joining(&self, at: &Layout) -> String {
-        join(at)
     }
 
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Vec<Message>, Failure> {
@@ -148,4 +150,10 @@ pub fn report<K: AsRef<[Message]>>(shells: &[Attended<K>]) -> String {
         .collect();
 
     format!("\ncapture:\n{}", lines.join("\n"))
+}
+
+impl Joins for Keeping {
+    fn joining(&self, at: &Layout) -> String {
+        join(at)
+    }
 }

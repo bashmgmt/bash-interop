@@ -32,10 +32,6 @@ impl Rig for Attaching {
         .to_string()
     }
 
-    fn joining(&self, at: &Layout) -> String {
-        format!("BC_JOIN TELL {}\n", bash_strings::emit_scalar(at.text()))
-    }
-
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Vec<Message>, Failure> {
         Ok(Vec::new())
     }

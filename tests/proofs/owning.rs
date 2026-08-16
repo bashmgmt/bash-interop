@@ -145,10 +145,6 @@ impl Rig for Exploding {
         String::new()
     }
 
-    fn joining(&self, at: &Layout) -> String {
-        crate::join(at)
-    }
-
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Boom, Failure> {
         Ok(Boom)
     }
@@ -202,4 +198,10 @@ fn a_panicking_answer_kills_the_subject() {
         .parse()
         .unwrap();
     assert!(gone(blocked), "{blocked} was left waiting for an answer that will never come");
+}
+
+impl crate::Joins for Exploding {
+    fn joining(&self, at: &Layout) -> String {
+        crate::join(at)
+    }
 }

@@ -119,8 +119,9 @@ impl Layout {
 /// [`Layout::bash_env`] caller states.
 #[derive(Copy, Clone, Debug)]
 pub enum Provision<'a> {
-    /// The file ends with this line, [`super::Rig::joining`]'s
-    /// usually: subjects with no prior knowledge join as their shells start.
+    /// The file ends with this line — supplied by the provisioner, usually
+    /// the rig's standard initiation: subjects with no prior knowledge join
+    /// as their shells start.
     Joining(&'a str),
 
     /// Definitions only: the client code initiates its own channel, and the

@@ -33,15 +33,15 @@
 //!         "STAGE() { BC_INSTR DEPLOY say STAGE \"$@\"; }\n".to_string()
 //!     }
 //!
-//!     /// The standard initiation — data; run only where a client or a
-//!     /// provisioned file says so.
-//!     fn joining(&self, at: &Layout) -> String {
-//!         format!("BC_JOIN DEPLOY {}\n", bash_strings::emit_scalar(at.text()))
-//!     }
-//!
 //!     async fn joined(&self, _at: &Layout, shell: Arc<Shell>) -> Result<Told, Failure> {
 //!         Ok(Told { shell, heard: Vec::new() })
 //!     }
+//! }
+//!
+//! /// The standard initiation — data the run's closure hands to `bash_env`;
+//! /// run only where a client or a provisioned file says so.
+//! fn deploy_join(at: &Layout) -> String {
+//!     format!("BC_JOIN DEPLOY {}\n", bash_strings::emit_scalar(at.text()))
 //! }
 //!
 //! impl Reacting for Told {
@@ -71,7 +71,7 @@
 //! // here, at the fringe — every other shell's initiation is its own code.
 //! let ran = Deploying
 //!     .run(&["bash", "deploy.bash"], |at| {
-//!         Ok(vec![at.bash_env(Provision::Joining(&Deploying.joining(at)))?])
+//!         Ok(vec![at.bash_env(Provision::Joining(&deploy_join(at)))?])
 //!     })
 //!     .await?;
 //! for shell in ran.whole()?.shells {
@@ -156,14 +156,6 @@ pub trait Rig {
     /// names coming into being, so it is inert, re-sourceable, and free of
     /// the coordinate unless its author bakes one in.
     fn bash(&self, at: &Layout) -> String;
-
-    /// The rig's standard initiation, as a line of bash ending in a newline
-    /// — the rig's own `<WORD>_INIT '<dir>'`, or a raw
-    /// `BC_JOIN <LABEL> <dir> [word…]`.
-    /// Data: the core never runs it. [`Layout::bash_env`] writes it into the
-    /// provisioned file under [`Provision::Joining`]; every other shell's
-    /// initiation is its own code.
-    fn joining(&self, at: &Layout) -> String;
 
     /// A shell has joined, and everything about it is known. Awaited in the
     /// accept loop, so a slow `joined` delays the next join and nothing else.

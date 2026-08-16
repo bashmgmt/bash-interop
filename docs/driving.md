@@ -11,7 +11,7 @@ Using it is one call:
 ```rust
 let ran = Deploying
     .run(&["bash", "deploy.bash"], |at| {
-        Ok(vec![at.bash_env(Provision::Joining(&Deploying.joining(at)))?])
+        Ok(vec![at.bash_env(Provision::Joining(&deploy_join(at)))?])
     })
     .await?;
 ```
@@ -58,8 +58,9 @@ The three usual sentences, each a complete answer:
 ```rust
 // Blanket: provision a joining startup file. Every non-interactive bash
 // in the subject's tree joins as it starts — the right default for
-// subjects that know nothing of the session.
-|at| Ok(vec![at.bash_env(Provision::Joining(&rig.joining(at)))?])
+// subjects that know nothing of the session. The line is the wrapper's
+// own statement (rigs.md: the sketch's deploy_join).
+|at| Ok(vec![at.bash_env(Provision::Joining(&deploy_join(at)))?])
 ```
 
 ```rust

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use bash_interop::rig::{Driving, ExitStatus, Failure, Layout, Message, Provision, Rig, Shell};
 
 use bash_interop::scratch::{bash, Scripts};
-use crate::{behind, provisioned, report, Keeping, ENTRY};
+use crate::{behind, provisioned, report, Joins, Keeping, ENTRY};
 
 /// Hands the subject a word of its own, and a variable of its own.
 struct Deploying;
@@ -18,10 +18,6 @@ impl Rig for Deploying {
         TELL() { BC_INSTR TELL say TELL "$@"; }
         "#
         .to_string()
-    }
-
-    fn joining(&self, at: &Layout) -> String {
-        format!("BC_JOIN TELL {}\n", bash_strings::emit_scalar(at.text()))
     }
 
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Vec<Message>, Failure> {
@@ -172,4 +168,10 @@ async fn a_definitions_file_leaves_initiation_to_the_script() {
         "the word before the join went nowhere: {}",
         report(&ran.shells)
     );
+}
+
+impl crate::Joins for Deploying {
+    fn joining(&self, at: &Layout) -> String {
+        format!("BC_JOIN TELL {}\n", bash_strings::emit_scalar(at.text()))
+    }
 }

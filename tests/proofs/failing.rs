@@ -31,10 +31,6 @@ impl Rig for Breaking {
         String::new()
     }
 
-    fn joining(&self, at: &Layout) -> String {
-        crate::join(at)
-    }
-
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Breaks, Failure> {
         Ok(Breaks { on: self.on, heard: Vec::new() })
     }
@@ -147,4 +143,10 @@ async fn an_unknown_verb_is_reported_rather_than_ignored() {
     assert_eq!(said.len(), 1, "{}", report(&ran.shells));
     assert_eq!(said[0][0], "returned 125", "the instrumentation failed{}", report(&ran.shells));
     assert!(said[0][1].contains("unknown verb mumble"), "it says which: {:?}", said[0][1]);
+}
+
+impl crate::Joins for Breaking {
+    fn joining(&self, at: &Layout) -> String {
+        crate::join(at)
+    }
 }

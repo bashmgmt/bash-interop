@@ -38,11 +38,6 @@ impl Rig for Deploying {
         "STAGE() { BC_INSTR DEPLOY say STAGE \"$@\"; }\n".to_string()
     }
 
-    // the standard initiation, as data — run only where someone says so
-    fn joining(&self, at: &Layout) -> String {
-        format!("BC_JOIN DEPLOY {}\n", bash_strings::emit_scalar(at.text()))
-    }
-
     // a shell joined: build its reaction from what it said of itself
     async fn joined(&self, _at: &Layout, shell: Arc<Shell>) -> Result<Told, Failure> {
         Ok(Told { shell, heard: Vec::new() })
@@ -65,6 +60,12 @@ impl Reacting for Told {
 }
 
 impl Driving for Deploying {}     // opt in to the Rust-orchestrated role
+
+// the standard initiation, as data — the run's closure hands it to
+// bash_env; run only where a client or a provisioned file says so
+fn deploy_join(at: &Layout) -> String {
+    format!("BC_JOIN DEPLOY {}\n", bash_strings::emit_scalar(at.text()))
+}
 ```
 
 Three shapes to hold onto: the **rig** is one value describing the whole
@@ -89,14 +90,6 @@ pub trait Rig {
     /// the coordinate unless its author bakes one in.
     fn bash(&self, at: &Layout) -> String;
 
-    /// The rig's standard initiation, as a line of bash ending in a newline
-    /// — the rig's own `<WORD>_INIT '<dir>'`, or a raw
-    /// `BC_JOIN <LABEL> <dir> [word…]`.
-    /// Data: the core never runs it. [`Layout::bash_env`] writes it into the
-    /// provisioned file under [`Provision::Joining`]; every other shell's
-    /// initiation is its own code.
-    fn joining(&self, at: &Layout) -> String;
-
     /// A shell has joined, and everything about it is known. Awaited in the
     /// accept loop, so a slow `joined` delays the next join and nothing else.
     async fn joined(&self, at: &Layout, shell: Arc<Shell>) -> Result<Self::Reaction, Failure>;
@@ -112,12 +105,14 @@ session; a rig that wants the workspace inside a definition can have it.
 The text becomes `<dir>/rig.bash`, laid by the session — and sourcing that
 file is safe precisely because this method promises definitions only.
 
-**What is `joining()` for, if the core never runs it?** It is the rig
-stating its standard way in *as a value*, so that the one place allowed to
-automate initiation — a provisioned `bash_env.bash` — has a line to write.
-A by-hand script does not call this method; it types the same line itself
-(or the init function the rig's `bash()` defined). One spelling, stated by
-the rig, used by whoever chooses to.
+**Where does the initiation line live, if the trait has no method for
+it?** With the wrapper — the code that owns the run and its environment
+closure. The one place allowed to automate initiation, a provisioned
+`bash_env.bash`, takes the line as plain data
+(`Provision::Joining(&line)`); the tools each export theirs as a function
+beside their rig (`bashprof::joining(at)`), and a by-hand script types the
+same line itself. The core takes a string and never a method: which line
+initiates a rig is the wrapper's statement, made where the run is made.
 
 **Why is `joined()` async, and what does a slow one cost?** It runs in the
 session's accept loop, between "a shell announced" and "its pipe opens".
@@ -224,7 +219,7 @@ session holds a message whose shell is unknown.
 
 ## `Layout` and `Provision` — the workspace, in your hands
 
-`joined`, `bash`, `joining` and the environment closure all receive
+`joined`, `bash` and the environment closure all receive
 `&Layout`. It is the workspace: one validated coordinate (held as text,
 because it crosses into bash), plus the model of the files inside — the
 constant names (`prelude.bash`, `rig.bash`, `bash_env.bash`, `join`,
@@ -247,8 +242,9 @@ That last one takes the choice its caller must state first:
 /// [`Layout::bash_env`] caller states.
 #[derive(Copy, Clone, Debug)]
 pub enum Provision<'a> {
-    /// The file ends with this line, [`super::Rig::joining`]'s
-    /// usually: subjects with no prior knowledge join as their shells start.
+    /// The file ends with this line — supplied by the provisioner, usually
+    /// the rig's standard initiation: subjects with no prior knowledge join
+    /// as their shells start.
     Joining(&'a str),
 
     /// Definitions only: the client code initiates its own channel, and the
@@ -259,7 +255,8 @@ pub enum Provision<'a> {
 ```
 
 Why an enum and not a boolean: the two arms carry different information.
-`Joining` needs the line to write (usually `&rig.joining(at)`), and
+`Joining` needs the line to write (the wrapper's own — the tools export
+theirs, `bashprof::joining(at)`), and
 `Definitions` needs a warning attached — the file then carries no
 coordinate at all, so if your scripts must find the workspace, you state a
 variable for it (`BASHPROF_SESSION`, `BASHCAP_SESSION` — each tool its

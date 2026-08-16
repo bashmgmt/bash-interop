@@ -94,9 +94,9 @@ line of client code: `BC_JOIN <label> <dir> [word…]`, zero, one or many
 labels, the label being client vocabulary — the write-time-stable name the
 words speak, bound to a run-time coordinate at the join; Rust is never told
 it. The words after the dir ride the announcement and land on
-`Shell::brought`. The rig states its standard initiation as data,
-`Rig::joining(&Layout)`, which the core never runs: it is written into a
-provisioned startup file, or said by a client's own line. The one file that
+`Shell::brought`. The standard initiation is data the wrapper supplies — the tools export
+theirs as a function beside their rig — and the core never runs it: it is
+written into a provisioned startup file, or said by a client's own line. The one file that
 may initiate, `<dir>/bash_env.bash`, is written only by
 `Layout::bash_env(provision)` — the two sources, then the joining line iff
 `Provision::Joining` — the choice stated first, by whoever provisions.
@@ -142,7 +142,7 @@ the run.
 
 ```rust
 // abridged — rigs.md quotes the real declarations
-trait Rig      { type Reaction: Reacting;  bash(&Layout) -> String;  joining(&Layout) -> String;
+trait Rig      { type Reaction: Reacting;  bash(&Layout) -> String;
                  async joined(&Layout, Arc<Shell>) }
 trait Reacting { type Kept;  async hear(Message);  async answer(Message) -> Answer;  async finish() -> Kept }
 ```
