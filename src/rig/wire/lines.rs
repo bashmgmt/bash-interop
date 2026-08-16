@@ -103,7 +103,7 @@ impl Lines {
         match self.receiver.try_read(&mut buffer) {
             Ok(0) => Ok(Read::End),
             Ok(count) => {
-                self.cut(&buffer[..count], Micros::now());
+                self.cut(&buffer[..count], Micros::now()?);
                 Ok(Read::Some)
             }
             Err(cause) if cause.kind() == io::ErrorKind::WouldBlock => Ok(Read::Nothing),

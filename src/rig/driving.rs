@@ -102,14 +102,18 @@ async fn driven<R: Driving, A: AsRef<OsStr>>(
         .run_until(async {
             let mut session = Session::open(rig, at)?;
 
-            // Declared after the session, so it drops before it: leaving
-            // through `?` stops the subject before releasing its files.
-            let environment = rig.environment(&session.layout);
-            let mut subject = Subject::spawn(argv, &session.layout, environment)?;
+            // The subject lives inside the block: however it leaves, the
+            // group is killed and reaped before the session releases files.
+            let subject = async {
+                let environment = rig.environment(&session.layout);
+                let mut subject = Subject::spawn(argv, &session.layout, environment)?;
 
-            session.serve(&Watch::process(subject.pid())?).await?;
-            let subject = subject.finish().doing(|| "waiting for bash".into())?;
+                session.serve(&Watch::process(subject.pid())?).await?;
+                subject.finish().doing(|| "waiting for bash".into())
+            }
+            .await;
             let (shells, failed) = session.close().await;
+            let subject = subject?;
 
             Ok(Run { shells, subject: ExitStatus::from(subject), failed })
         })

@@ -222,10 +222,11 @@ mechanism that cannot be checked by reading the source. One file per subject.
 | `a_shell_the_session_outlived_is_left_to_its_own_devices` | a client that released the handle while running has `parted: None`, and its next word takes `SIGPIPE` |
 | `a_joined_shell_may_publish_the_address_to_its_children` | `export BASH_ENV="$BC_SESSION"` reaches a child process |
 | `a_shell_says_what_it_is_rather_than_being_guessed_at` | an interactive shell joins by sourcing, and says `-i`, `-s`, no command line |
+| `a_failed_announcement_still_sees_the_session_out` | a `Failure` from `announce` comes back with the control fifo unlinked and only the three bash files left |
 
 | `owning.rs` | establishes |
 |---|---|
-| `a_named_workspace_is_left_behind_without_its_fifos` | `run_at` lays the session where the caller said and leaves the three bash files, nothing that was a pipe |
+| `a_named_workspace_is_left_behind_without_its_fifos` | `run_at` lays the session where the caller said and leaves the three bash files, nothing that was a pipe — the fifo of an announcement that never finished included |
 | `a_shell_left_asking_does_not_outlive_the_run` | the run does not wait for a straggler, and the straggler does not survive it |
 | `a_shell_outside_the_group_is_heard_and_never_signalled` | a `setsid` shell is heard, has `parted: None`, and is alive after the run |
 | `a_panicking_answer_kills_the_subject` | the panic propagates out of `run`, and the blocked subject is gone |

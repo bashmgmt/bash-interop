@@ -56,9 +56,10 @@ impl Control {
 
     /// Everything announced whole and not yet opened is released — its pipe
     /// opened and closed, so the shell blocked on it goes on and takes
-    /// `SIGPIPE` at its next write — an announcement left in the middle is
-    /// dropped, and the fifo is unlinked, so a shell arriving later finds no
-    /// session.
+    /// `SIGPIPE` at its next write. An announcement left in the middle is
+    /// dropped, and the fifo its shell made before its first frame is
+    /// removed: the token names it. The control fifo is unlinked last, so a
+    /// shell arriving later finds no session.
     pub(crate) fn close(mut self) -> Result<(), Failure> {
         for raw in self.lines.drain()? {
             if let Some(Announced { token, .. }) = self.frame(raw)? {
@@ -67,6 +68,10 @@ impl Control {
                 drop(Lines::open(&up)?);
                 fs::remove_file(&up).doing(|| format!("removing {}", up.display()))?;
             }
+        }
+        for token in self.partial.keys() {
+            let up = super::up(&self.dir, token);
+            fs::remove_file(&up).doing(|| format!("removing {}", up.display()))?;
         }
         let join = super::join(&self.dir);
         fs::remove_file(&join).doing(|| format!("removing {}", join.display()))?;

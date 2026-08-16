@@ -220,3 +220,27 @@ async fn a_shell_says_what_it_is_rather_than_being_guessed_at() {
     // refuses `-i`, so this is settled at startup and true of the whole shell.
     assert!(shell.options.flags.has('i'));
 }
+
+/// A `Failure` before anything was served — the announcement itself — still
+/// sees the session out: the control fifo is unlinked, the three bash files
+/// remain, and the error is the announcer's own.
+#[tokio::test]
+async fn a_failed_announcement_still_sees_the_session_out() {
+    let temp = tempfile::tempdir().unwrap();
+    let at = temp.path().join("here");
+    let (held, _handle) = pipe().expect("a handle");
+
+    let refused = Attaching
+        .serve(&at, held.into(), |_| Err(Failure::new("announcing", "the client is gone")))
+        .await
+        .err()
+        .expect("the announcer's failure must come back");
+    assert!(refused.to_string().contains("the client is gone"), "{refused}");
+
+    let mut left: Vec<String> = std::fs::read_dir(&at)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    left.sort();
+    assert_eq!(left, ["prelude.bash", "rig.bash", "session.bash"], "no fifo left behind");
+}

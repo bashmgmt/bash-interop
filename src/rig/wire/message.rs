@@ -12,18 +12,18 @@ use std::vec;
 use serde::{Deserialize, Serialize};
 
 use crate::bash::value::{emit_array, parse_array};
-use crate::failure::Failure;
+use crate::failure::{Doing, Failure};
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 pub struct Micros(pub u64);
 
 impl Micros {
     /// The run's own clock, to sit beside the sending shell's `$EPOCHREALTIME`.
-    pub(crate) fn now() -> Self {
-        let since =
-            SystemTime::now().duration_since(UNIX_EPOCH).expect("a clock at or after the epoch");
-
-        Self(since.as_micros() as u64)
+    pub(crate) fn now() -> Result<Self, Failure> {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|since| Self(since.as_micros() as u64))
+            .doing(|| "reading the run's clock".into())
     }
 
     /// `$EPOCHREALTIME`: seconds, the locale's decimal separator, six digits.

@@ -14,7 +14,9 @@ use crate::{behind, gone, lines, report, script, Keeping, ENTRY, JOIN};
 
 /// A workspace the caller named is left where it was told to, holding the
 /// session's three bash files and none of the fifos: the control fifo goes
-/// when the session closes, and a shell's two when it parts.
+/// when the session closes, a shell's two when it parts, and even the fifo of
+/// an announcement that never finished — staged here as the protocol would
+/// have left it — is removed, since its token names it.
 #[tokio::test]
 async fn a_named_workspace_is_left_behind_without_its_fifos() {
     let temp = tempfile::tempdir().unwrap();
@@ -26,6 +28,8 @@ async fn a_named_workspace_is_left_behind_without_its_fifos() {
             for i in 1 2 3; do BC_INSTR KEEP ask step "$i"; done
             bash "${BASH_SOURCE[0]%/*}/other.bash"
             ( BC_INSTR KEEP say REC fork )
+            mkfifo "${BC_SESSION%/*}/up.GHOST"
+            printf 'GHOST + half\n' >"${BC_SESSION%/*}/join"
             exit 0
             "#,
         ),

@@ -28,7 +28,7 @@ pub(super) async fn attend<A: Reacting>(
             biased;
             next = pipe.next() => match next? {
                 Some(line) => react(&mut reaction, &pipe, line).await?,
-                None => break Some(Micros::now()),
+                None => break Some(Micros::now()?),
             },
             _ = closing.changed() => {
                 for line in pipe.drain()? {

@@ -333,10 +333,10 @@ started the thing owns it.
 ## When the rig fails
 
 **A `Failure` from `hear`, `answer` or `joined` ends the conversation.** It
-reaches `serve` on the task's next turn, `run` leaves through `?`, the
-`LocalSet` and every task with it are dropped, and under `Driving` the
-`Subject` is dropped — killing the group. The subject is not told: an answer is
-a command, and no command means *the operator broke*.
+reaches the serve loop on the task's next turn, and under `Driving` the
+`Subject` — which lives inside the orchestration's inner block — is dropped
+first, killing the group. The subject is not told: an answer is a command, and
+no command means *the operator broke*.
 
 | | whose |
 |---|---|
@@ -344,9 +344,13 @@ a command, and no command means *the operator broke*.
 | an answer that returns non-zero | the subject's — `set -e`, `\|\|`, or ignore it |
 | a line the protocol did not write, or one left half-written | the run's while it is served; `failed` if found at close |
 
-Under `Serving` the session is closed before the `Failure` is returned: a shell
-announced and not yet opened is released, one attached takes `SIGPIPE` at its
-next word. The session owns nothing it could kill.
+**In both roles, every path after `Session::open` sees the session out**:
+`run`, `run_at` and `serve` have one exit — whatever failed (a reaction, the
+watch, the announcement, the spawn) is held while `close` runs, then returned.
+Close releases a shell announced and not yet opened, removes the fifo of an
+announcement that never finished (its token names it), unlinks the control
+fifo, and collects every task; a shell still attached takes `SIGPIPE` at its
+next word. Under `Serving` the session owns nothing it could kill.
 
 ## Status
 

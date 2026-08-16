@@ -270,8 +270,10 @@ impl Answer {
 }
 ```
 
-On the Rust side `Pipe::answer` opens `rep.<token>` with `open_sender` — never
-blocks; `ENXIO` if the asker is gone — and awaits `write_all`, so an answer
+On the Rust side `Pipe::answer` opens `rep.<token>` with `open_sender`, fresh
+per answer: the open is the liveness rendezvous, the answer-side mirror of the
+join's blocking open — never blocks, `ENXIO` if the asker died — and awaits
+`write_all`, so an answer
 past the pipe's buffer holds up nothing but that shell. An answer that wants
 to send more bash than one command's worth writes a file wherever it likes and
 names it: `Answer::of("source", [path])`. Assignments made by a sourced step

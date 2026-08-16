@@ -69,9 +69,13 @@ pub trait Serving: Rig {
         LocalSet::new()
             .run_until(async {
                 let mut session = Session::open(self, Some(at))?;
-                announce(&session.layout.address)?;
 
-                let served = session.serve(&Watch::held(held)?).await;
+                let served = async {
+                    let watch = Watch::held(held)?;
+                    announce(&session.layout.address)?;
+                    session.serve(&watch).await
+                }
+                .await;
                 let (shells, failed) = session.close().await;
                 served?;
 
