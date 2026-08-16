@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::bash::shell::Shell;
-use crate::bash::value::emit_q_words;
+use crate::shell::Shell;
+use bash_strings::emit_q_words;
 
 /// What a frame is, as `FUNCNAME` names it. Two of bash's words are not
 /// function names, and a script that defines a function called `main` or

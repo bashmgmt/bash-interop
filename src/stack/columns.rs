@@ -38,9 +38,9 @@
 
 use std::path::Path;
 
-use crate::bash::rig::field;
-use crate::bash::shell::Shell;
-use crate::bash::value::parse_array;
+use crate::rig::field;
+use crate::shell::Shell;
+use bash_strings::parse_array;
 use crate::failure::{Doing, Failure};
 
 use super::{Frame, Site, Source, Stack};

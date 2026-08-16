@@ -4,9 +4,9 @@
 
 use std::sync::Arc;
 
-use mb_resolver::bash::rig::{field, Driving, ExitStatus, Failure, Layout, Message, Rig, Shell};
+use bash_interop::rig::{field, Driving, ExitStatus, Failure, Layout, Message, Rig, Shell};
 
-use crate::support::{bash, Scripts};
+use bash_interop::scratch::{bash, Scripts};
 use crate::{behind, report, running, script, Keeping, ENTRY};
 
 /// The blocking open is the rendezvous: a shell that joins, says one thing and

@@ -6,13 +6,13 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
-use mb_resolver::bash::rig::{
+use bash_interop::rig::{
     Answer, Driving, ExitStatus, Failure, Layout, Message, Reacting, Rig, Run,
     Shell,
 };
 use tokio::sync::Notify;
 
-use crate::support::{bash, sourcing, Scripts};
+use bash_interop::scratch::{bash, sourcing, Scripts};
 use crate::{beginning, behind, report, ENTRY};
 
 const SOAK_BASH: &str = r#"

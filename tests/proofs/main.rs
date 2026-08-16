@@ -30,16 +30,14 @@ mod starting;
 mod transparency;
 mod transport;
 
-#[path = "../support/mod.rs"]
-mod support;
 
 use std::sync::Arc;
 
-use mb_resolver::bash::rig::{
+use bash_interop::rig::{
     heard, Attended, Driving, Failure, Layout, Message, Rig, Shell, Whole,
 };
 
-use support::{bash, Scripts};
+use bash_interop::scratch::{bash, Scripts};
 
 /// Every proof starts the same script, beside whatever else it wrote.
 pub const ENTRY: &str = "main.bash";

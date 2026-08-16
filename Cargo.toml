@@ -1,0 +1,22 @@
+[package]
+name = "bash-interop"
+version = "0.1.0"
+edition = "2024"
+description = "Run bash under instrumentation and hear what it says: a session per run, a pipe and a task per shell, words a script speaks and answers it runs."
+readme = "README.md"
+repository = "https://github.com/simlei/bash-interop"
+keywords = ["bash", "shell", "instrumentation", "ipc", "tracing"]
+categories = ["development-tools", "os::unix-apis", "command-line-interface"]
+exclude = ["KB/**", ".plans/**"]
+
+[dependencies]
+bash-strings = "0.1"
+serde = { version = "1.0", features = ["derive", "rc"] }
+tokio = { version = "1.53", features = ["rt", "net", "io-util", "macros", "sync"] }
+tempfile = "3.9"
+nix = { version = "0.31.1", features = ["fs"] }
+libc = "0.2"
+
+[dev-dependencies]
+serde_json = "1"
+tokio = { version = "1.53", features = ["time"] }

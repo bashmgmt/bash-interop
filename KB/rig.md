@@ -1,6 +1,6 @@
 # The rig — a reaction per shell, and two orchestrations
 
-`src/bash/rig/mod.rs` for the two traits, `driving.rs` and `serving.rs` for the
+`src/rig/mod.rs` for the two traits, `driving.rs` and `serving.rs` for the
 two ways a session comes about, `session.rs`, `attend.rs` and `watch.rs` for
 what they share.
 

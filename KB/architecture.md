@@ -1,6 +1,6 @@
 # The bash instrumentation toolkit — design
 
-What `src/bash/` is, what each layer is allowed to know, and the decisions the
+What `src/` is, what each layer is allowed to know, and the decisions the
 shape follows from. Per-directory reference is [`../bash/`](../bash/README.md);
 this document is the level above it.
 

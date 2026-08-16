@@ -1,12 +1,12 @@
 # Bash interop
 
-Four layers. **Values** (`src/bash/value/`) read and write bash's own quoted
-forms — `@Q`, `@A`, `declare -p`. **The shell** (`src/bash/shell.rs`) is which
+Four layers. **Values** (`bash-strings/src/`) read and write bash's own quoted
+forms — `@Q`, `@A`, `declare -p`. **The shell** (`src/shell.rs`) is which
 bash a shell is, how it was given its code and what it has switched on — a
 shell's own account of itself, which it gives once when it joins. **The stack**
-(`src/bash/stack/`) is the frame walk every instrument shares, both halves: the
+(`src/stack/`) is the frame walk every instrument shares, both halves: the
 bash that ships bash's five arrays, and the Rust that puts them back together.
-**The rig** (`src/bash/rig/`) is a session with instrumentation in it: every
+**The rig** (`src/rig/`) is a session with instrumentation in it: every
 shell that joins gets a pipe of its own and a task of its own, and the rig
 hears what each says and answers what it asks.
 
@@ -16,9 +16,8 @@ writes `$0` into `BASH_SOURCE` for code it was given rather than read, and no
 walk can say on its own which word that is. A tool composes them.
 
 ```
-KB/mb_resolver/bash/                              src/bash/
+KB/                              src/
   onboarding.md     start here: the words, the surface as code, one rig
-  values.md         quoted forms, BashVal, codecs   value/
   shell.md          what a shell is                 shell.rs
   wire.md           the bash, the fifos, the lines  rig/wire/
   rig.md            Rig, Reacting, Driving, Serving rig/{mod,attend,session,watch,driving,serving}.rs
@@ -30,7 +29,7 @@ KB/mb_resolver/bash/                              src/bash/
   bashprof.md       a call tree that travels        bashprof/
 ```
 
-Every module under `src/bash/rig/` is private; `mod.rs` carries `Rig` and
+Every module under `src/rig/` is private; `mod.rs` carries `Rig` and
 `Reacting` and one re-export list that is the rest of the API:
 
 ```rust

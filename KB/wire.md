@@ -1,6 +1,6 @@
 # The wire — the bash, the fifos, the lines, the message
 
-`src/bash/rig/wire/`, with its bash in `src/bash/rig/wire/prelude.bash`.
+`src/rig/wire/`, with its bash in `src/rig/wire/prelude.bash`.
 
 A control fifo every shell announces itself on — with its account, in frames
 — a pipe of its own for every shell, and a message that is one bash array

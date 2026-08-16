@@ -15,8 +15,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use super::rig::wire::{field, Account, Pid, Stamp};
-use super::value::parse_array;
+use crate::rig::wire::{field, Account, Pid, Stamp};
+use bash_strings::parse_array;
 use crate::failure::Failure;
 
 /// `$BASH_VERSINFO`, all six elements. What bash behaves like is a function of

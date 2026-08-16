@@ -6,11 +6,11 @@
 
 use std::sync::Arc;
 
-use crate::bash::rig::{
+use crate::rig::{
     Answer, Driving, Failure, Layout, Message, Reacting, Rig, Shell,
 };
-use crate::bash::stack::{self, Columns, Site, Source, Stack};
-use crate::tests::scripts::{bash, Scripts};
+use crate::stack::{self, Columns, Site, Source, Stack};
+use crate::scratch::{bash, Scripts};
 
 /// The whole instrument: a word that walks and says what it found. The 2 is
 /// `__bc_stack`'s own frame and `WALK`'s, so the walk starts at the subject.

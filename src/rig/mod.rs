@@ -15,7 +15,7 @@
 //!
 //! ```no_run
 //! use std::sync::Arc;
-//! use mb_resolver::bash::rig::{Answer, Driving, Failure, Layout, Message, Reacting, Rig, Shell};
+//! use bash_interop::rig::{Answer, Driving, Failure, Layout, Message, Reacting, Rig, Shell};
 //!
 //! /// Keeps what one shell said, and tells it to use staging.
 //! struct Deploying;
@@ -114,7 +114,7 @@ pub use serving::{Served, Serving};
 
 pub use wire::{field, Answer, Message, Micros, Pid, Stamp, Verb};
 
-pub use crate::bash::shell::Shell;
+pub use crate::shell::Shell;
 pub use crate::failure::{Doing, Failure};
 
 /// How a bash script joins a session, in every way there is. Both tools print
@@ -124,6 +124,11 @@ pub use crate::failure::{Doing, Failure};
 #[doc = include_str!("joining.txt")]
 /// ```
 pub const JOINING: &str = include_str!("joining.txt");
+
+/// The client half of the coprocess convention, as text: `BC_START` and
+/// `BC_LEAVE`. A client vendors it (`lib/joining.bash`); a crate carrying a
+/// vendored copy asserts it against this, so the two are the same bytes.
+pub const JOINING_BASH: &str = include_str!("../../assets/joining.bash");
 
 /// What bash a rig gives the subject, and how a reaction is made once a
 /// shell is there.
@@ -137,7 +142,7 @@ pub const JOINING: &str = include_str!("joining.txt");
 /// | [`Arc<Shell>`](Shell) — `bash: Bash`, `options: Options`, `brought`, `joined: Stamp` | |
 ///
 /// The rig's bash is laid beside the protocol's own by the session;
-/// [`stack::with_walk`](crate::bash::stack::with_walk) composes it where the
+/// [`stack::with_walk`](crate::stack::with_walk) composes it where the
 /// rig reports a frame walk.
 #[expect(async_fn_in_trait, reason = "single-threaded by design: no Send bound")]
 pub trait Rig {

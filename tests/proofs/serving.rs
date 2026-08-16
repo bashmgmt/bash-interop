@@ -12,11 +12,11 @@ use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 
-use mb_resolver::bash::rig::{
+use bash_interop::rig::{
     Attended, Failure, Layout, Message, Rig, Serving, Shell,
 };
 
-use crate::support::Scripts;
+use bash_interop::scratch::Scripts;
 use crate::{behind, report, ENTRY};
 
 /// Keeps what it hears, and has no say in when the session ends.

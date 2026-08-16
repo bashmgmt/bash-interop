@@ -132,8 +132,8 @@ impl<'a> Frame<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bash::rig::wire::{field, Micros};
-    use crate::bash::value::emit_array;
+    use crate::rig::wire::{field, Micros};
+    use bash_strings::emit_array;
 
     fn raw(text: impl AsRef<[u8]>) -> Raw {
         Raw { bytes: text.as_ref().to_vec(), heard_at: Micros(7) }

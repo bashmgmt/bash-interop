@@ -6,12 +6,12 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use mb_resolver::bash::rig::{
+use bash_interop::rig::{
     Answer, Driving, ExitStatus, Failure, Layout, Message, Reacting, Rig, Shell,
     Verb,
 };
 
-use crate::support::{bash, Scripts};
+use bash_interop::scratch::{bash, Scripts};
 use crate::{behind, gone, report, script, ENTRY, JOIN};
 
 /// Fails the first time it is given a message of the kind it breaks on.

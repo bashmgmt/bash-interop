@@ -2,9 +2,9 @@
 
 use std::sync::Arc;
 
-use mb_resolver::bash::rig::{Driving, ExitStatus, Failure, Layout, Message, Rig, Shell};
+use bash_interop::rig::{Driving, ExitStatus, Failure, Layout, Message, Rig, Shell};
 
-use crate::support::{bash, Scripts};
+use bash_interop::scratch::{bash, Scripts};
 use crate::{behind, report, Keeping, ENTRY};
 
 /// Hands the subject a word of its own, and a variable of its own.

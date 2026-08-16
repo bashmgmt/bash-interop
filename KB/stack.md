@@ -1,6 +1,6 @@
 # The call stack
 
-`src/bash/stack/stack.bash` writes it, the rest of `src/bash/stack/` reads it. One instrument
+`src/stack/stack.bash` writes it, the rest of `src/stack/` reads it. One instrument
 and one reader, shared by every tool that reports where a shell is.
 
 ## What bash keeps

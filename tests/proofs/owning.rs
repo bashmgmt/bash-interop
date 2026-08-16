@@ -5,11 +5,11 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use mb_resolver::bash::rig::{
+use bash_interop::rig::{
     Answer, Driving, Failure, Layout, Message, Reacting, Rig, Shell, Verb,
 };
 
-use crate::support::{bash, Scripts};
+use bash_interop::scratch::{bash, Scripts};
 use crate::{behind, gone, lines, report, script, Keeping, ENTRY, JOIN};
 
 /// A workspace the caller named is left where it was told to, holding the

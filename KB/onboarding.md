@@ -1,9 +1,9 @@
 # Bash instrumentation — onboarding
 
-What `src/bash/rig/` is, in the order a newcomer needs it: the words, the
+What `src/rig/` is, in the order a newcomer needs it: the words, the
 shape, the whole public surface as code, one complete rig, what the session
 does underneath, and the two tools built on it. Everything named here exists
-under `mb_resolver::bash::rig` unless a path says otherwise. The layer-by-layer
+under `bash_interop::rig` unless a path says otherwise. The layer-by-layer
 reference is [README.md](README.md); the design above it is
 [architecture/bash-instrumentation.md](../architecture/bash-instrumentation.md).
 
@@ -111,7 +111,7 @@ own exit status. The one option turned on is `expand_aliases`.
 Everything a caller touches, as declared. Read the comments as the contract.
 
 ```rust
-use mb_resolver::bash::rig::*;
+use bash_interop::rig::*;
 
 /// A description. `&self` throughout: nothing about it changes by running.
 /// No method has a default body.
@@ -269,7 +269,7 @@ and reaches its shells through `BASH_ENV`:
 
 ```rust
 use std::sync::Arc;
-use mb_resolver::bash::rig::*;
+use bash_interop::rig::*;
 
 struct Deploying;                                        // the description
 
@@ -357,7 +357,7 @@ BC_LEAVE                           # let go, wait, the server's status
 
 ## What the session does underneath
 
-Names in `src/bash/rig/`: `session.rs`, `attend.rs`, `watch.rs`, `wire/`.
+Names in `src/rig/`: `session.rs`, `attend.rs`, `watch.rs`, `wire/`.
 
 1. **Open.** The workspace — a temporary one under `run`, the caller's under
    `run_at` and `serve` — is made and canonicalised, the dir's spelling
@@ -423,7 +423,7 @@ bashprof serve --at DIR --into FILE [--output …]
 ## Where things are
 
 ```
-src/bash/rig/
+src/rig/
   mod.rs          Rig, Reacting, the two shipped reactions, the re-exports, JOINING
   joining.txt     JOINING's text
   attended.rs     Layout, Attended, Kept, Said, heard
@@ -433,8 +433,8 @@ src/bash/rig/
   attend.rs       one shell's task
   watch.rs        Watch: a pidfd or a held handle
   wire/           prelude.bash, lay() — the three files; Control (frames), Lines (bytes), Pipe (lines), message.rs
-src/bash/shell.rs Shell, Bash, Version, Invocation, Options, Flags
-src/bash/stack/   the frame walk: with_walk, Stack, Frame
+src/shell.rs Shell, Bash, Version, Invocation, Options, Flags
+src/stack/   the frame walk: with_walk, Stack, Frame
 src/bashcap/, src/bashprof/, src/bin/
 assets/           joining.bash, bashcap.bash, bashprof.bash — what a client vendors
 tests/examples/   worked rigs, public API only — read top to bottom

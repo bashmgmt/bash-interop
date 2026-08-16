@@ -246,7 +246,7 @@ mechanism that cannot be checked by reading the source. One file per subject.
 
 Bash-level invariants that hold without running anything are asserted against
 the shipped text instead, and live beside it: the protocol's in
-`src/bash/rig/wire/mod.rs`, each tool's in its own tests.
+`src/rig/wire/mod.rs`, each tool's in its own tests.
 
 ## Bash constraints that bound the design
 

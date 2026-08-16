@@ -6,9 +6,9 @@
 //! unreadable one is the whole point. Everything else about the run is
 //! ordinary.
 
-use mb_resolver::bash::rig::{Driving, ExitStatus};
+use bash_interop::rig::{Driving, ExitStatus};
 
-use crate::support::{bash, Scripts};
+use bash_interop::scratch::{bash, Scripts};
 use crate::{behind, report, script, Keeping, ENTRY};
 
 /// A shell that goes leaving a line without its newline is a fault, and it is

@@ -11,7 +11,7 @@ use std::vec;
 
 use serde::{Deserialize, Serialize};
 
-use crate::bash::value::{emit_array, parse_array};
+use bash_strings::{emit_array, parse_array};
 use crate::failure::{Doing, Failure};
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
@@ -103,7 +103,7 @@ impl Message {
 }
 
 /// A shell's account of itself, as it announces itself: the clock, then the
-/// pairs [`Shell::of`](crate::bash::shell::Shell::of) reads.
+/// pairs [`Shell::of`](crate::shell::Shell::of) reads.
 #[derive(Debug)]
 pub(crate) struct Account {
     pub stamp: Stamp,

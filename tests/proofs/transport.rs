@@ -1,6 +1,6 @@
 //! Every shell reaches the run, and what it writes arrives whole.
 
-use mb_resolver::bash::rig::ExitStatus;
+use bash_interop::rig::ExitStatus;
 
 use crate::{behind, report, running, script, ENTRY};
 

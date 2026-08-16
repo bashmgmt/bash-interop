@@ -1,6 +1,6 @@
 # The shell — what one is
 
-`src/bash/shell.rs`.
+`src/shell.rs`.
 
 ```rust
 pub struct Shell {

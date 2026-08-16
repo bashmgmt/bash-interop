@@ -9,7 +9,7 @@ mod pipe;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::bash::value::emit_scalar;
+use bash_strings::emit_scalar;
 use crate::failure::{Doing, Failure};
 
 pub(crate) use control::{Announced, Control};

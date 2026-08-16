@@ -6,9 +6,9 @@ use std::path::Path;
 use std::sync::Arc;
 
 use super::*;
-use crate::bash::rig::Shell;
-use crate::bash::value::emit_array;
-use crate::tests::accounts;
+use crate::rig::Shell;
+use bash_strings::emit_array;
+use crate::scratch::accounts;
 
 /// The layout bash produced for this stack, verified against a real shell:
 ///
@@ -215,7 +215,7 @@ fn a_relative_source_joins_the_walk_s_own_directory() {
 /// was never a path.
 #[test]
 fn only_a_file_is_ever_found_or_missing() {
-    let here = Source::of(file!(), Path::new(env!("CARGO_MANIFEST_DIR")), &reading());
+    let here = Source::of("src/stack/tests/mod.rs", Path::new(env!("CARGO_MANIFEST_DIR")), &reading());
     let gone = Source::of("nowhere/at/all.bash", Path::new("/w"), &reading());
 
     assert!(here.found().is_some() && here.missing().is_none());

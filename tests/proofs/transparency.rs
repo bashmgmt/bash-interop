@@ -1,7 +1,7 @@
 //! What the subject keeps: its own exit status, its own trap, its own `IFS`,
 //! its own locale.
 
-use mb_resolver::bash::rig::ExitStatus;
+use bash_interop::rig::ExitStatus;
 
 use crate::{behind, report, script};
 

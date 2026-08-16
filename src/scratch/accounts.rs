@@ -7,9 +7,10 @@
 
 use std::sync::Arc;
 
-use crate::bash::rig::wire::Account;
-use crate::bash::rig::{Micros, Shell, Stamp};
-use crate::bash::value::emit_array;
+use bash_strings::emit_array;
+
+use crate::rig::wire::Account;
+use crate::rig::{Micros, Shell, Stamp};
 
 /// The pairs an announcement carries. `zero` is the shell's `$0` and `flags`
 /// its `$-`, which between them decide how a walk taken in it reads.
