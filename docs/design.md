@@ -120,7 +120,7 @@ fallback — and answers to nobody: nothing is written back, a serving
 application is a complete standalone program, and the client feeds the same
 directory to start, probe, load and initiate. Liveness is the workspace's
 to show — the join fifo is present exactly while a session serves — so
-`BC_UP <dir>` is one file test, and the one boundary is a server killed
+liveness is one file test, and the one boundary is a server killed
 outright, whose stale fifo stands until its directory is next opened or
 removed.
 
@@ -188,8 +188,8 @@ do:
 
 ```
 bashprof run   [--reach bash-env|by-hand] --into build.times -- make test
-bashprof serve --at "$PWD/prof.d" --into build.times   # started by BC_START, from a script
-                                                # (mkdir; BC_UP probes; BC_LOAD; BASHPROF_INIT)
+bashprof serve --at "$PWD/prof.d" --into build.times   # started by a client's coproc
+                                       # (mkdir; probe join; source the laid files; init)
 ```
 
 One sentence covers both ends: **a session lasts as long as anyone who could

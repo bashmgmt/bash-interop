@@ -108,7 +108,7 @@ is refused instead of corrupting the first. A session killed outright
 leaves fifos behind, but the *next* open sweeps them safely, because the
 kernel released the dead session's lock. And the `join` fifo exists
 exactly while a session serves — so "is something serving at `<dir>`?" is
-one file test, which the client word `BC_UP` wraps.
+one file test: `[[ -p <dir>/join ]]`.
 
 ## One shell, start to finish
 

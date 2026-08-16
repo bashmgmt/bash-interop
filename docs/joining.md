@@ -81,47 +81,25 @@ legitimately shares the tool's words joins too, or is left as it is.
 
 ## A coprocess client — this script owns the session
 
+Started by nobody: it starts the server itself, on a workspace it names
+and makes, and holds the session open for as long as it runs. Nothing is
+vendored — `coproc` is bash's own keyword, the probe is one file test, and
+the only files ever sourced are the two the session laid:
+
 ```bash
 #!/usr/bin/env bash
-# Started by nobody: it starts the server itself, on a workspace it names
-# and makes, and holds the session open for as long as it runs.
+# Owns the session: names the workspace, starts the server, probes, loads,
+# initiates — and leaves by closing the handle coproc left it.
 set -euo pipefail
-source "$(dirname "${BASH_SOURCE[0]}")/lib/joining.bash"   # the vendored words
 
 declare -- workspace="$PWD/prof.d"   # an address is absolute — initiation refuses else
 mkdir -p "$workspace"
-BC_START bashprof serve --at "$workspace" --into build.times
-until BC_UP "$workspace"; do sleep 0.01; done
-BC_LOAD "$workspace"
-BASHPROF_INIT "$workspace"
-
-build() { sleep 0.1; }
-BASHPROF_TIMETHIS build build
-
-BC_LEAVE                   # let go, wait, take the server's status
-```
-
-## The same client, nothing vendored
-
-Each word the vendored file brought is one line of plain bash, so the same
-script exists with no `lib/` at all — `coproc` is bash's own keyword, the
-probe is one file test, and the only files ever sourced are the two the
-session laid:
-
-```bash
-#!/usr/bin/env bash
-# The coprocess client again, unwrapped: nothing vendored, and the words
-# come from the workspace itself.
-set -euo pipefail
-
-declare -- workspace="$PWD/prof.d"
-mkdir -p "$workspace"
 
 coproc SERVER { bashprof serve --at "$workspace" --into build.times; }
-until [[ -p "$workspace/join" ]]; do sleep 0.01; done   # BC_UP, unwrapped
+until [[ -p "$workspace/join" ]]; do sleep 0.01; done   # up exactly while serving
 
-source "$workspace/prelude.bash"                        # BC_LOAD, unwrapped
-source "$workspace/rig.bash"
+source "$workspace/prelude.bash"    # the protocol's words
+source "$workspace/rig.bash"        # the rig's
 BASHPROF_INIT "$workspace"
 
 build() { sleep 0.1; }
@@ -132,20 +110,14 @@ exec {handle}>&-    # let go: what was held is the server's standard input
 wait "$SERVER_PID"  # it sees the session out; its status is this script's
 ```
 
-Unwrapping shows what the handle *is*. `coproc` started the server with a
-pipe to its standard input and left this shell holding the write end,
-`${SERVER[1]}`; `Serving::serve_coprocess` takes that very descriptor as
-the thing to watch, and the session lasts exactly as long as somebody
-holds it — a subshell that inherited it counts. Closing it is the whole
-act of leaving, and `wait` then collects a server that has seen the
-session out. The copy into `handle` first mirrors `BC_LEAVE`: `exec
-{name}>&-` closes the descriptor a variable names.
-
-So the vendored file is a convenience, not a dependency: four one-liners
-with their sharp edges filed down — `BC_LEAVE` refuses when nothing was
-started, `BC_UP` says what the file test means — and a stable home for
-these lines' documentation. A script that prefers zero vendored bytes
-writes them itself.
+The handle is the write end of the server's standard input, which `coproc`
+left in `${SERVER[1]}`; `Serving::serve_coprocess` watches that very
+descriptor, and the session lasts exactly as long as somebody holds it — a
+subshell that inherited it counts. Closing it is the whole act of leaving,
+and `wait` then collects a server that has seen the session out. The
+convention's fine print — why the gate, why the copy into `handle`, what
+the `wait` returns — is in
+[serving.md](serving.md#the-coprocess-convention).
 
 ## From the pieces — told the workspace as an argument
 
@@ -153,9 +125,9 @@ writes them itself.
 #!/usr/bin/env bash
 # Started as:  bash join-and-speak.bash <workspace>
 #
-# No vendored words, no environment: the two laid files are everything,
-# and the coordinate arrives as argv. This is what BC_LOAD does, spelled
-# out — and the rig's init function is a raw BC_JOIN here.
+# Nothing vendored, no environment: the two laid files are everything,
+# and the coordinate arrives as argv. The same load as above, without a
+# server to start — and the rig's init function is a raw BC_JOIN here.
 set -euo pipefail
 declare -- workspace="${1:?the session workspace}"
 

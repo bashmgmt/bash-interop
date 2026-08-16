@@ -22,14 +22,12 @@ assets/bashprof.bash      BASHPROF_TIMETHIS                       → __bp_begin
 src/bashprof/effect.bash  __bp_begin, __bp_end
 ```
 
-`assets/joining.bash` is the one file with no second delivery: `BC_START`,
-`BC_UP` and `BC_LOAD` run before there is a session to inject anything
-into, so a client vendors them and nothing injects them. It has no guard
-either — a script that calls `BC_START` wants a session, and the tool being
-absent is a missing command rather than a call site to neutralise. See
-[serving.md](serving.md#the-coprocess-convention). Every way a script joins —
-driven and already joined, load-and-init by hand, only if there is a session,
-started as a coprocess, and the guard below — is
+Reaching a session, by contrast, vendors nothing: starting one is bash's
+own `coproc`, probing one is a file test, and loading sources the two
+files the session laid — [serving.md](serving.md#the-coprocess-convention).
+Every way a script joins — driven and already joined, by hand from the
+pieces, only if there is a session, as a coprocess client, and the guard
+below — is
 `bash_interop::rig::JOINING`, printed by `bashprof run --help` and
 `bashcap run --help`.
 
@@ -55,7 +53,7 @@ NAME` prints the entire body.
 Under `--reach bash-env` the tool defines everything through the provisioned
 `BASH_ENV` file, which bash sources **before the script's first line**, in
 every shell; by hand or under `serve`, the tool's definitions arrive where
-the script says `BC_LOAD` or sources the pieces itself. The client's own
+the script sources the laid files. The client's own
 `source` of the words therefore comes second, or redefines the words with
 the same bytes, which changes nothing. The guard sits on the half that differs, so a client cannot displace
 the real effect whichever way round the two arrive — provided the guard comes
@@ -119,7 +117,6 @@ tree has only 5.3.9 on it.
 |---|---|---|
 | injected (`prelude.bash`, `stack.bash`, the effects) | **5.0** | `$EPOCHREALTIME`, which every message is stamped with |
 | vendored (`bashcap.bash`, `bashprof.bash`) | **4.4** | `"$@"` with no positional parameters under `set -u`, and `${x@Q}` where an effect is present |
-| vendored (`joining.bash`) | 4.1 | `coproc`, `exec {fd}>&-` |
 
 So a client on bash 4.4 runs its own scripts with the words in place and the
 empty hooks behind them; putting a tool behind those hooks needs bash 5. Nothing

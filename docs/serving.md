@@ -61,83 +61,37 @@ process's stdin (write end) and stdout (read end). The convention: **the
 client keeps the server's stdin as the handle, and reads nothing** —
 `serve_coprocess` is the server half, taking its own stdin as `held`.
 
-The client's side is four vendored words. What each does, in one line:
-
-| word | does |
-|---|---|
-| `BC_START server…` | starts the server as the coprocess; nothing is awaited |
-| `BC_UP dir` | one file test: is a session serving at `dir`? |
-| `BC_LOAD dir` | sources the two laid files — definitions in, nothing joined |
-| `BC_LEAVE` | closes the handle, waits for the server, returns its status |
-
-And the words themselves, whole, as a client vendors them
-(`assets/joining.bash` — the same bytes the byte-assert in every consumer
-enforces):
-
-<!-- quote: assets/joining.bash anchor=words -->
-```bash
-# $@ is the server's command line, program included, and the workspace is in
-# there as the server's own argument — this word does not know it. NAME is a
-# literal in `coproc`'s grammar, so there is one server per shell.
-BC_START() {
-    coproc BC_SERVER { "$@"; }
-}
-
-# Is a session serving at $1? The join fifo is present exactly while one is:
-# the server locks the workspace, removes its fifos on every failure it can
-# observe, and sweeps a killed predecessor's leavings when it opens.
-BC_UP() {
-    [[ -p "${1:?the session workspace}/join" ]]
-}
-
-# Bring the session's definitions into this shell: the protocol's words, then
-# the rig's. Nothing joins — that is the caller's next line.
-BC_LOAD() {
-    local __bc_dir="${1:?the session workspace}"
-
-    source "$__bc_dir/prelude.bash"
-    source "$__bc_dir/rig.bash"
-}
-
-# Let go, and wait for what the client started. Whoever initiates cleans up;
-# nothing on the Rust side kills anything. When this returns the server has
-# seen the session out and written whatever it writes, and its status is this
-# word's.
-BC_LEAVE() {
-    local __bc_handle="${BC_SERVER[1]:?no server was started}"
-    exec {__bc_handle}>&-
-
-    wait "$BC_SERVER_PID"
-}
-```
-
-A complete client, reading top to bottom:
+The client's half is four moves of plain bash — start, probe, load and
+initiate, let go — reading top to bottom:
 
 ```bash
-source lib/joining.bash
+declare -- workspace="$PWD/prof.d"                      # the address, absolute
+mkdir -p "$workspace"                                   # …and the client makes it
+coproc SERVER { bashprof serve --at "$workspace" --into build.times; }
+until [[ -p "$workspace/join" ]]; do sleep 0.01; done   # the workspace shows readiness
 
-declare -- workspace="$PWD/prof.d"                            # the address, absolute
-mkdir -p "$workspace"                                         # …and the client makes it
-BC_START bashprof serve --at "$workspace" --into build.times  # start; nothing is read back
-until BC_UP "$workspace"; do sleep 0.01; done                 # the workspace shows readiness
-BC_LOAD "$workspace"                                          # definitions, by the same dir
-BASHPROF_INIT "$workspace"                                    # the client's own initiation
+source "$workspace/prelude.bash"                        # definitions, by the same dir
+source "$workspace/rig.bash"
+BASHPROF_INIT "$workspace"                              # the client's own initiation
 
-BC_INSTR BASHPROF say STEP compile                            # …the instrumented work…
+BC_INSTR BASHPROF say STEP compile                      # …the instrumented work…
 
-BC_LEAVE                                                      # let go, wait, take its status
+declare -- handle="${SERVER[1]}"
+exec {handle}>&-                                        # let go: close the held write end
+wait "$SERVER_PID"                                      # …and take the server's status
 ```
 
 Details a careful reader asks about here:
 
-- **Why the `until BC_UP` gate?** `coproc` returns before the server has
-  even parsed its arguments; sourcing the laid files before they exist
-  would fail. The gate polls the one truthful signal. A client that joins
-  much later (the session serving all along) needs no gate at all.
+- **Why the `until` gate?** `coproc` returns before the server has even
+  parsed its arguments; sourcing the laid files before they exist would
+  fail. The gate polls the one truthful signal. A client that joins much
+  later (the session serving all along) needs no gate at all.
 - **Where do the server's fds live?** `coproc NAME { … }` takes a literal
-  name, so they are `BC_SERVER[0]`/`BC_SERVER[1]` — which also means one
-  server per shell under this convention.
-- **What does `BC_LEAVE` return?** The server's own exit status, so a
+  name, so they are `SERVER[0]`/`SERVER[1]` — which also means one server
+  per shell under this convention. The copy into `handle` before the close
+  is because `exec {name}>&-` closes the descriptor a *variable* names.
+- **What does the `wait` return?** The server's own exit status, so a
   client under `set -e` stops when its server failed — and by the time it
   returns, whatever the server writes (the profile, the capture) is on
   disk, because the server writes after seeing the session out.

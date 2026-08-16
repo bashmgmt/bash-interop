@@ -138,11 +138,6 @@ pub use crate::failure::{Doing, Failure};
 /// ```
 pub const JOINING: &str = include_str!("joining.txt");
 
-/// The client's words, as text: `BC_START`, `BC_UP`, `BC_LOAD`,
-/// `BC_LEAVE`. A client vendors it (`lib/joining.bash`); a crate carrying a
-/// vendored copy asserts it against this, so the two are the same bytes.
-pub const JOINING_BASH: &str = include_str!("../../assets/joining.bash");
-
 /// What bash a rig gives the subject, and how a reaction is made once a
 /// shell is there.
 ///

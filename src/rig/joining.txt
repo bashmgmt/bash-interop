@@ -8,20 +8,27 @@ source "$BC_SESSION/rig.bash"
 BASHPROF_INIT "$BC_SESSION"
 
 # A script that starts the tool itself, as a coprocess: it names and makes
-# the workspace, probes the same directory until the session is up, loads,
-# initiates, and holds the session open for as long as it runs:
-source lib/joining.bash
+# the workspace, probes the same directory until the session is up — the
+# join fifo is present exactly while one serves — loads, initiates, and
+# holds the session open for as long as it keeps the handle coproc left it:
 declare -- workspace="$PWD/prof.d"             # an address is absolute
 mkdir -p "$workspace"
-BC_START bashprof serve --at "$workspace" --into build.times
-until BC_UP "$workspace"; do sleep 0.01; done
-BC_LOAD "$workspace"
+coproc SERVER { bashprof serve --at "$workspace" --into build.times; }
+until [[ -p "$workspace/join" ]]; do sleep 0.01; done
+source "$workspace/prelude.bash"
+source "$workspace/rig.bash"
 BASHPROF_INIT "$workspace"
-BC_LEAVE                                       # let go, wait, return its status
+
+# Letting go is closing that handle — the write end of the server's stdin —
+# and the wait returns the server's status, its reading written by then:
+declare -- handle="${SERVER[1]}"
+exec {handle}>&-
+wait "$SERVER_PID"
 
 # Only if there is a session — a script that runs the same with or without one:
 if [[ -n ${BC_SESSION-} ]]; then
-    BC_LOAD "$BC_SESSION"
+    source "$BC_SESSION/prelude.bash"
+    source "$BC_SESSION/rig.bash"
     BASHPROF_INIT "$BC_SESSION"
 fi
 

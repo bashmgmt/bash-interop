@@ -3,8 +3,7 @@
 The instrumentation core: `failure` (one error), `shell` (a shell's account of
 itself), `stack` (the frame walk, both halves), `rig` (session, wire,
 prelude.bash, the Driving/Serving roles, `JOINING`), `scratch` (public test
-material). `assets/joining.bash` is the vendorable client half, exported as
-`rig::JOINING_BASH`.
+material).
 
 **docs/ is the book** — `docs/README.md` is the contents page,
 `overview.md` the way in, `measurements.md` holds the kernel and bash facts

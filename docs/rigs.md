@@ -271,7 +271,7 @@ anything and releases it after its fifos are gone. An occupied workspace
 is refused whole; a predecessor killed outright leaves stale fifos that
 the *next* open sweeps safely (the kernel released the dead lock); and the
 `join` fifo therefore exists exactly while a session serves, which is what
-makes `BC_UP` — one file test — a truthful liveness probe.
+makes the liveness probe — `[[ -p <dir>/join ]]`, one file test — truthful.
 
 ## What a run hands back
 
