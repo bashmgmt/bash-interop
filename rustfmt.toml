@@ -1,0 +1,30 @@
+# Every workspace member formats by this file: rustfmt walks up from the file
+# it is formatting until it finds one, and only this repository has one. A
+# member cloned standalone has none and formats by rustfmt's own defaults;
+# `make fmt-check`, in `make ci`, is where this file is enforced.
+
+edition       = "2024"
+style_edition = "2024"
+hard_tabs     = false
+tab_spaces    = 4
+newline_style = "Unix"
+
+# The width rustfmt aims for. What it cannot break stays over it — a long
+# string literal is one line whatever this says.
+max_width = 120
+
+# Pinned, not derived. `use_small_heuristics` sets each width below to a
+# fraction of `max_width`, which ties a call's layout to the ceiling; stated
+# here, the two move independently.
+#
+# `fn_call_width` is the width a call's arguments must fit for one line. Past
+# it, rustfmt lays the call one of two ways: at 40 and above it overflows the
+# last argument, keeping the earlier ones on the opening line; at 35 and below
+# it puts every argument on its own line.
+fn_call_width                 = 40
+chain_width                   = 60
+array_width                   = 60
+struct_lit_width              = 18
+struct_variant_width          = 35
+attr_fn_like_width            = 70
+single_line_if_else_max_width = 50
