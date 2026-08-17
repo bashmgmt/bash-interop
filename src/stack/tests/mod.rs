@@ -253,8 +253,8 @@ fn a_shell_given_no_script_file_ends_at_the_frame_bash_never_pushed() {
         "where the walk was entered, args unrecorded"
     );
 
-    // The case that used to be refused: every frame bash reported is the
-    // instrument's, and what is left is the shell itself.
+    // The case that used to be refused: every frame bash reported belongs to
+    // the instrument, and what is left is the shell itself.
     let bare = columns(&raw, 3, true)
         .frames(&accounts::given("bash"))
         .unwrap();

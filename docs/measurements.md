@@ -55,8 +55,8 @@ The whole descriptor layer is stock tokio and nothing is hand-rolled.
 | `bash -c ':'` with a 200-line `BASH_ENV` | 1884 |
 | `exec {fd}>fifo` + close, a reader present | 8 |
 | `printf` one message to a fifo | 12 |
-| **`mkfifo` — this box's, which is uutils in Rust** | **2088** |
-| `mkfifo` — GNU coreutils' (`/bin/true` measured 680) or busybox's | ~600 |
+| **`mkfifo` on this box, which is uutils in Rust** | **2088** |
+| `mkfifo` from GNU coreutils (`/bin/true` measured 680) or busybox | ~600 |
 | a static 800 KB `mkfifo` — the floor: fork plus a bare exec | 514 |
 
 Bash has no builtin that makes a fifo. `mkfifo`, `mknod`, `mkdir` and `ln` are
@@ -201,7 +201,7 @@ mechanism that cannot be checked by reading the source. One file per subject.
 | `attaching.rs` | establishes |
 |---|---|
 | `a_shell_that_speaks_once_and_leaves_loses_nothing` | a `bash -c` that joins, says one thing and exits within microseconds loses nothing: the blocking open is the rendezvous |
-| `a_fork_that_speaks_is_a_shell_of_its_own_and_parts_on_its_own` | a fork takes a pipe of its own, its `parted` precedes the parent's, and the parent's words stay the parent's |
+| `a_fork_that_speaks_is_a_shell_of_its_own_and_parts_on_its_own` | a fork takes a pipe of its own, its `parted` precedes the parent's, and the parent keeps its own words |
 | `two_labels_in_one_process_are_two_shells` | two `BC_JOIN`s in one rig's bash are two pipes and two shells with one pid |
 | `a_label_nobody_joined_is_an_error_by_absence` | a word on an unjoined label names it and the call site, returns 125, and the run knows nothing |
 | `an_account_of_any_size_arrives_whole` | a `bash -c` with a 21 KB command of `€` — six frames, cut inside characters — reads back byte for byte as `Invocation::command` |
@@ -292,7 +292,7 @@ fired for, so the handler must return 0.
 
 Enabling `extdebug` while `BASH_ENV` is being read starts the debugger.
 `bashcap`'s trace arms itself from a `DEBUG` trap on the next command, which
-has to be the subject's, so its join comes before the trap.
+has to be a command of the subject, so its join comes before the trap.
 
 `local LC_ALL=C` counts bytes, and the subject's locale is back on return.
 `${#s}` and `${s:a:b}` count characters in the shell's locale; under `LC_ALL=C`

@@ -103,7 +103,7 @@ mod tests {
     }
 
     /// `lay` writes the two definition files as given and nothing more; the
-    /// provisioned file is [`Layout::bash_env`]'s, names both, quoted — a
+    /// provisioned file sits at [`Layout::bash_env`], names both, quoted — a
     /// workspace path bash would split or expand still sources — and ends
     /// with the joining line exactly when one is provisioned.
     #[test]

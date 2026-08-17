@@ -74,7 +74,7 @@ pub struct Message {
     pub verb: Verb,
     pub stamp: Stamp,
 
-    /// The client's arglist, and nothing of the protocol's.
+    /// The client's arglist, with no protocol word in it.
     pub words: Vec<String>,
 }
 

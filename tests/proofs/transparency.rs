@@ -35,7 +35,7 @@ async fn a_signalled_subject_is_reported_and_loses_nothing() {
 /// The subject keeps its own trap and its own `IFS`. The prelude installs no
 /// handler and shadows no builtin, so both survive a message going out — and
 /// the account a shell gives of itself, which joins an array with `[*]`, takes
-/// an `IFS` of its own for that frame rather than the subject's.
+/// an `IFS` of its own for that frame instead of reading what the subject set.
 #[tokio::test]
 async fn a_clients_own_trap_and_ifs_are_untouched() {
     let ran = script(

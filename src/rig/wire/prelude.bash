@@ -42,8 +42,8 @@ __bc_complain() {
     printf '%s: %s at %s\n' "${__BC__word:-?}" "$1" "${__BC__at:-?}" >&2
 }
 
-# $1 the label, $2 the session's workspace, the rest words of the caller's
-# own. Binds the name to the coordinate for this shell, keeps the words, and
+# $1 the label, $2 the session's workspace, the rest words the caller chose.
+# Binds the name to the coordinate for this shell, keeps the words, and
 # attaches this process; a fork inherits the entries and attaches itself on
 # its first word, announcing the same words.
 BC_JOIN() {
@@ -160,8 +160,8 @@ __bc_reattach() {
 # one array literal, the clock first. Every value is passed as bash reports
 # it; what any of it means is read on the other side. The words the join
 # brought ride as one nested literal, the shape `versinfo` takes. `IFS` is
-# scoped to this frame so `[*]` joins with a space whatever the subject's is,
-# and the subject's — unset included — is back on return.
+# scoped to this frame so `[*]` joins with a space whatever the subject set,
+# and the subject's `IFS` — unset included — is back on return.
 __bc_account() {
     declare __bc_out=$1 IFS=' '
     declare -a __bc_meta="(${__BC__META[$2]-})"

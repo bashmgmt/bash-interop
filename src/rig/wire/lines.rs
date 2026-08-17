@@ -1,5 +1,5 @@
-//! A fifo read end, cut at newlines. Bytes out; what a line means is the
-//! reader's.
+//! A fifo read end, cut at newlines. Bytes out; the reader decides what a
+//! line means.
 //!
 //! Bytes go straight into the buffer at each read, so a `next` dropped
 //! mid-await loses nothing; the only await is on readiness.

@@ -123,8 +123,9 @@ impl<'a> Columns<'a> {
         }
 
         // At least the emitter's own frame, and never past the end. Equal to
-        // the end is every reported frame being the instrument's, which happens
-        // where bash pushed none of its own — the entry line is what is left.
+        // the end means every reported frame belongs to the instrument, which
+        // happens where bash pushed none of its own — the entry line is what
+        // is left.
         if self.skip < 1 || self.skip > funcs.len() {
             return Err(broken(format!(
                 "skip {} of {} frames",

@@ -63,7 +63,7 @@ wrote.
 
 The words run where the call was written, which is what `BC_SAY` and `BC_ASK`
 being aliases buys: an answer's `declare` binds in the asking function rather
-than in a frame of the protocol's, so nothing needs `-g` to be seen, and
+than in a frame the protocol opened, so nothing needs `-g` to be seen, and
 `return` there ends the function that asked.
 
 Two consequences follow, and together they are why there is no second protocol
@@ -139,8 +139,8 @@ with initiation left to the scripts.
 
 `BASH_ENV` is a single variable, so two driven runs nested through it shadow
 each other for the inner subtree. The way around it is a definitions-only
-provision, which is the tools' `--reach by-hand`, and the choice is the
-client's.
+provision, which is the tools' `--reach by-hand`, and the client makes that
+choice.
 
 The command line is whatever the caller wrote, program included: `&["env",
 "TARGET=staging", "bash", "x.bash"]` needs no support from the run.
@@ -230,13 +230,13 @@ reports that it could not do its work.
 | no variable exported | nothing leaks into a child that did not join |
 | no name outside `BC_*`/`__BC_*` | a subject's globals cannot collide with ours |
 | no `set -o` change | `errexit`, `nounset`, `pipefail` stay as the subject set them |
-| no `eval` | nothing of the subject's is re-parsed |
+| no `eval` | nothing the subject wrote is re-parsed |
 | its own exit status | a wrapped script is indistinguishable from an unwrapped one |
 
 One exception: `expand_aliases` is turned on and stays on, because the error
 guards are aliases — `return` has to act in the frame that failed. `IFS` is
 scoped inside two of the protocol's own functions so `[*]` joins with a
-space, and the subject's, unset included, is back on return.
+space; what the subject had, unset included, is back on return.
 
 The protocol may not use `set -e`, so every command in it that can fail is
 followed by `|| __BC_BAIL` or `|| __BC_THROW`. A fault of ours is reported at

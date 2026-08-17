@@ -242,9 +242,9 @@ where it is checked without running bash.
 
 Any word that reports where a shell is. It reaches the walk through
 `stack::with_walk`, which puts `stack.bash` in front of the rig's definitions
-in `Rig::bash`, and it passes its own instrument depth: its word's frame, plus
-the walk's. Each tool's own book lists which words it defines and when they
-record arguments.
+in `Rig::bash`, and it passes its own instrument depth: one frame for the word
+and one for the walk. Each tool's own book lists which words it defines and
+when they record arguments.
 
 ## See also
 

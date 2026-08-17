@@ -113,7 +113,7 @@ A shell comes to be joined in two steps.
 
 Loading brings the definitions in. `source <dir>/prelude.bash` defines the
 protocol's words, `BC_JOIN`, `BC_SAY` and `BC_ASK`; `source <dir>/rig.bash` defines
-your rig's. The session lays both files, and both are inert — sourcing them
+the words your rig adds. The session lays both files, and both are inert — sourcing them
 defines functions and changes nothing else.
 
 Initiation opens the channel. One line, `BC_JOIN LABEL <dir>`, usually

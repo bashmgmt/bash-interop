@@ -76,8 +76,9 @@ pub fn saying_fn(word: &str, label: &str) -> String {
     format!("{word}() {{ declare -- BC_SAY__ARG_LABEL={label}; BC_SAY {word} \"$@\"; }}\n")
 }
 
-/// A test rig's standard initiation — the harness's convention, deliberately
-/// not the core's: the core takes the line as data, never as a method.
+/// A test rig's standard initiation — a convention of this harness and
+/// deliberately no part of the core, which takes the line as data, never as a
+/// method.
 pub trait Joins {
     fn joining(&self, at: &Layout) -> String;
 }

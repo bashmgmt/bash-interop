@@ -80,11 +80,11 @@ first, so the top level of everything it sources — the prelude, the rig's
 definitions — and its own join line run under it too. Every `__BC__*` name is
 assigned before anything reads it, which is what makes the second case hold.
 
-## `IFS` is the subject's, and `[*]` reads it
+## `IFS` comes from the subject, and `[*]` reads it
 
-`"${arr[*]}"` joins with the first character of `$IFS`, and `$IFS` belongs to
-the subject. A shipped file that joins an array takes one of its own for that
-frame:
+`"${arr[*]}"` joins with the first character of `$IFS`, and the subject is
+free to set that to anything. A shipped file that joins an array takes an
+`IFS` of its own for that frame:
 
 ```bash
 __bc_account() { declare IFS=' '; … }   # prelude: the version is "(${BASH_VERSINFO[*]@Q})"
@@ -105,7 +105,7 @@ Proved by
 `tests/proofs/transparency.rs::a_clients_own_trap_and_ifs_are_untouched`,
 which sets `IFS=,` and then reads the version back off the shell.
 
-## `LC_ALL` is the subject's, and `${#s}` reads it
+## `LC_ALL` comes from the subject, and `${#s}` reads it
 
 `${#s}` and `${s:a:b}` count in the shell's locale. The one place a shipped
 file has to count bytes, cutting the account into frames of at most
@@ -124,7 +124,7 @@ before it runs, so `${#1}` in the same statement would still count characters.
 The same ordering is why a word's parameters cannot be set as a command prefix
 on the call that reads them — see below.
 An assignment to `LC_ALL` takes effect at once, and the return puts the
-subject's back, unset included
+subject's `LC_ALL` back, unset included
 ([measurements.md](measurements.md#bash-constraints-that-bound-the-design)).
 
 ## The slot pattern
@@ -148,7 +148,7 @@ with_capture() {
 
 Three properties follow from the `declare`, and none hold without it. The
 write lands in `span`'s frame, so the binding is released when `span` returns.
-A nested `span` declares its own, so an inner one leaves the outer's intact.
+A nested `span` declares its own, so an inner one leaves the outer one intact.
 And nothing reaches the global scope.
 
 The initialiser is not part of the mechanism: `declare -a CAPTURED` and
@@ -259,7 +259,7 @@ aliases again.
 The parameters are ordinary variables, so a frame that sets one is visible to
 anything it calls. Declaring them keeps that to the frame that meant it, and
 the `<WORD>__ARG_` prefix keeps them out of a subject's way; a callee that
-reads one without setting it will see an enclosing frame's.
+reads one without setting it will see the value an enclosing frame set.
 
 ## Subshells
 

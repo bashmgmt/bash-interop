@@ -107,9 +107,9 @@ async fn joined(
 }
 
 /// Everything the joined shell says arrives, subshells included, and the
-/// session lasts exactly as long as the handle does. Nothing of that shell's
-/// life is the session's: it is neither started nor stopped here, and its
-/// status is the initiator's to collect.
+/// session lasts exactly as long as the handle does. The session does not
+/// manage that shell's life: it is neither started nor stopped here, and
+/// whoever started it collects its status.
 #[tokio::test]
 async fn a_shell_that_joined_is_heard_until_it_lets_go() {
     let scripts = Scripts::of(&[(

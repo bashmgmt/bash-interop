@@ -1,7 +1,7 @@
 //! When the rig cannot do its work. That is the run's failure, not a
 //! conversation with the subject: `run` ends in the reason, and the subject is
 //! killed rather than told something and left to interpret it. What the
-//! subject gets wrong stays the subject's.
+//! subject gets wrong stays with the subject.
 
 use std::sync::Arc;
 use std::time::Instant;

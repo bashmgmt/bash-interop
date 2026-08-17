@@ -35,9 +35,9 @@ pub(super) struct Session<'r, R: Rig> {
 }
 
 impl<'r, R: Rig> Session<'r, R> {
-    /// `at` is a directory the caller prescribed — it exists, and is the
-    /// caller's to have made — or nothing, for a workspace of the session's
-    /// own that goes when it ends. Either is canonicalised before it is
+    /// `at` is a directory the caller prescribed — it exists, and the caller
+    /// made it — or nothing, for a workspace the session makes for itself and
+    /// removes when it ends. Either is canonicalised before it is
     /// spelled anywhere: the rig's bash states an absolute path. The
     /// workspace is locked before it is touched and swept of any fifos a
     /// predecessor could not remove; a session already holding it is a

@@ -3,8 +3,8 @@
 # $1 names an array to append to; $2 is how many leading frames belong to the
 # instrument rather than the subject, counting this function's own.
 #
-# Bash's five arrays go out as they are. Every index — which frames are the
-# instrument's, which line a frame is executing, where a call's arguments sit
+# Bash's five arrays go out as they are. Every index — which frames belong to
+# the instrument, which line a frame is executing, where a call's arguments sit
 # in the flat stack and which way round they are — is arithmetic, and belongs
 # on the side that can be checked without running anything.
 #

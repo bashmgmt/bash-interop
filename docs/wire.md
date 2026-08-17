@@ -18,7 +18,7 @@ src/rig/wire/
 
 ## The client surface
 
-A script that takes part has three words and nothing else of the protocol's:
+A script that takes part uses three words and nothing else from the protocol:
 
 ```bash
 BC_JOIN LABEL DIR word…       # once: bind the label, announce, attach
@@ -278,7 +278,7 @@ They cannot change while a shell lives, so they travelled once in the account
 and are reached through the `Shell` your reaction was handed.
 
 Two reading conventions are distinct. `Message::behind(lead)` claims a family
-of messages by first word, giving a decoder `None` for another tool's.
+of messages by first word, giving a decoder `None` when another tool wrote it.
 `field(words, key)` reads an optional `key value` payload convention,
 unrelated to the `key=value` headers the protocol writes up front.
 
@@ -359,8 +359,8 @@ and assignments a sourced step makes are global and reach the client.
 
 ## When the protocol itself fails
 
-The prelude may not use `set -e`, since the subject's options are the
-subject's, so every command in it that can fail is guarded:
+The prelude may not use `set -e` — the subject decides its own options — so
+every command in it that can fail is guarded:
 
 ```bash
 shopt -s expand_aliases

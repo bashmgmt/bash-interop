@@ -107,7 +107,7 @@ async fn a_line_that_will_not_read_ends_the_run() {
 }
 
 /// A line on the control fifo that is not a frame ends the run, naming what
-/// it could not read: the fifo is the session's, made by the run, and a shell
+/// it could not read: the fifo belongs to the session, made by the run, and a shell
 /// writes it only through the protocol.
 #[tokio::test]
 async fn a_frame_the_protocol_did_not_write_ends_the_run() {

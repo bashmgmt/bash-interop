@@ -3,7 +3,8 @@
 Joining has two halves, kept apart.
 
 Loading brings the definitions into a shell: `source <dir>/prelude.bash` for
-the protocol's words, then `source <dir>/rig.bash` for the rig's, both inert.
+the protocol's words, then `source <dir>/rig.bash` for the words the rig adds.
+Both are inert.
 Initiation opens the channel: one line of client code, `BC_JOIN <label> <dir>
 [word…]`, or the rig's init function wrapping it. A shell that loaded and
 never initiated has the words and is not part of the run; a shell that
@@ -107,7 +108,7 @@ coproc SERVER { bashprof serve --at "$workspace" --into build.times; }
 until [[ -p "$workspace/join" ]]; do sleep 0.01; done   # up exactly while serving
 
 source "$workspace/prelude.bash"    # the protocol's words
-source "$workspace/rig.bash"        # the rig's
+source "$workspace/rig.bash"        # the rig's words
 BASHPROF_INIT "$workspace"
 
 build() { sleep 0.1; }
@@ -115,7 +116,7 @@ BASHPROF_TIMETHIS build build
 
 declare -- handle="${SERVER[1]}"
 exec {handle}>&-    # let go: what was held is the server's standard input
-wait "$SERVER_PID"  # it sees the session out; its status is this script's
+wait "$SERVER_PID"  # it sees the session out; this script exits with its status
 ```
 
 The handle is the write end of the server's standard input, which `coproc`
@@ -169,8 +170,8 @@ bash child.bash            # a fresh bash: sources $BASH_ENV, joins, speaks
 ```
 
 Which shells the session reaches is always a decision with an author: the
-run's, in its environment closure; the provisioning caller's, in its stated
-`Provision`; the script's, at its own init line. The core runs no initiation.
+run, in its environment closure; the provisioning caller, in its stated
+`Provision`; the script, at its own init line. The core runs no initiation.
 
 The proofs behind each way are `tests/proofs/starting.rs` for provisioned,
 both ways, and by-hand, and `tests/proofs/serving.rs` for the coprocess, from

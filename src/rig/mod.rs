@@ -31,8 +31,8 @@
 //! impl Rig for Deploying {
 //!     type Reaction = Told;
 //!
-//!     /// A word the subject's scripts can call, as one command over the
-//!     /// core's, so it composes where any command does. Definitions only:
+//!     /// A word the subject's scripts can call, one command over
+//!     /// `BC_SAY`, so it composes where any command does. Definitions only:
 //!     /// sourcing this joins nothing.
 //!     fn bash(&self, _at: &Layout) -> String {
 //!         "alias STAGE='BC_SAY__ARG_LABEL=DEPLOY BC_SAY STAGE'\n".to_string()

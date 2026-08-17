@@ -1,7 +1,7 @@
 //! The account a shell gives of itself, built by hand.
 //!
 //! One builder, so a test that needs the words and a test that needs the shell
-//! read the same one. The numbers are a real 5.3.9's: what is under test
+//! read the same one. The numbers come from a real 5.3.9: what is under test
 //! wherever this is used is the arrangement or the walk, never the reading of
 //! this payload — that is tested against a live shell.
 
