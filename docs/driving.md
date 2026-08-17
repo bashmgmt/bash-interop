@@ -45,9 +45,10 @@ rewriting, so a launcher goes in the same way anything else does — `&["env",
 ## The environment closure
 
 The second argument settles what the subject's environment gets. The core adds
-nothing on its own, and the closure's return is the subject's whole
-environment delta. It receives the settled `Layout`, with the workspace made
-and the files laid, and it is fallible, because provisioning writes a file.
+nothing on its own, so whatever the closure returns becomes the subject's
+entire environment delta. It receives the settled `Layout`, with the workspace
+made and the files laid, and it is fallible, because provisioning writes a
+file.
 
 Three closures cover the usual cases.
 

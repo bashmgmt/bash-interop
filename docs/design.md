@@ -10,7 +10,7 @@ Run a bash program, hear every shell in its process tree, and answer the
 questions those shells ask, while the program behaves as it does when nothing
 is listening.
 
-The last clause is where the difficulty lives. A subject script has its own
+That last clause is the hard part. A subject script has its own
 traps, its own `IFS`, its own shell options and its own exit status, and a
 tool that disturbs any of them measures something other than the program. The
 design is organised around what the instrumentation may not touch, and every
@@ -48,17 +48,23 @@ property of the shell, and the shell is what knows it.
 `BC_INSTR L say a b c` ships three words, and a rig receives three words. Any
 width, zero included, and the protocol reads no position of one.
 
-Several tools can therefore share one wire. A leading discriminator such as
-`TIMETHIS` or `__BASHCAP__` is the sender's own choice, and a decoder opts in
-with `line.behind(TAG)`, receiving `None` for somebody else's message. There
-is no registry and nothing to coordinate.
+Several tools can therefore share one wire. The sender picks its own leading
+discriminator — `TIMETHIS`, `__BASHCAP__` — and a decoder opts in with
+`line.behind(TAG)`, receiving `None` for somebody else's message. There is no
+registry and nothing to coordinate.
 
-An answer is an arglist too, and it is a command the shell runs. That covers
-the cases a richer protocol would need types for: `["return", "1"]` refuses,
-`["declare", "-g", "x=1"]` sets a variable in the asking shell's own scope,
-`["source", path]` runs bash of any length the rig wrote to a file, and
-`["exit", "9"]` ends the subject. The expressiveness is bash's, so there is no
-answer type to extend.
+An answer is an arglist too, and the shell that asked runs it as a command in
+its own frame — bash parses the reply as an array literal and invokes it, with
+no `eval` involved. `["return", "1"]` refuses, `["declare", "-g", "x=1"]` sets
+a variable in the asking shell, `["source", path]` runs bash of any length the
+rig wrote to a file, `["exit", "9"]` ends the subject, and `["echo", value]`
+hands a value back through a command substitution the script already wrote.
+
+Two consequences follow, and together they are why there is no second protocol
+here. Bash supplies the expressiveness, so no answer type has to grow. And
+since every shell sources `<dir>/rig.bash` on the way in, a reply can call a
+function the rig defined and pass it arguments computed in Rust, which makes
+the rig's own bash the vocabulary an answer selects from.
 
 ## Values travel as bash's own quoted forms
 
@@ -110,20 +116,20 @@ A driven run starts the command line and owns a workspace of its own, either
 a temporary directory or, with `run_at`, one the caller made and keeps.
 Nothing external prescribes or collides with it.
 
-How the shells reach the session is stated at the run. `run` and `run_at`
-take an environment closure, fallible because provisioning writes a file,
-whose return is the subject's whole environment delta. The core exports
-nothing on its own.
+How the shells reach the session is stated at the run. `run` and `run_at` take
+an environment closure — fallible, because provisioning writes a file — and
+what it returns becomes the subject's entire environment delta. The core
+exports nothing on its own.
 
 `Layout::bash_env(Provision::Joining(…))` is the usual pair, and it joins
 every non-interactive bash in the tree. This is what makes `bashcap run --into
 out make test` work, with every recipe shell `make` starts joining by itself.
 
-Carrying the workspace in a named variable is each tool's own convention,
-spelled in their binaries under their own names — `BASHCAP_INIT
-"$BASHCAP_SESSION"` where a by-hand script says so. The tools' `--reach` is
-their vocabulary over these spellings: `bash-env` provisions a joining file,
-`by-hand` a definitions file with initiation left to the scripts.
+Each tool decides for itself how to carry the workspace in a named variable,
+and spells that name in its own binary — `BASHCAP_INIT "$BASHCAP_SESSION"`
+where a by-hand script says so. `--reach` is the tools' vocabulary over these
+spellings: `bash-env` provisions a joining file, `by-hand` a definitions file
+with initiation left to the scripts.
 
 `BASH_ENV` is a single variable, so two driven runs nested through it shadow
 each other for the inner subtree. The way around it is a definitions-only
@@ -140,10 +146,10 @@ fallback — and answers to nobody. Nothing is written back, a serving
 application is a complete standalone program, and the client feeds the same
 directory to start, probe, load and initiate.
 
-Liveness is the workspace's to show, since the join fifo is present exactly
-while a session serves, so one file test answers whether something serves
-here. The boundary case is a server killed outright, whose stale fifo stands
-until its directory is next opened or removed.
+The workspace shows whether anything is live. Its join fifo is present exactly
+while a session serves, so one file test answers the question. The boundary
+case is a server killed outright, whose stale fifo stands until its directory
+is next opened or removed.
 
 Across both roles the join is one line, either a provisioned file's or the
 client's own, and each tool prints every way a script writes it under
@@ -217,7 +223,7 @@ reports that it could not do its work.
 | no builtin shadowed | `printf`, `read`, `exec` mean what they mean |
 | no variable exported | nothing leaks into a child that did not join |
 | no name outside `BC_*`/`__BC_*` | a subject's globals cannot collide with ours |
-| no `set -o` change | `errexit`, `nounset`, `pipefail` are the subject's |
+| no `set -o` change | `errexit`, `nounset`, `pipefail` stay as the subject set them |
 | no `eval` | nothing of the subject's is re-parsed |
 | its own exit status | a wrapped script is indistinguishable from an unwrapped one |
 
@@ -270,12 +276,12 @@ command, loudly, in the same way an unjoined label reports 125.
 
 | | what stands in its place |
 |---|---|
-| a session-wide accumulator in the library | what a run produces is the client's; `Vec<Message>` and `()` are the two shipped |
+| a session-wide accumulator in the library | what a run produces belongs to the client; `Vec<Message>` and `()` are the two shipped |
 | a timer, an interval, a heartbeat | serving ends on a descriptor, so tokio's `time` feature is not enabled |
 | a closing word or reserved payload word | the handle says when it is over, and nothing in the loop intercepts a message |
-| a way in that the core prefers | every environment is the run's closure, every join a stated line, and `--reach` a tool's vocabulary |
+| a way in that the core prefers | every environment comes from the run's closure, every join from a stated line, and `--reach` is a tool's own vocabulary |
 | a poisoned or degraded mode | an answer that says no is a command returning non-zero, like any other |
-| parallelism | a task per shell on one thread; the cost is bash's `printf`, and a `Send` bound would tax every implementor |
+| parallelism | a task per shell on one thread; the cost sits in bash's `printf`, and a `Send` bound would tax every implementor |
 | a fork tree | a fork inherits and then takes its own pipe; its descent is not reported |
 | a schema or IDL | an arglist has no shape to agree on |
 

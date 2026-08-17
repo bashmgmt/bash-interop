@@ -36,8 +36,8 @@ while a process that might still speak exists. When the last holder closes it,
 deliberately or by dying, the watch fires and the session closes. A shell that
 talks after that writes into a fifo whose reader is gone and takes `SIGPIPE`.
 
-Whether the session is up is the workspace's to show. The `join` fifo exists
-exactly while a session serves, kept truthful by the lock and the sweep
+The workspace shows whether the session is up. Its `join` fifo exists exactly
+while a session serves, kept truthful by the lock and the sweep
 ([rigs.md](rigs.md)), so the client gates on the same directory it named. The
 boundary case is a server killed with `SIGKILL`, which removes nothing; its
 stale fifo stands until the directory is next opened and swept, or removed.
@@ -80,7 +80,7 @@ exec {handle}>&-    # let go: what was held is the server's standard input
 wait "$SERVER_PID"  # it sees the session out; its status is this script's
 ```
 
-Three details in that script are worth spelling out.
+Three details in that script deserve explanation.
 
 The `until` gate is there because `coproc` returns before the server has
 parsed its arguments, and sourcing the laid files before they exist would

@@ -67,10 +67,10 @@ fn deploy_join(at: &Layout) -> String {
 }
 ```
 
-Three shapes carry the arrangement. The rig is one value describing the whole
-of it. The reaction is a second type, built fresh per shell. The roles, here
-`Driving`, are empty opt-in impls, with the orchestration coming from the
-trait.
+Three shapes make up the arrangement. The rig is a single value describing
+all of it. The reaction is a second type, built fresh for each shell. The
+roles — `Driving` here — are empty impls you opt into, and the trait brings
+the orchestration with it.
 
 ## `Rig`
 
@@ -106,8 +106,8 @@ environment closure. A provisioned `bash_env.bash` is the one place allowed to
 automate initiation, and it takes the line as plain data,
 `Provision::Joining(&line)`. The tools each export theirs as a function beside
 their rig, such as `bashprof::joining(at)`, and a by-hand script types the
-same line. The core takes a string and has no method for it, so which line
-initiates a rig is the wrapper's statement, made where the run is made.
+same line. The core takes a string and has no method for it, so the wrapper
+states which line initiates a rig, at the point where the run is made.
 
 `joined()` is async because it runs in the session's accept loop, between a
 shell announcing itself and its pipe opening, where you may need to open a

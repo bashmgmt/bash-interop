@@ -14,8 +14,8 @@ The exception is stated rather than implied. A run may provision
 initiates, with `Provision::Joining` putting the rig's joining line at the
 end, or only defines, with `Provision::Definitions`. `BASH_ENV` names that
 file, so it reaches every non-interactive bash in the subject's tree as it
-starts. This is the way to join subjects that have never heard of the session,
-and it is where auto-initiation lives.
+starts. This is how a subject that has never heard of the session comes to
+join, and it is the only place where initiation happens automatically.
 
 Every way in reaches the same end state, the words defined and the channel
 open, from a different starting situation. Each is one whole script below,

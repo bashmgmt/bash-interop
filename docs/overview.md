@@ -37,16 +37,11 @@ BC_INSTR DEPLOY say REC compiled "$target"    # ship these words; carry on
 BC_INSTR DEPLOY ask which-target              # ship, block, run the reply
 ```
 
-`say` ships the words as one message and the script continues immediately.
-`ask` blocks: the message travels, your reaction decides an answer, and the
-answer comes back as a command the shell runs. `["declare", "-g",
-"target=staging"]` sets a variable in the asking shell. `["source", path]`
-runs a file of any length. `["return", "3"]` refuses with a status. The
-`ask`'s own exit status is the answer's, so `if BC_INSTR … ask …` works as
-shell logic.
+`say` ships the words as one message and the script continues immediately,
+since nothing is waiting on it. `ask` blocks until your reaction replies.
 
-A message carries an arglist — the words exactly as the caller wrote them,
-any number of them, boundaries preserved — plus the verb and two clocks, the
+A message carries an arglist — the words exactly as the caller wrote them, any
+number of them, boundaries preserved — plus the verb and two clocks, the
 shell's own `$EPOCHREALTIME` and the session's clock at the read. There is no
 schema. The first word is whatever convention your rig and your scripts agree
 on, which lets several tools share one session without coordinating.
@@ -55,6 +50,41 @@ The word between `BC_INSTR` and the verb, `DEPLOY` above, is the label. It is
 bash-side vocabulary: a lookup key binding a name your scripts use to the
 workspace they joined, so one process can hold several sessions at once. The
 Rust side is never told the label. It sees which pipe a message came out of.
+
+### The reply is a command
+
+What comes back from an `ask` is also a list of words, and the asking shell
+parses it with bash's own array syntax and then invokes it, in the frame that
+asked:
+
+```bash
+local -a __bc_answer="$__bc_line"    # the reply, read as a bash array literal
+"${__bc_answer[@]}"                  # and invoked, right here
+```
+
+No `eval` takes part. Bash reads an array literal — the notation `declare -p`
+prints — and calls the result.
+
+Replying with a command rather than a value is where the generality comes
+from, because running one command in the caller's frame already spans what a
+richer protocol would need types for:
+
+| the reply | what the asking shell does |
+|---|---|
+| `["echo", "/usr/lib"]` | prints it, so `x=$(BC_INSTR … ask …)` captures a value |
+| `["declare", "-g", "target=staging"]` | sets a variable in its own process |
+| `["return", "3"]` | returns 3, so `if BC_INSTR … ask …` branches on the reply |
+| `["source", "/tmp/x.bash"]` | runs a file of any length the rig just wrote |
+| `["exit", "9"]` | ends the subject |
+
+The `ask` exits with the status of whatever ran, so a reply that says no
+arrives as an ordinary shell failure the script can test.
+
+The command need not be a builtin. `<dir>/rig.bash` holds bash your rig wrote,
+and every shell sources it on the way in, so a reply may call a function you
+defined there and pass it arguments your Rust code computed. The rig supplies
+the vocabulary; the reply picks a word from it. That is the whole control
+channel, and it needs no `eval`, no reserved words and no second protocol.
 
 ## Joining: definitions, then initiation
 
@@ -121,7 +151,7 @@ serves, so `[[ -p <dir>/join ]]` answers whether one is up.
                                                → your hear(message)
  BC_INSTR L ask words…  ───────── up.<token> ► → your answer(message)
    blocks reading rep    ◄─────── rep.<token>  writes the answer command
-   runs the answer; its status is the ask's
+   runs the answer; the ask exits with it
 
  exits (or just stops talking)                 pipe reaches end of input
                                                → your finish() runs
@@ -192,4 +222,4 @@ From here: [design.md](design.md) states the decisions this shape follows
 from. [rigs.md](rigs.md) is the API you implement. [driving.md](driving.md)
 and [serving.md](serving.md) are the two orchestrations,
 [joining.md](joining.md) every way in, and [wire.md](wire.md) the protocol
-underneath. The full Rust surface is rustdoc's: `cargo doc --no-deps --open`.
+underneath. The full Rust surface is in rustdoc: `cargo doc --no-deps --open`.

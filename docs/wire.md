@@ -32,8 +32,8 @@ several sessions at once. Rust is never told the label and sees only pipes.
 
 `BC_JOIN` binds the label to a workspace and refuses the malformed cases: a
 relative dir, a label that could not name a file, a label already joined in
-this shell. The words after the dir are the caller's own payload, kept per
-label, `@Q`-quoted, announced with every attach, and landing verbatim on
+this shell. The words after the dir belong to the caller, and are kept per
+label, `@Q`-quoted, announced with every attach, and landed verbatim on
 `Shell::brought`. The protocol reserves no word in them and never
 self-locates.
 
@@ -288,10 +288,10 @@ __bc_ask() {
 ```
 
 The reply pipe was opened `<>` at attach, so the read waits for an answer
-instead of hitting end of input. `local -a` is bash's own parser unpacking the
-answer's array literal. The shell runs it, and its status becomes `BC_INSTR
-ask`'s, which is how an answer that says no reaches the subject as an ordinary
-testable status.
+instead of hitting end of input. The `local -a` line is bash parsing the reply
+as an array literal, using the same syntax it prints; the shell then invokes
+it. `BC_INSTR ask` exits with whatever that command returned, which is how a
+reply that says no reaches the subject as an ordinary, testable status.
 
 On the Rust side the answer is a value with four constructors:
 
