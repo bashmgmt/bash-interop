@@ -10,7 +10,7 @@ keywords = ["bash", "shell", "instrumentation", "ipc", "tracing"]
 categories = ["development-tools", "os::unix-apis", "command-line-interface"]
 
 [dependencies]
-bash-strings = "*"
+bash-strings = "0.1"
 serde = { version = "1.0", features = ["derive", "rc"] }
 tokio = { version = "1.53", features = ["rt", "net", "io-util", "macros", "sync"] }
 tempfile = "3.9"
