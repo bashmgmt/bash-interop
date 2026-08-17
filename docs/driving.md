@@ -55,6 +55,7 @@ file.
 
 The three usual sentences, each a complete answer:
 
+<!-- quote: tests/book.rs anchor=env-joining -->
 ```rust
 // Blanket: provision a joining startup file. Every non-interactive
 // bash in the subject's tree joins as it starts — the right default
@@ -63,6 +64,7 @@ The three usual sentences, each a complete answer:
 |at| Ok(vec![at.bash_env(Provision::Joining(&deploy_join(at)))?]),
 ```
 
+<!-- quote: tests/book.rs anchor=env-definitions -->
 ```rust
 // Chosen: provision definitions only, and hand the coordinate to
 // the scripts under a name of YOUR convention — they initiate where
@@ -76,6 +78,7 @@ The three usual sentences, each a complete answer:
 },
 ```
 
+<!-- quote: tests/book.rs anchor=env-nothing -->
 ```rust
 // Nothing: the subject runs with no additions at all. Shells can
 // still join by hand if some script knows the workspace by other

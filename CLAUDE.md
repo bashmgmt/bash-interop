@@ -9,8 +9,11 @@ material).
 `overview.md` the way in, `measurements.md` holds the kernel and bash facts
 the transport stands on: check there before proposing a transport change;
 `design.md` is the design above the code. Do not restate any of it in code
-comments. Code blocks in the book are hand copies of the tree — when
-touching either side, check the other.
+comments. The book's Rust quotes are anchored (`// ANCHOR:` regions,
+synced by `docs/sync-quotes.bash`, CI-checked; client-usage examples live
+compiled in `tests/book.rs`); its bash blocks are hand copies, because a
+marker in shipped bash would ride into every laid workspace file — when
+touching either side of one, check the other.
 
 ```bash
 cargo test --lib -- --test-threads=1

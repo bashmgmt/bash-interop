@@ -77,6 +77,7 @@ comes with the trait. Now the contracts, one at a time.
 
 As it stands in `src/rig/mod.rs`; read the doc comments as the contract:
 
+<!-- quote: src/rig/mod.rs anchor=rig-trait -->
 ```rust
 #[expect(async_fn_in_trait, reason = "single-threaded by design: no Send bound")]
 pub trait Rig {
@@ -124,6 +125,7 @@ nothing about it. Everything that changes lives in the reactions.
 
 ## `Reacting` — one shell's counterpart
 
+<!-- quote: src/rig/mod.rs anchor=reacting-trait -->
 ```rust
 #[expect(async_fn_in_trait, reason = "single-threaded by design: no Send bound")]
 pub trait Reacting: Sized + 'static {
@@ -234,6 +236,7 @@ What you actually call on it:
 
 That last one takes the choice its caller must state first:
 
+<!-- quote: src/rig/attended.rs anchor=provision -->
 ```rust
 /// What the provisioned file does about the channel — the first thing a
 /// [`Layout::bash_env`] caller states.

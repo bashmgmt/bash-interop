@@ -19,7 +19,12 @@ two session setups work, and where each responsibility lies.
 | [scoping.md](scoping.md) | where names bind in the shipped bash |
 | [measurements.md](measurements.md) | the kernel and bash facts the transport stands on |
 
-Code blocks are hand copies of the tree, named by the file they copy —
-when touching either side, check the other. The complete client scripts
-also live as fixtures in `bashprof/__fixtures/book/`, where that crate's
-cli suite runs them as printed.
+Rust blocks quoting the tree are anchored: a fence preceded by an HTML
+comment declaring `quote: <file> anchor=<name>` is the `// ANCHOR:` region
+of that file, kept identical by [`sync-quotes.bash`](sync-quotes.bash) and checked
+in CI; client-usage examples live compiled in `tests/book.rs`. Bash blocks
+are hand copies — a marker in shipped bash would ride into every laid
+workspace file — so when touching either side of one, check the other. The
+complete client scripts also live as fixtures in
+`bashprof/__fixtures/book/`, where that crate's cli suite runs them as
+printed.
