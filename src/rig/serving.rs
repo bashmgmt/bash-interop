@@ -35,7 +35,7 @@ pub struct Served<K> {
 /// | | |
 /// |---|---|
 /// | who chose the workspace | the client: `at` is required, exists, and is the address |
-/// | what the client is handed | nothing — liveness is the workspace's to show: the join fifo is present exactly while the session serves |
+/// | what the client is handed | nothing — the workspace shows it: the join fifo is present exactly while the session serves |
 /// | what ends it | the handle the initiator holds, watched and never closed here |
 /// | what comes back | [`Served`] |
 ///
@@ -48,8 +48,8 @@ pub struct Served<K> {
 /// byte on any channel. A client that wants to know the session is up asks
 /// the workspace — the join fifo is present exactly while a session serves
 /// — sources the laid definitions and initiates its own channel, feeding
-/// every step the same coordinate it gave the server. What the session
-/// reaches is the client's decision: joining instruments that shell, its
+/// every step the same coordinate it gave the server. The client decides what
+/// the session reaches: joining instruments that shell, its
 /// functions, its subshells and what it sources; a client that wants its
 /// child processes reached writes its own startup file and exports
 /// `BASH_ENV` to it.

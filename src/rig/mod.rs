@@ -100,12 +100,12 @@
 //! auto-initiation there is. The book's `docs/joining.md` shows every way
 //! a script joins, each as a whole script.
 //!
-//! **A session lasts as long as anyone who could still speak.** Nothing inside
+//! A session lasts as long as anyone who could still speak, and nothing inside
 //! a rig ends one.
 //!
 //! The session is single-threaded: one `current_thread` runtime, one task per
 //! shell, and no `Send` bound anywhere. What shells share — a sink, a merged
-//! view — is the caller's own, handed in through [`Rig::joined`] as an
+//! view — belongs to the caller and is handed in through [`Rig::joined`] as an
 //! `Rc<RefCell<_>>` or whatever it likes; a `RefCell` borrow must not be held
 //! across an `.await`.
 //!

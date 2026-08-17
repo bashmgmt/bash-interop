@@ -54,8 +54,8 @@ pub struct Whole<K> {
 /// contract is the two provided entries.
 ///
 /// The command line is run as it is given and carries its own program, so a
-/// caller wanting a launcher puts one there: `env TARGET=staging -- bash
-/// x.bash` is the whole story. `environment` is handed the settled [`Layout`]
+/// caller wanting a launcher puts one there, written exactly as it would be
+/// typed: `env TARGET=staging -- bash x.bash`. `environment` is handed the settled [`Layout`]
 /// and its return is the subject's **whole** environment delta — the core
 /// adds nothing. Fallible, because provisioning writes a file:
 /// [`Layout::bash_env`] with a stated [`Provision`](super::Provision) is the
@@ -82,9 +82,8 @@ pub trait Driving: Rig {
         driven(self, None, argv, environment).await
     }
 
-    /// The caller's directory instead — it exists, and is the caller's to
-    /// have made — left behind: a reading taken later may follow source
-    /// paths into it.
+    /// The caller's directory instead — it exists, and the caller made it —
+    /// left behind: a reading taken later may follow source paths into it.
     async fn run_at<A, E>(&self, at: &Path, argv: &[A], environment: E) -> Result<Run<Kept<Self>>, Failure>
     where
         A: AsRef<OsStr>,
