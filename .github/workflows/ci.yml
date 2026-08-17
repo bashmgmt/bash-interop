@@ -2,36 +2,21 @@ name: CI
 
 on:
   push:
-    branches: [master, main]
+    branches: [master]
   pull_request:
-    branches: [master, main]
+    branches: [master]
 
-env:
-  CARGO_TERM_COLOR: always
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  check:
-    name: check + clippy + doc
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo fmt --check
-      - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo doc --no-deps --document-private-items
-
-  test:
-    name: tests (bash 5, shells serialised)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: bash --version
-      - run: cargo test --lib -- --test-threads=1
-      - run: cargo test --test proofs -- --test-threads=1
-      - run: cargo test --doc
-      - run: docs/sync-quotes.bash --check
+  ci:
+    uses: bashmgmt/.github/.github/workflows/rust-ci.yml@main
+    with:
+      test: |
+        cargo test --lib -- --test-threads=1
+        cargo test --test proofs -- --test-threads=1
+        cargo test --doc
+        docs/sync-quotes.bash --check
+      bash-versions: '["system", "5.3.9"]'
