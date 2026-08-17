@@ -16,20 +16,19 @@ constraints that bound the design, and what each proof establishes.
 | parent exits, a subshell still holds the inherited fd | `POLLIN` only — `POLLHUP` waits for the subshell |
 | a reader opens then closes | the blocked writer unblocks, and its next write takes `SIGPIPE` |
 
-> **`POLLHUP` means "a writer attached and all writers are now gone".**
-
-There is no ambiguity between *not yet* and *no longer*, and no state to keep
-beside the pipe. This is why end of input on a shell's pipe is its goodbye, and
-why the blocking `exec {fd}>up.$tok` is the rendezvous.
+`POLLHUP` means that a writer attached and all writers are now gone. Nothing
+in that is ambiguous between not yet and no longer, and no state has to be
+kept beside the pipe, which is what makes end of input on a shell's pipe its
+goodbye and the blocking `exec {fd}>up.$tok` the rendezvous.
 
 | many writers on one fifo | |
 |---|---|
 | each writes 4096 bytes per `write` | every line arrives whole |
 | each writes 4097 | lines interleave |
 
-`PIPE_BUF` is 4096 on Linux, and it bounds a *write*, not a line: this is why
-the control fifo carries frames of at most 4096 bytes and a shell's pipe —
-one writer — carries lines of any length.
+`PIPE_BUF` is 4096 on Linux, and it bounds a write rather than a line. The
+control fifo therefore carries frames of at most 4096 bytes, and a shell's
+pipe, having one writer, carries lines of any length.
 
 ## tokio, on the same
 
@@ -60,14 +59,15 @@ The whole descriptor layer is stock tokio and nothing is hand-rolled.
 | `mkfifo` — GNU coreutils' (`/bin/true` measured 680) or busybox's | ~600 |
 | a static 800 KB `mkfifo` — the floor: fork plus a bare exec | 514 |
 
-**Bash has no builtin that makes a fifo.** `mkfifo`, `mknod`, `mkdir` and `ln`
-are all external commands; the loadable `mkfifo` builtin is not shipped by
-default anywhere; and every fork-free way to *wait* for a fifo the run would
-make instead fails to one wall — a fifo gives one process a non-consuming wait
+Bash has no builtin that makes a fifo. `mkfifo`, `mknod`, `mkdir` and `ln` are
+all external commands, the loadable `mkfifo` builtin is not shipped by default
+anywhere, and every fork-free way to wait for a fifo the run would make
+instead runs into the same wall: a fifo gives one process a non-consuming wait
 only through `open`, and a shared `open` cannot say which shell it releases.
-So a shell that attaches forks once, and that is the one cost of a pipe per
-shell: paid at source by every bash process under `BASH_ENV`, and by every
-fork that speaks. An ask, by contrast, forks nothing.
+
+A shell that attaches therefore forks once, and that is the cost of a pipe per
+shell. It is paid at source by every bash process under `BASH_ENV`, and by
+every fork that speaks. An ask forks nothing.
 
 ## The token
 
@@ -127,7 +127,7 @@ See [stack.md](stack.md).
 
 ## What a function layer costs an instrument
 
-An instrument that separates its layers as **functions** puts every layer's
+An instrument that separates its layers into functions puts every layer's
 frame on the stack of everything measured below it, and every walk carries
 them. `BASHPROF_TIMETHIS` as one function against the same word as a CPS spine
 of three, BEGIN payload in bytes by how many measured calls enclose it:
@@ -140,21 +140,21 @@ of three, BEGIN payload in bytes by how many measured calls enclose it:
 | 3 | 697 | 2244 |
 | **per level** | **~113** | **~566** |
 
-**What costs this is a layer that is still on the stack while the measured call
-runs.** `__bp_begin` sends the BEGIN and returns before `"$@"`, so it stands in
-its own walk and in nobody else's — ~77 bytes and one frame per level. The
-one extra call per measurement (the END is inline in the word) costs
-~1.0 µs.
+What costs this is a layer still on the stack while the measured call runs.
+`__bp_begin` sends the BEGIN and returns before `"$@"`, so it stands in its own
+walk and in nobody else's, at about 77 bytes and one frame per level. The one
+extra call per measurement, the END being inline in the word, costs about
+1.0 µs.
 
 ## What a callee's frame gives back
 
-**`local` restores what was there, including *unset*.** A callee taking
-`local IFS=' '` leaves an unset `IFS` unset and an empty one empty; the
+`local` restores what was there, unset included. A callee taking
+`local IFS=' '` leaves an unset `IFS` unset and an empty one empty, so the
 distinction a manual restore has to make by hand, bash makes itself.
 
-**A command-prefix assignment scopes to the call**, restores the previous
-state — unset included — and reaches expansions inside it, including through a
-`local -n` nameref.
+A command-prefix assignment scopes to the call, restores the previous state,
+unset included, and reaches expansions inside it, including through a `local
+-n` nameref.
 
 ## Cost of a snapshot
 
@@ -255,35 +255,35 @@ the shipped text instead, and live beside it: the protocol's in
 
 ## Bash constraints that bound the design
 
-**The floor is bash 5.0.** From the changelog rather than measured here:
+The floor is bash 5.0, taken from the changelog rather than measured here:
 `$EPOCHREALTIME`, which stamps every message and every account.
 
-**Traps do not compose.** Bash allows one handler per signal, so contributing
-an `EXIT`/`ERR`/`DEBUG` fragment means adopting whatever handler the client
-installed. This is why provenance and exit are carried by lines and by the
+Traps do not compose. Bash allows one handler per signal, so contributing an
+`EXIT`, `ERR` or `DEBUG` fragment means adopting whatever handler the client
+installed. Provenance and exit are therefore carried by lines and by the
 kernel rather than by a handler.
 
-**A subshell resets caught traps.** Anything buffered in a `( … )` and flushed
-from `EXIT` is lost. This is why a message is written where it is produced
-rather than accumulated.
+A subshell resets caught traps, so anything buffered in a `( … )` and flushed
+from `EXIT` is lost. A message is written where it is produced rather than
+accumulated.
 
-**`$?` must be read as a frame's first statement.**
+`$?` must be read as a frame's first statement.
 
-**A bash arithmetic *command* is false when its result is 0.** `x=$(( x + n ))`
-has no such status. This is why no instrument in the crate counts in bash.
+A bash arithmetic command is false when its result is 0, while `x=$(( x + n ))`
+has no such status. No instrument in the crate counts in bash.
 
-**Under `extdebug`, a `DEBUG` handler returning non-zero skips the command it
-fired for.** The handler must return 0.
+Under `extdebug`, a `DEBUG` handler returning non-zero skips the command it
+fired for, so the handler must return 0.
 
-**Enabling `extdebug` while `BASH_ENV` is being read starts the debugger.**
+Enabling `extdebug` while `BASH_ENV` is being read starts the debugger.
 `bashcap`'s trace arms itself from a `DEBUG` trap on the next command, which
-must be the subject's — so its join comes before the trap.
+has to be the subject's, so its join comes before the trap.
 
-**`local LC_ALL=C` counts bytes, and the subject's locale is back on return.**
+`local LC_ALL=C` counts bytes, and the subject's locale is back on return.
 `${#s}` and `${s:a:b}` count characters in the shell's locale; under `LC_ALL=C`
-they count bytes, an assignment to `LC_ALL` takes effect at once — `local`
-included — and returning restores the outer value, unset included. Measured
-with and without `set -o posix` (bash 5.3.9). This is what bounds a frame in
+they count bytes, an assignment to `LC_ALL` takes effect at once, `local`
+included, and returning restores the outer value, unset included. Measured
+with and without `set -o posix` on bash 5.3.9. This is what bounds a frame in
 bytes.
 
-**`mkfifo` is not a builtin.** See above.
+`mkfifo` is not a builtin; see above.

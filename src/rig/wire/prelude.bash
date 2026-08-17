@@ -44,7 +44,7 @@ BC_JOIN() {
 
     __BC__DIR[$1]=$2
     local __bc_label=$1 IFS=' '
-    shift 2
+    shift 2 || __BC_THROW
     __BC__META[$__bc_label]="${*@Q}"
     __bc_attach "$__bc_label"
 }

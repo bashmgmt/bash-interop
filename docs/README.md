@@ -2,8 +2,8 @@
 
 Run bash under instrumentation and hear what it says: a session per run, a
 pipe and a task per shell, words a script speaks and answers it runs. This
-book is the reference for the current design — what the pieces are, how the
-two session setups work, and where each responsibility lies.
+book is the reference for the design as it stands — what the pieces are, how
+the two session setups work, and where each responsibility lies.
 
 | chapter | what it covers |
 |---|---|
@@ -19,12 +19,13 @@ two session setups work, and where each responsibility lies.
 | [scoping.md](scoping.md) | where names bind in the shipped bash |
 | [measurements.md](measurements.md) | the kernel and bash facts the transport stands on |
 
-Rust blocks quoting the tree are anchored: a fence preceded by an HTML
-comment declaring `quote: <file> anchor=<name>` is the `// ANCHOR:` region
-of that file, kept identical by [`sync-quotes.bash`](sync-quotes.bash) and checked
-in CI; client-usage examples live compiled in `tests/book.rs`. Bash blocks
-are hand copies — a marker in shipped bash would ride into every laid
-workspace file — so when touching either side of one, check the other. The
-complete client scripts also live as fixtures in
+Rust blocks quoting the tree are anchored. A fence preceded by an HTML
+comment declaring `quote: <file> anchor=<name>` holds the `// ANCHOR:` region
+of that file, kept identical by [`sync-quotes.bash`](sync-quotes.bash) and
+checked in CI; client-usage examples live compiled in `tests/book.rs`.
+
+Bash blocks are hand copies, because a marker in shipped bash would ride into
+every laid workspace file, so touching one side of a bash block means checking
+the other. The complete client scripts also live as fixtures in
 `bashprof/__fixtures/book/`, where that crate's cli suite runs them as
 printed.

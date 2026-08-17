@@ -1,7 +1,7 @@
 # The call stack
 
-`src/stack/stack.bash` writes it, the rest of `src/stack/` reads it. One instrument
-and one reader, shared by every tool that reports where a shell is.
+`src/stack/stack.bash` writes it, the rest of `src/stack/` reads it. One
+instrument and one reader, shared by every tool that reports where a shell is.
 
 ## What bash keeps
 
@@ -15,15 +15,14 @@ BASH_ARGC    ('2' '0' '0' '0' '1')                          aligned 1:1
 BASH_ARGV    ('2' 'walk' 'x')            one flat stack, groups reversed
 ```
 
-`BASH_ARGC` and `BASH_ARGV` exist only under `extdebug` — see
-`bashcap/docs/bashcap.md` for how that is turned on. Expanding an unset array is
-not an error, including under `set -u`, so an instrument writes all five
-unconditionally.
+`BASH_ARGC` and `BASH_ARGV` exist only under `extdebug`; `bashcap`'s book
+covers how that is turned on. Expanding an unset array is not an error, `set
+-u` included, so an instrument writes all five unconditionally.
 
 ## The instrument
 
-The whole instrument, as shipped (`src/stack/stack.bash`; its header
-comment carries the contract):
+The whole instrument as shipped, from `src/stack/stack.bash`, whose header
+comment carries the contract:
 
 ```bash
 __bc_stack() {
@@ -41,28 +40,27 @@ __bc_stack() {
 }
 ```
 
-Seven expansions. Nothing sliced, summed, reversed or looped over. Everything
-that decides what a walk means happens on the Rust side, where it can be
-checked without running a shell.
+Seven expansions, with nothing sliced, summed, reversed or looped over.
+Everything that decides what a walk means happens on the Rust side, where it
+can be checked without running a shell.
 
 `$PWD` is there because a relative `BASH_SOURCE` is relative to something and
-nothing else records what. It changes under the subject's feet, which is why it
-rides with every walk rather than with what the shell said of itself once.
+nothing else records what. It changes under the subject's feet, so it rides
+with every walk rather than with what the shell said of itself once.
 
-`$1` names the caller's own array, so nesting works and no global is involved —
-see [scoping.md](scoping.md). The nameref is `__bc_stack_out`, a name no caller
-would choose, because a nameref pointing at itself **warns and discards the
-write** rather than failing.
+`$1` names the caller's own array, so nesting works and no global is involved;
+see [scoping.md](scoping.md). The nameref is `__bc_stack_out`, a name no
+caller would choose, because a nameref pointing at itself warns and discards
+the write instead of failing.
 
 `$2` is how many leading frames belong to the instrument, counting
-`__bc_stack`'s own. Each caller passes what it is: bashcap's
-`__bc_capture` forwards the number the word gave it — 3 under `BASHCAP`
-(the word, the capture, the walk), 2 under `WITH_BASHCAP`, whose own
-frame is the call site — and bashprof's `__bp_begin` passes 3 plus the
-shift a wrapper declared.
+`__bc_stack`'s own. Each caller passes what it is. bashcap's `__bc_capture`
+forwards the number the word gave it — 3 under `BASHCAP`, for the word, the
+capture and the walk, and 2 under `WITH_BASHCAP`, whose own frame is the call
+site. bashprof's `__bp_begin` passes 3 plus the shift a wrapper declared.
 
-Each section is a bash array literal, read back with `parse_array` — see
-`bash-strings/docs/values.md`.
+Each section is a bash array literal, read back with `parse_array`; see
+[bash-strings: values](https://bashmgmt.github.io/bash-strings/values.html).
 
 ## The reader
 
@@ -109,20 +107,20 @@ impl<'a> Columns<'a> {
 }
 ```
 
-A walk is **one value, not a head and a tail.** Which frame is the call site is
-`at()`, and a `Stack` cannot be empty: `Stack::of` is the one place that can
-say so, and `Columns::frames` turns that into a `Failure` where the message is
-read. Nothing downstream carries the question.
+A walk is one value rather than a head and a tail. Which frame is the call
+site is `at()`, and a `Stack` cannot be empty: `Stack::of` is the one place
+that can say so, and `Columns::frames` turns that into a `Failure` where the
+message is read, so nothing downstream carries the question.
 
-Three indices are undone on the Rust side, and all three are pure
-arithmetic. First, **`skip`** drops the instrument's own frames — it is at
-least 1 and never past the end of the walk. The other two have sections of
-their own below: the line shift, and the argument stack.
+Three indices are undone on the Rust side, all of them arithmetic. `skip`
+drops the instrument's own frames, and is at least 1 and never past the end of
+the walk. The line shift and the argument stack have sections of their own
+below.
 
 ## The line each frame is executing
 
-`BASH_LINENO[i]` is where frame `i` was **called from**, so where frame `i` is
-**executing** is `BASH_LINENO[i - 1]`. `LINENO` holds the missing cell at the
+`BASH_LINENO[i]` is where frame `i` was called from, so where frame `i` is
+executing is `BASH_LINENO[i - 1]`. `LINENO` holds the missing cell at the
 innermost end, and the two together are the whole vector:
 
 ```
@@ -132,12 +130,12 @@ BASH_LINENO   = (   9  ,  12  ,  14  ,  0  )
 LINENO        =     3
 ```
 
-`LINENO` is not shipped: it would be the emitter's own line, and `skip >= 1`
-drops that frame by construction.
+`LINENO` is not shipped, since it would be the emitter's own line, and `skip
+>= 1` drops that frame by construction.
 
-**The last `BASH_LINENO` cell is left over, and it is where the walk itself was
-entered.** Bash pushes a frame for the top level of a script file and for
-nothing else, so that cell tells the two apart — measured on 5.3.9:
+The last `BASH_LINENO` cell is left over, and it holds where the walk itself
+was entered. Bash pushes a frame for the top level of a script file and for
+nothing else, so that cell tells the two apart. Measured on 5.3.9:
 
 | how bash was started | last cell |
 |---|---|
@@ -148,16 +146,15 @@ nothing else, so that cell tells the two apart — measured on 5.3.9:
 | a shell fed on standard input | the same |
 | a file sourced from either of those | the same |
 
-Where it is not `0` there is exactly one frame above the outermost that
-`FUNCNAME` never names, and the cell is its line. That is `Site::Shell`, built
-from what bash did report rather than refused for what it did not — a `make`
-recipe is the everyday form of it, since `make` runs each one through
-`$(SHELL) -c`.
+Where it is not `0` there is one frame above the outermost that `FUNCNAME`
+never names, and the cell is its line. That frame is `Site::Shell`, built from
+what bash did report. A `make` recipe is the everyday form of it, since `make`
+runs each one through `$(SHELL) -c`.
 
 ## Bash's own words
 
 Measured against 5.3.9. `eval`, traps, subshells and command substitution add
-no frame at all.
+no frame.
 
 | in `FUNCNAME` | |
 |---|---|
@@ -170,18 +167,18 @@ no frame at all.
 | `main` | the function was defined at an interactive prompt |
 | `$0` | the code came from a `-c` command line or from standard input |
 
-The last is not a word but whatever `$0` is — `bash`, or any name a caller
-passed — so a walk alone cannot tell it from a file of the same name. `$0` and
-how bash was started are in what the shell said when it joined, and
-`Columns::frames` is handed that: the word reads as `Source::Shell` only in a
-shell bash was given no script file for, and where it was, `$0` **is** that
-script and reads as the path it is. A script that defines a function called `main` or
-`source` is indistinguishable from bash's own use of those words: bash reports
-the same string either way.
+The last is whatever `$0` is — `bash`, or any name a caller passed — so a walk
+alone cannot tell it from a file of the same name. `$0` and how bash was
+started are in what the shell said when it joined, and `Columns::frames` is
+handed that: the word reads as `Source::Shell` only in a shell bash was given
+no script file for, and where it was, `$0` is that script and reads as the
+path it is. A script defining a function called `main` or `source` is
+indistinguishable from bash's own use of those words, since bash reports the
+same string either way.
 
 ## Where a source path lands
 
-`BASH_SOURCE` holds the path **as it was written**, relative or not and never
+`BASH_SOURCE` holds the path as it was written, relative or not, and never
 normalised:
 
 ```
@@ -190,70 +187,68 @@ BASH_SOURCE=('sub/../lib.bash' 'sub/main.bash')
 ```
 
 `stack.bash` therefore ships `$PWD` with the walk, and `Source::File` is that
-joined with what bash said — absolute, with nothing resolved: no symlink
-followed, no `..` collapsed.
+joined with what bash said: absolute, with nothing resolved, no symlink
+followed and no `..` collapsed.
 
-Bash does not record what a relative path was relative to **when the file was
-sourced**, only where the shell is now. A subject that changed directory in
-between leaves a path that resolves to nothing, and that is what `missing`
-reports. It is not an error: the path was true when it was written — a reading
-reports it as it chooses, and a rig whose reading outlives the run keeps
-its own workspace so the instrument's frames stay readable — see
-[rigs.md](rigs.md).
+Bash records what a relative path was relative to at the time of the walk,
+never at the time the file was sourced. A subject that changed directory in
+between leaves a path that resolves to nothing, which is what `missing`
+reports. The path was true when it was written; a reading reports it as it
+chooses, and a rig whose reading outlives the run keeps its own workspace so
+the instrument's frames stay readable, as [rigs.md](rigs.md) covers.
 
-One consequence of `skip >= 1` is worth stating: the `i - 1` index above
-is in range for every reported frame, so the off-by-one is unrepresentable
-rather than guarded.
+Because `skip >= 1`, the `i - 1` index above is in range for every reported
+frame, so the off-by-one is unrepresentable rather than guarded.
 
 ## The argument stack
 
- `BASH_ARGV` is one flat stack of words; `BASH_ARGC[i]` is the width of
-frame `i`'s group in it. A group's offset is the sum of the widths before
-it, and its contents are stored reversed. Summing forward and reading each
-group backward gives the arguments in the order the call was written.
+`BASH_ARGV` is one flat stack of words, and `BASH_ARGC[i]` is the width of
+frame `i`'s group in it. A group's offset is the sum of the widths before it,
+and its contents are stored reversed. Summing forward and reading each group
+backward gives the arguments in the order the call was written.
 
 ### When arguments are absent
 
-`BASH_ARGC` aligns 1:1 with `FUNCNAME` only where the shell was recording. Turn
-`extdebug` on part-way and it is **short**, and short means every width belongs
-to a different frame.
+`BASH_ARGC` aligns 1:1 with `FUNCNAME` only where the shell was recording.
+Turn `extdebug` on part-way and it is short, and short means every width
+belongs to a different frame.
 
-**Alignment is the test, not `shopt -q`,** and an unaligned record is carried as
-absent. That is why `Frame::args` is an `Option`: `None` is "not recorded" and
-`Some([])` is "called with none". A tool that never wants arguments omits the
-two sections entirely and gets the same `None`.
+Alignment is the test rather than `shopt -q`, and an unaligned record is
+carried as absent. `Frame::args` is therefore an `Option`, where `None` is not
+recorded and `Some([])` is called with none. A tool that never wants arguments
+omits the two sections entirely and gets the same `None`.
 
-A record that *does* line up but claims more arguments than were sent is a
-corrupt one, and fails the run.
+A record that lines up but claims more arguments than were sent is corrupt,
+and fails the run.
 
-## Why the columns rather than rows
+## Columns rather than rows
 
 An instrument could assemble whole frames in bash and ship them as an array of
-arrays. That is one more level of `@Q`, which re-escapes every quote, and a
-walk over `BASH_ARGV` written in bash. Measured at depth 8 with three arguments
-per frame, 4000 iterations, against an empty-loop floor of 2.7 µs:
+arrays. That costs one more level of `@Q`, which re-escapes every quote, and a
+walk over `BASH_ARGV` written in bash. Measured at depth 8 with three
+arguments per frame, 4000 iterations, against an empty-loop floor of 2.7 µs:
 
 | | µs/op | payload bytes |
 |---|---:|---:|
 | assembling rows, with the argument walk | 201 | 522 |
 | six raw `${arr[*]@Q}` expansions | 21 | 314 |
 
-The columns are also closer to what bash keeps: `BASH_ARGC` plus `BASH_ARGV` is
-a width-prefixed flat word stream, which is `LinkedArr`'s own shape. Shipping
-them as they are means the index arithmetic lands where the compiler can see
-it, and where it is checked without running bash.
+The columns are also closer to what bash keeps. `BASH_ARGC` plus `BASH_ARGV`
+is a width-prefixed flat word stream, which is `LinkedArr`'s shape. Shipping
+them as they are puts the index arithmetic where the compiler can see it, and
+where it is checked without running bash.
 
 ## Who uses it
 
-Any word that reports where a shell is: it reaches the walk through
-`stack::with_walk`, which puts `stack.bash` in front of the rig's
-definitions in `Rig::bash`, and it passes its own instrument depth — its
-word's frame plus the walk's. Which words exist, and when they record
-arguments, is each tool's own book's.
+Any word that reports where a shell is. It reaches the walk through
+`stack::with_walk`, which puts `stack.bash` in front of the rig's definitions
+in `Rig::bash`, and it passes its own instrument depth, its word's frame plus
+the walk's. Which words exist, and when they record arguments, is each tool's
+own book.
 
 ## See also
 
-- `bash-strings/docs/values.md` — `parse_array`, the shape each section is
-- `bashcap/docs/bashcap.md` — `extdebug`, and what else a snapshot carries
+- [bash-strings: values](https://bashmgmt.github.io/bash-strings/values.html) — `parse_array`, the shape each section is
+- [bashcap: bashcap](https://bashmgmt.github.io/bashcap/bashcap.html) — `extdebug`, and what else a snapshot carries
 - [scoping.md](scoping.md) — why the nameref rather than a global
 - [measurements.md](measurements.md) — what a snapshot costs

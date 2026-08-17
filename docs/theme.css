@@ -1,0 +1,4 @@
+/* Code in these books runs to 80 columns; the default 750px column clips it. */
+:root {
+    --content-max-width: 1000px;
+}

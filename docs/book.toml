@@ -1,0 +1,12 @@
+[book]
+title = "bash-interop"
+authors = ["Simon Leischnig"]
+language = "en"
+src = "."
+
+[build]
+build-dir = "book"
+
+[output.html]
+git-repository-url = "https://github.com/bashmgmt/bash-interop"
+additional-css = ["theme.css"]

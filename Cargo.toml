@@ -3,11 +3,11 @@ name = "bash-interop"
 version = "0.1.0"
 edition = "2024"
 description = "Run bash under instrumentation and hear what it says: a session per run, a pipe and a task per shell, words a script speaks and answers it runs."
+license = "MIT"
 readme = "README.md"
-repository = "https://github.com/simlei/bash-interop"
+repository = "https://github.com/bashmgmt/bash-interop"
 keywords = ["bash", "shell", "instrumentation", "ipc", "tracing"]
 categories = ["development-tools", "os::unix-apis", "command-line-interface"]
-exclude = [".plans/**"]
 
 [dependencies]
 bash-strings = "*"

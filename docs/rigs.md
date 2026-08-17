@@ -1,11 +1,11 @@
-# The rig — what you implement
+# The rig
 
-This chapter is the API: the two traits you write (`Rig` and `Reacting`),
-the values you are handed (`Layout`, `Shell`), and what a finished run gives
-back. It ends with a look under the floor — the session machinery all of it
-runs on — so that nothing later in the book has to be taken on faith.
+This chapter is the API: the two traits you write, `Rig` and `Reacting`, the
+values you are handed, `Layout` and `Shell`, and what a finished run gives
+back. It ends with the session machinery underneath, so the guarantees above
+it can be checked rather than assumed.
 
-Where the code lives, for when you want to read along:
+Where the code lives, for reading along:
 
 ```
 src/rig/
@@ -19,12 +19,11 @@ src/rig/
       wire/        the protocol (its own chapter: wire.md)
 ```
 
-## A rig in one look
+## A rig at a glance
 
-Before the contracts, the whole thing at a glance — a rig that gives the
-subject one word, keeps what each shell says, and answers one question.
-(This is a compressed sketch; the compiled original, kept honest by the
-doctest gate, is the module doc of `rig` — `cargo doc --open`.)
+A rig that gives the subject one word, keeps what each shell says, and answers
+one question. This is a compressed sketch; the compiled original, kept honest
+by the doctest gate, is the module doc of `rig`.
 
 ```rust
 struct Deploying;                                        // the description
@@ -68,14 +67,14 @@ fn deploy_join(at: &Layout) -> String {
 }
 ```
 
-Three shapes to hold onto: the **rig** is one value describing the whole
-arrangement; the **reaction** is a second type, built fresh *per shell*;
-and the roles (`Driving` here) are empty opt-in impls — the orchestration
-comes with the trait. Now the contracts, one at a time.
+Three shapes carry the arrangement. The rig is one value describing the whole
+of it. The reaction is a second type, built fresh per shell. The roles, here
+`Driving`, are empty opt-in impls, with the orchestration coming from the
+trait.
 
-## `Rig` — the description
+## `Rig`
 
-As it stands in `src/rig/mod.rs`; read the doc comments as the contract:
+As it stands in `src/rig/mod.rs`; the doc comments are the contract.
 
 <!-- quote: src/rig/mod.rs anchor=rig-trait -->
 ```rust
@@ -96,34 +95,29 @@ pub trait Rig {
 }
 ```
 
-Questions this quote tends to raise, answered in order:
+`bash()` takes `&Layout` because baking the coordinate in is a freedom. Most
+rigs ignore the parameter and return the same bytes for every session; a rig
+that wants the workspace inside a definition can have it. The text becomes
+`<dir>/rig.bash`, laid by the session, and sourcing that file is safe because
+this method promises definitions only.
 
-**Why does `bash()` take `&Layout` if its text is supposed to be
-location-free?** Because *may bake* is a freedom, not a requirement. Most
-rigs ignore the parameter (`_at`) and return the same bytes for every
-session; a rig that wants the workspace inside a definition can have it.
-The text becomes `<dir>/rig.bash`, laid by the session — and sourcing that
-file is safe precisely because this method promises definitions only.
-
-**Where does the initiation line live, if the trait has no method for
-it?** With the wrapper — the code that owns the run and its environment
-closure. The one place allowed to automate initiation, a provisioned
-`bash_env.bash`, takes the line as plain data
-(`Provision::Joining(&line)`); the tools each export theirs as a function
-beside their rig (`bashprof::joining(at)`), and a by-hand script types the
-same line itself. The core takes a string and never a method: which line
+The initiation line lives with the wrapper, the code that owns the run and its
+environment closure. A provisioned `bash_env.bash` is the one place allowed to
+automate initiation, and it takes the line as plain data,
+`Provision::Joining(&line)`. The tools each export theirs as a function beside
+their rig, such as `bashprof::joining(at)`, and a by-hand script types the
+same line. The core takes a string and has no method for it, so which line
 initiates a rig is the wrapper's statement, made where the run is made.
 
-**Why is `joined()` async, and what does a slow one cost?** It runs in the
-session's accept loop, between "a shell announced" and "its pipe opens".
-You may need to open a file, allocate a resource, or consult something —
-that can await. The cost is the one the doc comment states: a slow
-`joined` delays the *next* join, never a shell already admitted.
+`joined()` is async because it runs in the session's accept loop, between a
+shell announcing itself and its pipe opening, where you may need to open a
+file, allocate a resource, or consult something. A slow `joined` delays the
+next join and never a shell already admitted.
 
-**Why `&self` everywhere?** A rig is a description; running it changes
+`&self` throughout, because a rig is a description and running it changes
 nothing about it. Everything that changes lives in the reactions.
 
-## `Reacting` — one shell's counterpart
+## `Reacting`
 
 <!-- quote: src/rig/mod.rs anchor=reacting-trait -->
 ```rust
@@ -148,34 +142,33 @@ pub trait Reacting: Sized + 'static {
 }
 ```
 
-Reading it slowly: `hear` receives a `say` — nobody is waiting, so there is
-nothing to produce but success or a `Failure`. `answer` receives an `ask` —
-a shell is blocked on it, and the `Answer` you return is written back as
-the command that shell runs. `finish` consumes the reaction when its shell
-can no longer speak, and what it returns becomes the shell's entry in the
-run's result. `&mut self` because the reaction is the thing that changes;
-`Message` arrives by value because it is now yours; `'static` because each
-reaction runs as a task of its own and must own what it holds.
+`hear` receives a `say`, where nobody is waiting, so there is nothing to
+produce but success or a `Failure`. `answer` receives an `ask`, where a shell
+is blocked, and the `Answer` you return is written back as the command that
+shell runs. `finish` consumes the reaction when its shell can no longer speak,
+and what it returns becomes the shell's entry in the run's result.
 
-**No method has a default body**, deliberately. A default is a decision an
-implementor did not make and cannot see in their own code. Instead, the two
-common whole behaviours are shipped as types — name one as your `Reaction`
-and write nothing:
+`&mut self` because the reaction is what changes. `Message` arrives by value
+because it is yours from then on. `'static` because each reaction runs as a
+task of its own and must own what it holds.
+
+No method has a default body, so an implementor decides every case in view.
+The two common whole behaviours ship as types instead: name one as your
+`Reaction` and write nothing.
 
 | shipped reaction | `hear` | `answer` | `finish` |
 |---|---|---|---|
 | `Vec<Message>` | push | `hear` it, then `Answer::unknown()` | `Ok(self)` |
 | `()` | drop it | `Answer::unknown()` | `Ok(())` |
 
-`Answer::unknown()` is `return 127` — bash's own "command not found" — so a
-script asking a question no rig answers sees an ordinary, testable failure
-status, not a hang and not a crash.
+`Answer::unknown()` is `return 127`, bash's own command-not-found, so a script
+asking a question no rig answers sees an ordinary, testable failure status.
 
 ### Sharing between shells
 
-Each reaction is its own task, so how do several shells write into one
-place — one output file, one merged view? That place is *the rig's*, and
-`joined` hands each reaction a share. From bashcap:
+Several shells writing into one place — an output file, a merged view — share
+a resource the rig owns, and `joined` hands each reaction a share. From
+bashcap:
 
 ```rust
 type Sink = Rc<RefCell<BufWriter<File>>>;
@@ -184,25 +177,24 @@ struct BashCap   { into: PathBuf, sink: Sink, tracing: Tracing }   // the rig ow
 struct Capturing { shell: Arc<Shell>, into: PathBuf, sink: Sink, written: usize }
 ```
 
-`Rc<RefCell<_>>`, not `Arc<Mutex<_>>`: the session is single-threaded — one
+`Rc<RefCell<_>>` fits because the session is single-threaded: one
 `current_thread` runtime, one `spawn_local` task per shell, no `Send` bound
-anywhere — so a single-threaded share is the honest one. The one rule async
-adds: never hold the `RefCell` borrow across an `.await`. The borrow itself
-is fine; the panic case is another task borrowing while yours is parked.
-Every reaction in this crate borrows, writes, and returns without awaiting.
+anywhere. The rule async adds is to never hold the `RefCell` borrow across an
+`.await`; the borrow itself is fine, and the panic case is another task
+borrowing while yours is parked. Every reaction in this crate borrows, writes
+and returns without awaiting.
 
-Awaiting inside `hear`/`answer`/`finish` yields to the other shells' tasks;
-synchronous work blocks them for its duration — the usual terms of any
-cooperative loop.
+Awaiting inside `hear`, `answer` or `finish` yields to the other shells'
+tasks, and synchronous work blocks them for its duration, on the usual terms
+of a cooperative loop.
 
 ### Facts are members, not parameters
 
-Which bash a shell is, how it was started, what options it had on, which
-words its join brought — all of that is settled before its first message
-and cannot change while it lives (a subshell that differs is a *new* shell
-with its own `$BASHPID`; `set` refuses `-i`, `-c`, `-s`). So it arrives
-once, at `joined`, as `Arc<Shell>`, and a reaction that needs it keeps it
-as a member:
+Which bash a shell is, how it was started, what options it had on, and which
+words its join brought are settled before its first message and cannot change
+while it lives. A subshell that differs is a new shell with its own
+`$BASHPID`, and `set` refuses `-i`, `-c` and `-s`. So it arrives once, at
+`joined`, as `Arc<Shell>`, and a reaction that needs it keeps it as a member:
 
 ```rust
 struct Seen { shell: Arc<Shell>, captures: Vec<Capture> }
@@ -212,29 +204,28 @@ async fn joined(&self, _at: &Layout, shell: Arc<Shell>) -> Result<Seen, Failure>
 }
 ```
 
-This is also a proof obligation discharged by construction: owning a
-reaction *is* the evidence that its shell announced itself, and a message
-can only reach a reaction down that shell's own pipe — no path through the
-session holds a message whose shell is unknown.
+Owning a reaction is the evidence that its shell announced itself, and a
+message reaches a reaction only down that shell's own pipe, so no path through
+the session holds a message whose shell is unknown.
 
-## `Layout` and `Provision` — the workspace, in your hands
+## `Layout` and `Provision`
 
-`joined`, `bash` and the environment closure all receive
-`&Layout`. It is the workspace: one validated coordinate (held as text,
-because it crosses into bash), plus the model of the files inside — the
-constant names (`prelude.bash`, `rig.bash`, `bash_env.bash`, `join`,
-`up.<tok>`, `rep.<tok>`, `lock`) exist nowhere else in the codebase.
+`joined`, `bash` and the environment closure all receive `&Layout`. It is the
+workspace: one validated coordinate, held as text because it crosses into
+bash, plus the model of the files inside. The constant names — `prelude.bash`,
+`rig.bash`, `bash_env.bash`, `join`, `up.<tok>`, `rep.<tok>`, `lock` — exist
+nowhere else in the codebase.
 
-What you actually call on it:
+What you call on it:
 
-- `at.text()` — the directory as text, ready for
-  `bash_strings::emit_scalar` when a joining line spells it;
-- `at.path()` — the same, as a `&Path` for Rust's own file work;
-- `at.bash_env(provision)` — the one owner of the provisioned startup
-  file: writes it, and yields the `("BASH_ENV", <file>)` pair for the
+- `at.text()` — the directory as text, ready for `bash_strings::emit_scalar`
+  when a joining line spells it;
+- `at.path()` — the same as a `&Path`, for Rust's own file work;
+- `at.bash_env(provision)` — the one owner of the provisioned startup file: it
+  writes the file and yields the `("BASH_ENV", <file>)` pair for the
   environment closure to return.
 
-That last one takes the choice its caller must state first:
+The last one takes the choice its caller states first:
 
 <!-- quote: src/rig/attended.rs anchor=provision -->
 ```rust
@@ -254,22 +245,21 @@ pub enum Provision<'a> {
 }
 ```
 
-Why an enum and not a boolean: the two arms carry different information.
-`Joining` needs the line to write (the wrapper's own — the tools export
-theirs, `bashprof::joining(at)`), and
-`Definitions` needs a warning attached — the file then carries no
-coordinate at all, so if your scripts must find the workspace, you state a
-variable for it (`BASHPROF_SESSION`, `BASHCAP_SESSION` — each tool its
-own name) *beside* this pair. [joining.md](joining.md) shows both arms as whole scripts, including
-what happens to a shell that has the words and never initiates.
+The two arms carry different information, which is why this is an enum.
+`Joining` needs the line to write, the wrapper's own. `Definitions` leaves the
+file without a coordinate, so a caller whose scripts must find the workspace
+states a variable for it beside this pair; the tools spell theirs
+`BASHPROF_SESSION` and `BASHCAP_SESSION`. [joining.md](joining.md) shows both
+arms as whole scripts, including what happens to a shell that has the words
+and never initiates.
 
 Behind the same type sits the ownership story, told once here and assumed
-everywhere else: the session `flock`s `<dir>/lock` before touching
-anything and releases it after its fifos are gone. An occupied workspace
-is refused whole; a predecessor killed outright leaves stale fifos that
-the *next* open sweeps safely (the kernel released the dead lock); and the
-`join` fifo therefore exists exactly while a session serves, which is what
-makes the liveness probe — `[[ -p <dir>/join ]]`, one file test — truthful.
+elsewhere. The session `flock`s `<dir>/lock` before touching anything and
+releases it after its fifos are gone. An occupied workspace is refused whole.
+A predecessor killed outright leaves stale fifos that the next open sweeps
+safely, the kernel having released the dead lock. The `join` fifo therefore
+exists exactly while a session serves, which is what makes `[[ -p <dir>/join
+]]` a truthful liveness probe.
 
 ## What a run hands back
 
@@ -287,15 +277,14 @@ pub struct Attended<K> {
 pub type Kept<R> = <<R as Rig>::Reaction as Reacting>::Kept;
 ```
 
-Provenance is the shape: *which shell produced this* is not a field to
-match up, it is which entry you are holding. `parted` deserves a pause —
-it is an `Option` because it records a genuine either/or: `Some(when)` for
-a shell that finished while the session watched, `None` for a shell still
-alive when the session ended (a served client that outlives the handle,
-say). It is never "unknown".
+Which shell produced something is which entry you are holding, so there is no
+field to match up. `parted` is an `Option` because it records a genuine
+either/or: `Some(when)` for a shell that finished while the session watched,
+`None` for a shell still alive when the session ended, such as a served client
+outliving the handle.
 
-When a reading wants the run flat again — every message from every shell,
-in the order things were actually said:
+When a reading wants the run flat again — every message from every shell, in
+the order things were said:
 
 ```rust
 pub struct Said<'a> { pub shell: &'a Arc<Shell>, pub message: &'a Message }
@@ -303,20 +292,19 @@ pub struct Said<'a> { pub shell: &'a Arc<Shell>, pub message: &'a Message }
 pub fn heard<K: AsRef<[Message]>>(shells: &[Attended<K>]) -> Vec<Said<'_>>;
 ```
 
-Separate pipes have no arrival order *between* them, so `heard` sorts by
-`Stamp::sent_at` — the sending shells' own clocks — stably over join order.
-Your own `Kept` joins in by implementing `AsRef<[Message]>`. And that is
-the whole accumulator story: the core ships no session-wide collector,
-because what needs to be whole across shells is a resource your rig owns
-(the `Sink` pattern above).
+Separate pipes have no arrival order between them, so `heard` sorts by
+`Stamp::sent_at`, the sending shells' own clocks, stably over join order. Your
+own `Kept` joins in by implementing `AsRef<[Message]>`. The core ships no
+session-wide collector, since what needs to be whole across shells is a
+resource the rig owns, in the `Sink` pattern above.
 
 ## Under the floor: the session
 
-Nothing below is API — you never touch these types — but seeing the loop
-once makes the guarantees above concrete.
+Nothing below is API. Seeing the loop once makes the guarantees above
+concrete.
 
-Both orchestrations drive the same `Session` (a sketch of
-`src/rig/session.rs`; abridged, rustdoc is authoritative):
+Both orchestrations drive the same `Session`, sketched from
+`src/rig/session.rs`; rustdoc is authoritative.
 
 ```rust
 struct Session<'r, R: Rig> {
@@ -345,28 +333,28 @@ loop {
 }
 ```
 
-Arm one: a shell announced itself on the `join` fifo. Its **account** —
-which bash, how invoked, what options, the join's extra words — arrived
-*with* the announcement (reassembled from frames; [wire.md](wire.md)
-explains why frames exist). `announced` makes the shell's reply fifo,
-opens its pipe — that open is what releases the shell from its blocking
-rendezvous — builds `Shell`, awaits your `joined`, and spawns the task.
-Nothing in this loop ever awaits an admitted shell.
+In the first arm a shell announced itself on the `join` fifo. Its account —
+which bash, how invoked, what options, the join's extra words — arrived with
+the announcement, reassembled from frames, which [wire.md](wire.md) explains.
+`announced` makes the shell's reply fifo, opens its pipe, builds `Shell`,
+awaits your `joined`, and spawns the task. Opening the pipe is what releases
+the shell from its blocking rendezvous. Nothing in this loop awaits an
+admitted shell.
 
-Arm two: some shell's task finished. Its `Attended` is collected; a
-`Failure` it carried ends the run here.
+In the second arm some shell's task finished. Its `Attended` is collected, and
+a `Failure` it carried ends the run here.
 
-Arm three: the watch fired — the subject exited (driving) or the handle
-was released (serving). The loop returns, and `close` does the one ending
-there is: signal every task to drain what its pipe still holds, finish
-every reaction, release any shell announced but not yet admitted, remove
-the fifos, unlink `join` last, and hand back
-`(Vec<Attended<…>>, Option<Failure>)`.
+In the third the watch fired, because the subject exited under driving or the
+handle was released under serving. The loop returns, and `close` does the one
+ending there is: signal every task to drain what its pipe still holds, finish
+every reaction, release any shell announced but not admitted, remove the
+fifos, unlink `join` last, and hand back `(Vec<Attended<…>>,
+Option<Failure>)`.
 
 ## When a rig fails
 
-A `Failure` from `joined`, `hear` or `answer` means *the operator broke* —
-not the subject. What happens next, and whose problem each case is:
+A `Failure` from `joined`, `hear` or `answer` reports that the operator broke,
+not the subject.
 
 | happening | whose problem, and what follows |
 |---|---|
@@ -374,11 +362,10 @@ not the subject. What happens next, and whose problem each case is:
 | an answer that returns non-zero | the subject's, entirely ordinary: `set -e`, `\|\|`, or ignoring it are its own choices |
 | a line on a pipe the protocol did not write, or one left half-written | the run's while serving; reported in `failed` if found at close |
 
-The subject is *not told* when the operator breaks — an answer is a
-command, and no command arriving means the asking shell blocks until the
-kill or the close reaches it. And in both roles, **every path after
-`Session::open` sees the session out**: whatever failed is held while
-`close` runs, then returned. There is exactly one exit.
+The subject is not told when the operator breaks. An answer is a command, and
+no command arriving means the asking shell blocks until the kill or the close
+reaches it. In both roles every path after `Session::open` sees the session
+out: whatever failed is held while `close` runs, then returned.
 
 Two small types complete the error picture:
 
@@ -386,9 +373,9 @@ Two small types complete the error picture:
 pub enum ExitStatus { Code(u8), Signal(u8) }   // shell_code(): 128 + n for a signal
 ```
 
-How the *run* went and how the *subject* ended are different facts —
-`Run::failed` carries the first, `ExitStatus` only the second, and no
-signal disposition is ever changed. And the crate's one error:
+How the run went and how the subject ended are different facts. `Run::failed`
+carries the first and `ExitStatus` the second, and no signal disposition is
+changed. Then the crate's one error:
 
 ```rust
 pub struct Failure { doing: String, cause: Box<dyn Error + Send + Sync> }
@@ -399,7 +386,7 @@ pub trait Doing<T> {
 ```
 
 A context and a cause rather than an enum, because every consumer either
-displays it or walks `source()` — nothing matches on variants.
+displays it or walks `source()`.
 
 ## See also
 
@@ -409,4 +396,4 @@ displays it or walks `source()` — nothing matches on variants.
   wire
 - [shell.md](shell.md) — everything `Shell` knows and how it knows it
 - [stack.md](stack.md) — the frame walk any instrument can reuse
-- `bashcap/docs/` — a real rig that streams instead of keeping
+- [bashcap's book](https://bashmgmt.github.io/bashcap/) — a real rig that streams instead of keeping

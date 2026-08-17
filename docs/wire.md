@@ -1,11 +1,8 @@
-# The wire — the bash, the fifos, the lines, the message
+# The wire
 
-This is the bottom of the stack: the protocol everything above stands on.
-Read it when you want to know *exactly* what crosses between a shell and
-the session — to debug a run, to extend a tool, or to convince yourself
-the guarantees in [overview.md](overview.md) are real. Nothing here is
-API; the chapter quotes the shipped bash itself, in hand copies of
-`src/rig/wire/prelude.bash` and its neighbours.
+The protocol everything above stands on: what crosses between a shell and the
+session, byte for byte. Nothing here is API. The chapter quotes the shipped
+bash itself, in hand copies of `src/rig/wire/prelude.bash` and its neighbours.
 
 Where things live:
 
@@ -21,8 +18,7 @@ src/rig/wire/
 
 ## The client surface
 
-A script that takes part says three words and nothing else of the
-protocol's:
+A script that takes part says three words and nothing else of the protocol's:
 
 ```bash
 BC_JOIN LABEL DIR word…    # once: bind the label, announce, attach
@@ -30,17 +26,16 @@ BC_INSTR LABEL say a b c   # ship the arglist and return
 BC_INSTR LABEL ask a b c   # ship it, block, and run the answer
 ```
 
-The **label** is a lookup key in bash — `__BC__DIR`, `__BC__FD`,
-`__BC__REP`, `__BC__OWNER` are associative arrays over it — which is what
-lets one process hold several sessions at once. Rust is never told the
-label; it only sees pipes.
+The label is a lookup key in bash, with `__BC__DIR`, `__BC__FD`, `__BC__REP`
+and `__BC__OWNER` as associative arrays over it, which lets one process hold
+several sessions at once. Rust is never told the label and sees only pipes.
 
-`BC_JOIN` binds the label to a workspace and refuses the malformed cases
-loudly: a relative dir, a label that could not name a file, a label
-already joined in this shell. The words *after* the dir are the caller's
-own free payload — kept per label, `@Q`-quoted, announced with every
-attach, and landing verbatim on `Shell::brought`. The protocol reserves no
-word in them and never self-locates. Here is the word as shipped:
+`BC_JOIN` binds the label to a workspace and refuses the malformed cases: a
+relative dir, a label that could not name a file, a label already joined in
+this shell. The words after the dir are the caller's own payload, kept per
+label, `@Q`-quoted, announced with every attach, and landing verbatim on
+`Shell::brought`. The protocol reserves no word in them and never
+self-locates.
 
 ```bash
 BC_JOIN() {
@@ -62,11 +57,10 @@ BC_JOIN() {
 }
 ```
 
-`BC_INSTR` is the speaking word. Two things to notice before the quote:
-the first line records *the subject's own call site* (that is what error
-messages name), and the `__BC__OWNER` check is how a **fork** — which
-inherited the arrays but not a pipe of its own — attaches itself on its
-first word:
+`BC_INSTR` is the speaking word. Its first line records the subject's own call
+site, which is what error messages name, and the `__BC__OWNER` check is how a
+fork — which inherited the arrays but not a pipe of its own — attaches itself
+on its first word.
 
 ```bash
 BC_INSTR() {
@@ -85,13 +79,13 @@ BC_INSTR() {
 }
 ```
 
-A silent fork never attaches, and holds its parent's pipe open for as long
-as it lives — correctly, because it could still write on it.
+A silent fork never attaches and holds its parent's pipe open for as long as
+it lives, which is correct, because it could still write on it.
 
 ## The files
 
-The session lays two definition files and takes a lock; one more file
-exists only when a run provisions it:
+The session lays two definition files and takes a lock. One more file exists
+only when a run provisions it.
 
 ```
 <dir>/prelude.bash    generic, shipped verbatim: the words above, the internals below
@@ -100,15 +94,16 @@ exists only when a run provisions it:
 <dir>/bash_env.bash   only when provisioned: the two sources, then the stated joining, or not
 ```
 
-Neither laid file initiates — that story, and the ownership story behind
-the lock (refusal of occupied workspaces, the sweep of a killed
-predecessor's fifos), is told once in [rigs.md](rigs.md) and holds here
-unchanged. Two wire-level facts belong to this chapter: `Layout::new`
-validates the directory as one line of UTF-8 text, because it crosses into
-bash and onto the announce line; and re-sourcing a *joining*
-`bash_env.bash` in a child re-runs the join — that is precisely how
-`BASH_ENV` reaches a whole tree — while re-running it in a shell already
-joined is refused by `BC_JOIN` (`already joined`, 125).
+Neither laid file initiates, and the ownership story behind the lock — refusal
+of occupied workspaces, the sweep of a killed predecessor's fifos — is told
+once in [rigs.md](rigs.md) and holds here unchanged.
+
+Two wire-level facts belong to this chapter. `Layout::new` validates the
+directory as one line of UTF-8 text, because it crosses into bash and onto the
+announce line. And re-sourcing a joining `bash_env.bash` in a child re-runs
+the join, which is how `BASH_ENV` reaches a whole tree, while re-running it in
+a shell already joined is refused by `BC_JOIN` with `already joined` and
+status 125.
 
 ## The fifos
 
@@ -124,31 +119,30 @@ joined is refused by `BC_JOIN` (`already joined`, 125).
 | `up.<token>` | the shell, before it announces | exactly one process | `O_RDONLY\|O_NONBLOCK`, async receiver | `exec {fd}>` for its life |
 | `rep.<token>` | the run, on the announcement | the run | `open_sender` per answer | `exec {fd}<>` for its life |
 
-Why three kinds, and why only one of them has a framing scheme: a fifo
-write is atomic only up to `PIPE_BUF` (4096 bytes on Linux). On a shell's
-*own* pipe that never matters — one writer means nothing can interleave,
-so a message wider than `PIPE_BUF` is still one `printf` whose pieces
-arrive in order, and the reader just cuts at newlines. The **control
-fifo** is different: every shell writes its announcement there, the
-announcement carries the whole account (unbounded — it includes
-`$BASH_EXECUTION_STRING`), and two shells' bytes may interleave at any
-`PIPE_BUF` boundary. So announcements, and only announcements, travel in
-frames.
+Only one of the three has a framing scheme, because a fifo write is atomic
+only up to `PIPE_BUF`, 4096 bytes on Linux. On a shell's own pipe that never
+matters: one writer means nothing can interleave, so a message wider than
+`PIPE_BUF` is still one `printf` whose pieces arrive in order, and the reader
+cuts at newlines.
+
+The control fifo is different. Every shell writes its announcement there, the
+announcement carries the whole account, which is unbounded because it includes
+`$BASH_EXECUTION_STRING`, and two shells' bytes may interleave at any
+`PIPE_BUF` boundary. Announcements therefore travel in frames.
 
 ### Frames on the control fifo
 
-Each frame fits in one atomic write, and says whether more follow:
+Each frame fits in one atomic write and says whether more follow:
 
 ```
 <token> + <bytes>\n      a frame with more to come
 <token> . <bytes>\n      the last frame
 ```
 
-The sender is ten lines of bash. The one subtlety is `local LC_ALL=C`:
-it makes `${#2}` and `${2:a:b}` count **bytes**, so a frame is ≤ 4096
-bytes whatever the text holds — and the subject's locale is back on
-return. A frame may therefore end *inside* a multibyte character, which
-is fine, because reassembly happens in bytes:
+The sender is ten lines of bash. `local LC_ALL=C` makes `${#2}` and
+`${2:a:b}` count bytes, so a frame is at most 4096 bytes whatever the text
+holds, and the subject's locale is back on return. A frame may therefore end
+inside a multibyte character, which reassembly in bytes handles.
 
 ```bash
 __bc_announce() {
@@ -162,9 +156,9 @@ __bc_announce() {
 }
 ```
 
-On the Rust side, `Control` keeps the unfinished announcements' bytes per
-token, appends each frame, and on the `.` frame decodes the whole as
-UTF-8 and reads it as the `Account`. Its surface (abridged):
+On the Rust side `Control` keeps the unfinished announcements' bytes per
+token, appends each frame, and on the `.` frame decodes the whole as UTF-8 and
+reads it as the `Account`. Its surface, abridged:
 
 ```rust
 pub(crate) struct Announced { pub token: String, pub account: Account }
@@ -175,15 +169,14 @@ impl Control {
 }
 ```
 
-A line that is not a frame — no token that could name a file, no ` + ` or
-` . ` after it — ends the run naming the line: this protocol does not
-guess. `close` releases every shell announced whole and not yet opened,
-drops an announcement left in the middle, and unlinks `join` last.
+A line that is not a frame — no token that could name a file, no ` + ` or ` . `
+after it — ends the run naming the line. `close` releases every shell
+announced whole and not yet opened, drops an announcement left in the middle,
+and unlinks `join` last.
 
-## Attaching: the blocking open is the rendezvous
+## Attaching
 
-The attach is the one choreographed moment, so read it as choreography.
-The shell's side:
+The blocking open is the rendezvous. The shell's side:
 
 ```bash
 __bc_attach() {
@@ -204,31 +197,30 @@ __bc_attach() {
 }
 ```
 
-Step by step: take the account; make *your own* pipe; announce token and
-account together on the control fifo; then **block** opening your pipe's
-write end. That open completes only when the run opens the read end — and
-the run does that only after it has read your whole announcement and made
-your reply fifo. So the ordering is airtight in both directions: the run
-cannot open a fifo that does not exist yet, the shell cannot write a
-message before the run is listening, and by the time the shell is
-released, the run already knows everything about it. This is also why a
-shell that says one thing and exits within microseconds loses nothing —
-it cannot get ahead of its own admission.
+The shell takes its account, makes its own pipe, announces token and account
+together on the control fifo, and then blocks opening its pipe's write end.
+That open completes when the run opens the read end, and the run does that
+only after reading the whole announcement and making the reply fifo. The
+ordering holds in both directions: the run cannot open a fifo that does not
+exist yet, the shell cannot write a message before the run is listening, and
+by the time the shell is released the run knows everything about it. A shell
+that says one thing and exits within microseconds cannot get ahead of its own
+admission.
 
-(The `[[ -p ]]` check before writing is not decoration: `>` on a missing
-path would create a regular *file* where a fifo should be. A session that
-closed unlinked `join`, so the check is also how a late shell learns
-there is nothing to join.)
+The `[[ -p ]]` check before writing matters because `>` on a missing path
+would create a regular file where a fifo should be. A session that closed
+unlinked `join`, so the check is also how a late shell learns there is nothing
+to join.
 
-**The token** — `<label>::<pid>.<µs>.<random>` — names the two fifos and
-appears in nothing else. Uniqueness is structural (a pid at a
-microsecond); the random tail is defence in depth. A collision fails at
-`mkfifo`, in the shell that chose the token, and Rust keys nothing on it.
+The token, `<label>::<pid>.<µs>.<random>`, names the two fifos and appears in
+nothing else. A pid at a microsecond is already unique and the random tail is
+defence in depth. A collision fails at `mkfifo`, in the shell that chose the
+token, and Rust keys nothing on it.
 
 ## What a line is
 
-Every line on every fifo is a **bash array literal**, with the protocol's
-words in front — but the shapes never share a channel:
+Every line on every fifo is a bash array literal with the protocol's words in
+front, and the shapes never share a channel:
 
 ```
 ('at=1786786563.138850' 'pid' '4711' … 'command' '')      the account: no verb, clock first —
@@ -238,36 +230,33 @@ words in front — but the shapes never share a channel:
 ('ASK'  'at=…' 'which' 'target')                          the other verb; there is no third
 ```
 
-Session setup and conversation cannot mix, and each reader enforces its
-side: `Account::read` refuses a line with a verb where the clock goes, and
-a pipe line whose first word is not `SAY` or `ASK` is refused as
-"`…` is not a verb". Once a shell is admitted, nothing about it travels
-again — its pipe speaks only the two verbs.
+Session setup and conversation cannot mix, and each reader enforces its side.
+`Account::read` refuses a line with a verb where the clock goes, and a pipe
+line whose first word is not `SAY` or `ASK` is refused as not a verb. Once a
+shell is admitted its pipe speaks only the two verbs.
 
-Bash's own quoted forms are the codec — `${*@Q}` on the way out,
-`local -a x="$line"` or `bash-strings`' `parse_array` on the way in — so
-word boundaries, newlines, tabs, and bytes bash cannot display survive
-with no escape scheme of ours. The Rust value types mirror the wire
-directly (abridged):
+Bash's own quoted forms are the codec: `${*@Q}` on the way out, `local -a
+x="$line"` or `bash-strings`' `parse_array` on the way in. Word boundaries,
+newlines, tabs and bytes bash cannot display survive with no escape scheme of
+ours. The Rust value types mirror the wire, abridged:
 
 ```rust
 pub struct Message { pub verb: Verb, pub stamp: Stamp, pub words: Vec<String> }
 pub struct Stamp   { pub sent_at: Micros, pub heard_at: Micros }
 ```
 
-`Stamp` is the two clocks: the sending shell's `$EPOCHREALTIME`, and the
-run's clock at the read that completed the line — which is why nothing is
-ever timed in bash, and why a whole profiling tool can be "the interval
-between two stamps". Note what is *not* here: the shell's pid, `$SHLVL`,
-`$BASH_SUBSHELL`. Those cannot change while a shell lives, so they
-travelled once, in the account, and are reached through the `Shell` your
-reaction was handed.
+`Stamp` holds the two clocks, the sending shell's `$EPOCHREALTIME` and the
+run's clock at the read that completed the line. That is why nothing is timed
+in bash, and why a whole profiling tool is the interval between two stamps.
 
-Two reading conventions, deliberately distinct: `Message::behind(lead)`
-claims a *family* of messages by first word (a decoder gets `None` for
-another tool's), and `field(words, key)` reads an optional `key value`
-payload convention — unrelated to the `key=value` headers the protocol
-itself writes up front.
+The shell's pid, `$SHLVL` and `$BASH_SUBSHELL` are absent from a message.
+They cannot change while a shell lives, so they travelled once in the account
+and are reached through the `Shell` your reaction was handed.
+
+Two reading conventions are distinct. `Message::behind(lead)` claims a family
+of messages by first word, giving a decoder `None` for another tool's.
+`field(words, key)` reads an optional `key value` payload convention,
+unrelated to the `key=value` headers the protocol writes up front.
 
 ## Sending, and asking
 
@@ -281,11 +270,10 @@ __bc_send() {
 }
 ```
 
-(`${*@Q}` joins on the first character of `IFS`, hence the `local IFS` —
-the full scoping story is [scoping.md](scoping.md).)
+`${*@Q}` joins on the first character of `IFS`, hence the `local IFS`; the
+full scoping story is [scoping.md](scoping.md).
 
-An `ask` is a write, a blocking read, and then something unusual — the
-reply is *executed*:
+An `ask` is a write, a blocking read, and then the reply is executed:
 
 ```bash
 __bc_ask() {
@@ -299,13 +287,13 @@ __bc_ask() {
 }
 ```
 
-The reply pipe was opened `<>` (read-write) at attach, so the read waits
-for an answer instead of hitting end of input. `local -a` is bash's own
-parser unpacking the answer's array literal; the shell runs it, and its
-status becomes `BC_INSTR ask`'s — which is how "the answer said no" is an
-ordinary testable status in the subject.
+The reply pipe was opened `<>` at attach, so the read waits for an answer
+instead of hitting end of input. `local -a` is bash's own parser unpacking the
+answer's array literal. The shell runs it, and its status becomes `BC_INSTR
+ask`'s, which is how an answer that says no reaches the subject as an ordinary
+testable status.
 
-On the Rust side, the answer is a value with four constructors:
+On the Rust side the answer is a value with four constructors:
 
 ```rust
 pub struct Answer(Vec<String>);
@@ -318,19 +306,17 @@ impl Answer {
 }
 ```
 
-`Pipe::answer` opens `rep.<token>` fresh for each answer with
-`open_sender`: that open is the liveness mirror of the join's blocking
-open — it never blocks, and `ENXIO` means the asker died. The write is
-awaited, so an answer past the pipe's buffer holds up nothing but its own
-shell. An answer that wants to deliver more bash than one command's worth
-writes a file wherever it likes and answers `Answer::of("source",
-[path])` — assignments made by a sourced step are global and reach the
-client.
+`Pipe::answer` opens `rep.<token>` fresh for each answer with `open_sender`.
+That open is the liveness mirror of the join's blocking open: it never blocks,
+and `ENXIO` means the asker died. The write is awaited, so an answer past the
+pipe's buffer holds up its own shell alone. An answer carrying more bash than
+one command's worth writes a file and answers `Answer::of("source", [path])`,
+and assignments a sourced step makes are global and reach the client.
 
 ## When the protocol itself fails
 
-The prelude may not use `set -e` (the subject's options are the
-subject's), so every command in it that can fail is guarded:
+The prelude may not use `set -e`, since the subject's options are the
+subject's, so every command in it that can fail is guarded:
 
 ```bash
 shopt -s expand_aliases
@@ -339,37 +325,37 @@ alias __BC_BAIL='return $?'
 alias __BC_THROW='{ __bc_complain "${FUNCNAME[0]} ($?)"; return "$__BC__FAILED"; }'
 ```
 
-Aliases rather than functions because `return` must act in the frame that
-failed — this is the one shell option the protocol turns on
-(`expand_aliases`), and it stays on. What a subject sees when the
-instrumentation breaks:
+These are aliases because `return` must act in the frame that failed. That is
+the one shell option the protocol turns on, `expand_aliases`, and it stays on.
+
+What a subject sees when the instrumentation breaks:
 
 ```
 BC_INSTR: label NOPE is not joined at build.bash:42
 BC_INSTR: __bc_attach (1) at build.bash:7
 ```
 
-One line per fault, naming the *subject's own call site*, and status
-**125** — the code `env` and `timeout` use when the wrapper rather than
-the payload failed. So three outcomes stay distinguishable at every call
-site: the instrumentation broke (125), the answer ran and said no (its
-own status), the command was fine (0).
+One line per fault, naming the subject's own call site, with status 125 — the
+code `env` and `timeout` use when the wrapper rather than the payload failed.
+Three outcomes stay distinguishable at every call site: the instrumentation
+broke at 125, the answer ran and said no with its own status, and the command
+was fine at 0.
 
-Three spots are deliberately unguarded: the array assignment in
-`__bc_ask` (cannot fail), running the answer (its status *is* the
-result), and a `BASH_ENV` file's own `source` (bash discards its status).
+Three spots are unguarded. The array assignment in `__bc_ask` cannot fail,
+running the answer produces the result, and a `BASH_ENV` file's own `source`
+has its status discarded by bash.
 
-## Lifecycle, in one paragraph
+## Lifecycle
 
-End of input on `up.<token>` is the goodbye: the run alone holds the read
-end, so when the last write-end holder is gone — the shell exited, or
-closed its fd — the task sees end of input, and that moment is
-`Attended::parted`. There is no `PART` verb and nothing to send. At close,
-the run releases every announced-but-unopened pipe (its shell takes
-`SIGPIPE` at its next write), each task reads what its pipe already holds,
-a shell's two fifos are unlinked when its task ends, and `join` is
-unlinked last — so a kept workspace holds fifo names only for shells
-still alive.
+End of input on `up.<token>` is the goodbye. The run alone holds the read end,
+so when the last write-end holder is gone, whether the shell exited or closed
+its fd, the task sees end of input, and that moment is `Attended::parted`.
+There is no `PART` verb and nothing to send.
+
+At close the run releases every announced-but-unopened pipe, whose shell takes
+`SIGPIPE` at its next write; each task reads what its pipe already holds; a
+shell's two fifos are unlinked when its task ends; and `join` is unlinked
+last. A kept workspace therefore holds fifo names only for shells still alive.
 
 ## See also
 
