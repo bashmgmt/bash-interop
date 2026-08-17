@@ -42,8 +42,7 @@ use bash_interop::scratch::{Scripts, bash};
 /// Every proof starts the same script, beside whatever else it wrote.
 pub const ENTRY: &str = "main.bash";
 
-/// The join the proofs' rigs state: `BC_INSTR KEEP say …` is how their
-/// scripts speak, and the workspace is baked in, quoted.
+/// The join the proofs' rigs state, with the workspace baked in, quoted.
 pub fn join(at: &Layout) -> String {
     let dir = emit_scalar(at.text());
     format!(
@@ -51,6 +50,30 @@ pub fn join(at: &Layout) -> String {
         BC_JOIN KEEP {dir}
         "#
     )
+}
+
+/// A saying word for a rig's own label. An alias, so the words a script
+/// writes after it ride on the right and reach the wire without a frame of
+/// their own.
+pub fn saying(word: &str, label: &str) -> String {
+    saying_as(word, word, label)
+}
+
+/// The same, where the name a script calls and the word it leads with differ —
+/// a rig holding two labels gives each its own name for one payload word.
+pub fn saying_as(name: &str, word: &str, label: &str) -> String {
+    format!(
+        "alias {name}='BC_SAY__ARG_LABEL={label} BC_SAY {word}'
+"
+    )
+}
+
+/// A saying word an *answer* can call. An answer runs as `"${__BC__ANSWER[@]}"`,
+/// and that expansion names commands rather than aliases, so a word a rig
+/// answers with is a function — one frame, in exchange for being callable
+/// from a reply.
+pub fn saying_fn(word: &str, label: &str) -> String {
+    format!("{word}() {{ declare -- BC_SAY__ARG_LABEL={label}; BC_SAY {word} \"$@\"; }}\n")
 }
 
 /// A test rig's standard initiation — the harness's convention, deliberately
@@ -85,9 +108,9 @@ pub struct Keeping;
 impl Rig for Keeping {
     type Reaction = Vec<Message>;
 
-    /// No words of its own in the subject's shells.
+    /// One saying word, `REC`, for the scripts to speak with.
     fn bash(&self, _at: &Layout) -> String {
-        String::new()
+        saying("REC", "KEEP")
     }
 
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Vec<Message>, Failure> {

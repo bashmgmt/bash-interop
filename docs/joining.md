@@ -9,6 +9,11 @@ Initiation opens the channel: one line of client code, `BC_JOIN <label> <dir>
 never initiated has the words and is not part of the run; a shell that
 initiates without loading fails at an unknown command.
 
+Both laid files define aliases as well as functions, so the `source` has to be
+a command of its own. Anything parsed in the same unit as it — a `{ …; }` group
+holding both — will not see the words yet
+([scoping.md](scoping.md#aliases-and-what-they-can-carry)).
+
 The exception is stated rather than implied. A run may provision
 `<dir>/bash_env.bash`, and whoever provisions it states whether that file
 initiates, with `Provision::Joining` putting the rig's joining line at the
@@ -138,7 +143,8 @@ source "$workspace/prelude.bash"
 source "$workspace/rig.bash"
 BC_JOIN TELL "$workspace"
 
-BC_INSTR TELL say STEP joined-from-the-pieces
+declare -- BC_SAY__ARG_LABEL=TELL
+BC_SAY STEP joined-from-the-pieces
 ```
 
 ## Publishing to child processes

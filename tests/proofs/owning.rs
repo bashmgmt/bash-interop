@@ -25,9 +25,10 @@ async fn a_named_workspace_is_left_behind_without_its_fifos() {
         (
             ENTRY,
             r#"
-            for i in 1 2 3; do BC_INSTR KEEP ask step "$i"; done
+            declare -- BC_ASK__ARG_LABEL=KEEP
+            for i in 1 2 3; do declare -a BC_ASK__ARGS=(step "$i"); BC_ASK; done
             bash "${BASH_SOURCE[0]%/*}/other.bash"
-            ( BC_INSTR KEEP say REC fork )
+            ( REC fork )
             declare -- workspace="${DEPLOY_SESSION:?the workspace, from the run closure}"
             mkfifo "$workspace/up.GHOST"
             printf 'GHOST + half\n' >"$workspace/join"
@@ -37,7 +38,8 @@ async fn a_named_workspace_is_left_behind_without_its_fifos() {
         (
             "other.bash",
             r#"
-            for i in 1 2 3; do BC_INSTR KEEP ask step "$i"; done
+            declare -- BC_ASK__ARG_LABEL=KEEP
+            for i in 1 2 3; do declare -a BC_ASK__ARGS=(step "$i"); BC_ASK; done
             exit 0
             "#,
         ),
@@ -84,7 +86,8 @@ async fn a_shell_left_asking_does_not_outlive_the_run() {
     let started = Instant::now();
     let ran = script(
         r#"
-        bash -c 'BC_INSTR KEEP say REC lingering $BASHPID; sleep 30; BC_INSTR KEEP ask never' &
+        bash -c 'REC lingering $BASHPID; sleep 30
+                   declare -- BC_ASK__ARG_LABEL=KEEP; declare -a BC_ASK__ARGS=(never); BC_ASK' &
         sleep 0.2
         exit 0
         "#,
@@ -116,9 +119,9 @@ async fn a_shell_left_asking_does_not_outlive_the_run() {
 async fn a_shell_outside_the_group_is_heard_and_never_signalled() {
     let ran = script(
         r#"
-        setsid bash -c 'BC_INSTR KEEP say REC outsider $BASHPID; sleep 30' &
+        setsid bash -c 'REC outsider $BASHPID; sleep 30' &
         sleep 0.3
-        BC_INSTR KEEP say REC done
+        REC done
         "#,
     )
     .await;
@@ -160,7 +163,7 @@ impl Rig for Exploding {
     type Reaction = Boom;
 
     fn bash(&self, _at: &Layout) -> String {
-        String::new()
+        crate::saying("REC", "KEEP")
     }
 
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Boom, Failure> {
@@ -195,7 +198,9 @@ fn a_panicking_answer_kills_the_subject() {
         ENTRY,
         r#"
         echo $BASHPID > "${BASH_SOURCE[0]%/*}/pid"
-        BC_INSTR KEEP ask anything
+        declare -- BC_ASK__ARG_LABEL=KEEP
+        declare -a BC_ASK__ARGS=(anything)
+        BC_ASK
         "#,
     )]);
     let argv = bash(scripts.at(ENTRY));

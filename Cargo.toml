@@ -1,6 +1,6 @@
 [package]
 name = "bash-interop"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "Run bash under instrumentation and hear what it says: a session per run, a pipe and a task per shell, words a script speaks and answers it runs."
 license = "MIT"

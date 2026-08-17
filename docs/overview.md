@@ -30,15 +30,30 @@ directory, and everything after that happens in files under that directory.
 
 ## What a shell says, and what it can be told
 
-Once joined, a script speaks through one word in two moods:
+Once joined, a script has two words. Each names the channel it speaks on in a
+variable beside the call:
 
 ```bash
-BC_INSTR DEPLOY say REC compiled "$target"    # ship these words; carry on
-BC_INSTR DEPLOY ask which-target              # ship, block, run the reply
+declare -- BC_SAY__ARG_LABEL=DEPLOY
+BC_SAY REC compiled "$target"                 # ship these words; carry on
+
+declare -- BC_ASK__ARG_LABEL=DEPLOY
+declare -a BC_ASK__ARGS=(which-target)
+BC_ASK                                        # ship, block, run the reply
 ```
 
-`say` ships the words as one message and the script continues immediately,
-since nothing is waiting on it. `ask` blocks until your reaction replies.
+`BC_SAY` ships the words as one message and the script continues immediately,
+since nothing is waiting on it. `BC_ASK` blocks until your reaction replies.
+
+Both are aliases, which is what puts the reply in the frame that asked. An
+alias's trailing words land on the last command of its expansion; for `BC_SAY`
+that is the message, so its words ride on the right, and for `BC_ASK` that is
+the answer, so its payload goes in `BC_ASK__ARGS` instead. A rig usually gives
+scripts a word of its own over these, and then a call site is one line:
+
+```bash
+alias STAGE='BC_SAY__ARG_LABEL=DEPLOY BC_SAY STAGE'
+```
 
 A message carries an arglist — the words exactly as the caller wrote them, any
 number of them, boundaries preserved — plus the verb and two clocks, the
@@ -46,8 +61,7 @@ shell's own `$EPOCHREALTIME` and the session's clock at the read. There is no
 schema. The first word is whatever convention your rig and your scripts agree
 on, which lets several tools share one session without coordinating.
 
-The word between `BC_INSTR` and the verb, `DEPLOY` above, is the label. It is
-bash-side vocabulary: a lookup key binding a name your scripts use to the
+`DEPLOY` above is the label. It is bash-side vocabulary: a lookup key binding a name your scripts use to the
 workspace they joined, so one process can hold several sessions at once. The
 Rust side is never told the label. It sees which pipe a message came out of.
 
@@ -58,8 +72,8 @@ parses it with bash's own array syntax and then invokes it, in the frame that
 asked:
 
 ```bash
-local -a __bc_answer="$__bc_line"    # the reply, read as a bash array literal
-"${__bc_answer[@]}"                  # and invoked, right here
+declare -ga __BC__ANSWER="$__bc_line"   # the reply, read as a bash array literal
+"${__BC__ANSWER[@]}"                    # and invoked, right where you asked
 ```
 
 No `eval` takes part. Bash reads an array literal — the notation `declare -p`
@@ -71,27 +85,34 @@ richer protocol would need types for:
 
 | the reply | what the asking shell does |
 |---|---|
-| `["echo", "/usr/lib"]` | prints it, so `x=$(BC_INSTR … ask …)` captures a value |
-| `["declare", "-g", "target=staging"]` | sets a variable in its own process |
-| `["return", "3"]` | returns 3, so `if BC_INSTR … ask …` branches on the reply |
+| `["echo", "/usr/lib"]` | prints it, so `x=$(BC_ASK)` captures a value |
+| `["declare", "target=staging"]` | binds a variable in the frame that asked |
+| `["__bc_status", "3"]` | gives the ask status 3, so `if BC_ASK` branches on the reply |
+| `["return", "3"]` | returns 3 *from the function that asked*, ending it |
 | `["source", "/tmp/x.bash"]` | runs a file of any length the rig just wrote |
 | `["exit", "9"]` | ends the subject |
 
 The `ask` exits with the status of whatever ran, so a reply that says no
 arrives as an ordinary shell failure the script can test.
 
+Because the reply runs where the call was written, `declare` binds in the
+asking function and dies with it, and `local` works there too — nothing has to
+reach for `-g` to be seen.
+
 The command need not be a builtin. `<dir>/rig.bash` holds bash your rig wrote,
 and every shell sources it on the way in, so a reply may call a function you
-defined there and pass it arguments your Rust code computed. The rig supplies
-the vocabulary; the reply picks a word from it. That is the whole control
-channel, and it needs no `eval`, no reserved words and no second protocol.
+defined there and pass it arguments your Rust code computed. It has to be a
+function: the reply runs as `"${__BC__ANSWER[@]}"`, and that expansion names
+commands rather than aliases. The rig supplies the vocabulary; the reply picks
+a word from it. That is the whole control channel, and it needs no `eval`, no
+reserved words and no second protocol.
 
 ## Joining: definitions, then initiation
 
 A shell comes to be joined in two steps.
 
 Loading brings the definitions in. `source <dir>/prelude.bash` defines the
-protocol's words, `BC_JOIN` and `BC_INSTR`; `source <dir>/rig.bash` defines
+protocol's words, `BC_JOIN`, `BC_SAY` and `BC_ASK`; `source <dir>/rig.bash` defines
 your rig's. The session lays both files, and both are inert — sourcing them
 defines functions and changes nothing else.
 
@@ -147,9 +168,9 @@ serves, so `[[ -p <dir>/join ]]` answers whether one is up.
    2. blocks opening up.<token> ◄─ open ─────  opens the pipe: the shell
       …unblocked: it is joined                 is admitted; a task starts
 
- BC_INSTR L say words…  ───────── up.<token> ► task reads a line
+ BC_SAY words…          ───────── up.<token> ► task reads a line
                                                → your hear(message)
- BC_INSTR L ask words…  ───────── up.<token> ► → your answer(message)
+ BC_ASK                 ───────── up.<token> ► → your answer(message)
    blocks reading rep    ◄─────── rep.<token>  writes the answer command
    runs the answer; the ask exits with it
 

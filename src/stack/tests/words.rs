@@ -15,9 +15,10 @@ use crate::stack::{self, Columns, Site, Source, Stack};
 /// `stack` tests itself with nothing but `stack`.
 const BASH: &str = r#"
 WALK() {
-    local -a __w=()
+    declare -a __w=()
     __bc_stack __w 2
-    BC_INSTR WALK say WALK "${__w[@]}"
+    declare -- BC_SAY__ARG_LABEL=WALK
+    BC_SAY WALK "${__w[@]}"
 }
 "#;
 

@@ -11,9 +11,9 @@ use crate::{behind, report, script};
 async fn a_signalled_subject_is_reported_and_loses_nothing() {
     let ran = script(
         r#"
-        BC_INSTR KEEP say REC before
+        REC before
         kill -TERM $$
-        BC_INSTR KEEP say REC never
+        REC never
         "#,
     )
     .await;
@@ -42,7 +42,7 @@ async fn a_clients_own_trap_and_ifs_are_untouched() {
         r#"
         trap 'echo mine' EXIT
         IFS=,
-        BC_INSTR KEEP say REC one two
+        REC one two
         "#,
     )
     .await;
@@ -71,9 +71,9 @@ async fn a_clients_own_locale_is_untouched_by_a_wide_message() {
         export LC_ALL=C.UTF-8
         wide="ä"
 
-        BC_INSTR KEEP say REC before "${#wide}" "$LC_ALL"
-        BC_INSTR KEEP say REC "$(printf 'x%.0s' {1..9000})"
-        BC_INSTR KEEP say REC after "${#wide}" "$LC_ALL"
+        REC before "${#wide}" "$LC_ALL"
+        REC "$(printf 'x%.0s' {1..9000})"
+        REC after "${#wide}" "$LC_ALL"
         "#,
     )
     .await;

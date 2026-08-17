@@ -15,22 +15,32 @@ reply.
 
 Once a script has joined a session, it can do two things.
 
-`say` ships a list of words and returns immediately, because nothing is waiting
-on it:
+`BC_SAY` ships a list of words and returns immediately, because nothing is
+waiting on it:
 
 ```bash
-BC_INSTR BUILD say STARTED phase compile
+declare -- BC_SAY__ARG_LABEL=BUILD
+BC_SAY STARTED phase compile
 ```
 
-`ask` ships a list of words and blocks until your Rust code replies:
+`BC_ASK` ships a list of words and blocks until your Rust code replies:
 
 ```bash
-BC_INSTR BUILD ask cache-lookup "$sha"
+declare -- BC_ASK__ARG_LABEL=BUILD
+declare -a BC_ASK__ARGS=(cache-lookup "$sha")
+BC_ASK
 ```
 
 The words are yours in both cases. There is no schema and no reserved
 vocabulary — the wire moves an argument list of any width, and the protocol
 reads none of its positions.
+
+A rig normally gives scripts a word of its own over these, so a call site is
+one line and reads like the domain rather than the protocol:
+
+```bash
+alias STARTED='BC_SAY__ARG_LABEL=BUILD BC_SAY STARTED'
+```
 
 ## What an answer is
 
@@ -42,12 +52,16 @@ travel back to the shell that asked, which parses them with bash's own array
 syntax and then runs them as a command, in the frame that asked:
 
 ```bash
-local -a __bc_answer="$__bc_line"    # the reply, read as a bash array literal
-"${__bc_answer[@]}"                  # and invoked, right here
+declare -ga __BC__ANSWER="$__bc_line"   # the reply, read as a bash array literal
+"${__BC__ANSWER[@]}"                    # and invoked, right where you asked
 ```
 
 There is no `eval` anywhere in that. Bash parses an array literal — the same
 notation `declare -p` prints — and calls the result.
+
+Because it runs where the call was written, an answer's `declare` binds in the
+function that asked and dies with it. Nothing has to reach for `-g` to be seen,
+and a reply can shape the caller's own scope.
 
 Handing back a command rather than a value is what makes the channel general.
 One command, run in the frame that asked, already covers the things you would
@@ -55,9 +69,10 @@ otherwise design a protocol around:
 
 | your reaction returns | the asking shell does |
 |---|---|
-| `Answer::of("echo", [path])` | prints it, so `x=$(BC_INSTR … ask …)` captures a value |
-| `Answer::of("declare", ["-g", "target=staging"])` | sets a variable in its own process |
-| `Answer::status(3)` | `return 3`, so `if BC_INSTR … ask …` branches on the reply |
+| `Answer::of("echo", [path])` | prints it, so `x=$(BC_ASK)` captures a value |
+| `Answer::of("declare", ["target=staging"])` | binds a variable in the frame that asked |
+| `Answer::status(3)` | gives the ask status 3, so `if BC_ASK` branches on the reply |
+| `Answer::returning(3)` | returns 3 from the function that asked, ending it |
 | `Answer::of("source", [path])` | runs a file of any length that you just wrote |
 | `Answer::of("exit", ["9"])` | ends the subject |
 
@@ -105,15 +120,14 @@ single-threaded, which is why nothing here asks you for a `Send` bound.
 Two things matter before you put a call site into code you ship.
 
 A call site is a real dependency, and a loud one on purpose. Run the script
-with no session anywhere and `BC_INSTR` is simply a command that does not
-exist: status 127, and nothing else happens. Load the prelude but join no
-session and it reports `label … is not joined` at your call site and returns
-125. Neither case fails quietly, because a script that asked to be observed
+with no session anywhere and `BC_SAY` is simply a command that does not exist:
+status 127, and nothing else happens. Load the prelude but join no session and
+it reports `label … is not joined` at your call site and returns 125. Neither case fails quietly, because a script that asked to be observed
 and silently was not is the worse outcome. If a script has to run both ways,
 say so in one line at the top:
 
 ```bash
-declare -F BC_INSTR >/dev/null || BC_INSTR() { :; }
+declare -F __bc_say >/dev/null || alias BC_SAY=:
 ```
 
 Second, nothing is timed, counted or inferred on the bash side. A message

@@ -6,9 +6,9 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use bash_interop::rig::{Answer, Driving, ExitStatus, Failure, Layout, Message, Reacting, Rig, Shell, Verb};
+use bash_interop::rig::{Answer, Driving, Failure, Layout, Message, Reacting, Rig, Shell, Verb};
 
-use crate::{ENTRY, behind, gone, provisioned, report, script};
+use crate::{ENTRY, gone, provisioned};
 use bash_interop::scratch::{Scripts, bash};
 
 /// Fails the first time it is given a message of the kind it breaks on.
@@ -25,7 +25,7 @@ impl Rig for Breaking {
     type Reaction = Breaks;
 
     fn bash(&self, _at: &Layout) -> String {
-        String::new()
+        crate::saying("REC", "KEEP")
     }
 
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Breaks, Failure> {
@@ -89,7 +89,7 @@ fn blocked(scripts: &Scripts) -> i32 {
 async fn a_rig_that_cannot_answer_ends_the_run_and_kills_the_subject() {
     let scripts = Scripts::of(&[(
         ENTRY,
-        &format!("{REPORTING}BC_INSTR KEEP ask anything"),
+        &format!("{REPORTING}declare -- BC_ASK__ARG_LABEL=KEEP\ndeclare -a BC_ASK__ARGS=(anything)\nBC_ASK"),
     )]);
 
     let breaking = Breaking { on: Verb::Ask };
@@ -121,9 +121,10 @@ async fn a_failure_while_hearing_ends_the_run_and_kills_the_subject() {
         ENTRY,
         &format!(
             r#"{REPORTING}
-            bash -c 'while :; do BC_INSTR KEEP ask nothing || :; sleep 0.01; done' &
+            bash -c 'declare -- BC_ASK__ARG_LABEL=KEEP; declare -a BC_ASK__ARGS=(nothing)
+                   while :; do BC_ASK || :; sleep 0.01; done' &
             sleep 0.1
-            BC_INSTR KEEP say REC one
+            REC one
             sleep 30
             "#
         ),
@@ -151,40 +152,6 @@ async fn a_failure_while_hearing_ends_the_run_and_kills_the_subject() {
     assert!(
         gone(blocked(&scripts)),
         "the subject outlived the run"
-    );
-}
-
-/// A verb the protocol does not define is the client's mistake and stays in
-/// the client's shell: it is named on stderr, returns 125, and the run carries
-/// on knowing nothing about it.
-#[tokio::test]
-async fn an_unknown_verb_is_reported_rather_than_ignored() {
-    let ran = script(
-        r#"
-        complaint="$(BC_INSTR KEEP mumble something 2>&1)"
-        BC_INSTR KEEP say REC "returned $?" "$complaint"
-        "#,
-    )
-    .await;
-
-    assert_eq!(
-        ran.subject,
-        ExitStatus::Code(0),
-        "the subject carries on"
-    );
-
-    let said = behind(&ran.shells, "REC");
-    assert_eq!(said.len(), 1, "{}", report(&ran.shells));
-    assert_eq!(
-        said[0][0],
-        "returned 125",
-        "the instrumentation failed{}",
-        report(&ran.shells)
-    );
-    assert!(
-        said[0][1].contains("unknown verb mumble"),
-        "it says which: {:?}",
-        said[0][1]
     );
 }
 

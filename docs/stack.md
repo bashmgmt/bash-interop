@@ -26,7 +26,7 @@ comment carries the contract:
 
 ```bash
 __bc_stack() {
-    local -n __bc_stack_out="$1"
+    declare -n __bc_stack_out="$1"
 
     __bc_stack_out+=(
         skip    "$2"

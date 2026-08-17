@@ -37,10 +37,7 @@ impl Rig for Answering {
 
     /// `NOTE` is this rig's own word, called back by several of the answers.
     fn bash(&self, _at: &Layout) -> String {
-        r#"
-        NOTE() { BC_INSTR SOAK say NOTE "$@"; }
-        "#
-        .to_string()
+        crate::saying_fn("NOTE", "SOAK") + &crate::saying("REC", "SOAK")
     }
 
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Soak, Failure> {
@@ -117,30 +114,34 @@ async fn a_session_survives_every_way_of_answering() {
         (
             ENTRY,
             r#"
+            declare -- BC_ASK__ARG_LABEL=SOAK
             declare -i i=0
             while (( i < 56 )); do
-                BC_INSTR SOAK say REC tick "$i"
+                REC tick "$i"
+                declare -a BC_ASK__ARGS=(step "$i")
                 if (( i % 7 == 6 )); then
-                    got="$(BC_INSTR SOAK ask step "$i")"
-                    BC_INSTR SOAK say REC big "${#got}"
+                    got="$(BC_ASK)"
+                    REC big "${#got}"
                 else
-                    BC_INSTR SOAK ask step "$i" || BC_INSTR SOAK say REC refused "$i"
+                    BC_ASK || REC refused "$i"
                 fi
                 (( i += 1 ))
             done
 
             wide="$(printf 'W%.0s' {1..9000})"
-            BC_INSTR SOAK say REC wide "$wide"
+            REC wide "$wide"
 
             bash "${BASH_SOURCE[0]%/*}/other.bash"
-            BC_INSTR SOAK say REC marks ${!mark_@}
+            REC marks ${!mark_@}
             "#,
         ),
         (
             "other.bash",
             r#"
-            BC_INSTR SOAK ask step 4
-            BC_INSTR SOAK say REC other done
+            declare -- BC_ASK__ARG_LABEL=SOAK
+            declare -a BC_ASK__ARGS=(step 4)
+            BC_ASK
+            REC other done
             "#,
         ),
     ]);
@@ -232,7 +233,7 @@ impl Rig for Gated {
     type Reaction = Gate;
 
     fn bash(&self, _at: &Layout) -> String {
-        String::new()
+        crate::saying("REC", "GATE")
     }
 
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Gate, Failure> {
@@ -275,9 +276,11 @@ async fn an_answer_may_wait_on_another_shells_word() {
     let scripts = Scripts::of(&[(
         ENTRY,
         r#"
-        got="$(BC_INSTR GATE ask open-please)" &
+        declare -- BC_ASK__ARG_LABEL=GATE
+        declare -a BC_ASK__ARGS=(open-please)
+        got="$(BC_ASK)" &
         sleep 0.2
-        BC_INSTR GATE say REC opening
+        REC opening
         wait
         "#,
     )]);

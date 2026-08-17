@@ -14,10 +14,7 @@ impl Rig for Deploying {
     type Reaction = Vec<Message>;
 
     fn bash(&self, _at: &Layout) -> String {
-        r#"
-        TELL() { BC_INSTR TELL say TELL "$@"; }
-        "#
-        .to_string()
+        crate::saying("TELL", "TELL")
     }
 
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Vec<Message>, Failure> {
@@ -96,10 +93,7 @@ async fn the_closures_return_is_the_subjects_whole_environment() {
 /// front of it, and no argument the caller did not write.
 #[tokio::test]
 async fn the_command_line_is_run_as_asked() {
-    let scripts = Scripts::of(&[(
-        ENTRY,
-        "BC_INSTR KEEP say REC \"$0\" \"$#\"",
-    )]);
+    let scripts = Scripts::of(&[(ENTRY, "REC \"$0\" \"$#\"")]);
     let ran = Keeping
         .run(
             &bash(scripts.at(ENTRY)),
@@ -137,13 +131,13 @@ async fn a_subject_may_join_by_hand_where_it_chooses() {
             source "$workspace/prelude.bash"
             source "$workspace/rig.bash"
             BC_JOIN KEEP "$workspace"
-            BC_INSTR KEEP say REC by-hand
+            REC by-hand
             bash "${BASH_SOURCE[0]%/*}/other.bash"
             "#,
         ),
         (
             "other.bash",
-            "type BC_INSTR >/dev/null 2>&1 && BC_INSTR KEEP say REC never\n",
+            "type BC_SAY >/dev/null 2>&1 && REC never\n",
         ),
     ]);
 

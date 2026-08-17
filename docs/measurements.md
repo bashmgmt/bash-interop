@@ -106,6 +106,22 @@ Minimum of seven runs of 4000:
 | sending, inlined at every call site | 21 |
 | sending through one bash function | 28 |
 
+What the word costs around that write, measured on a 26-word message with the
+same guards each way, minimum of seven runs of 3000:
+
+| | µs |
+|---|---|
+| a dispatching function calling a sender — two frames, words copied twice | 69.1 |
+| `BC_SAY`: one frame, the write shared as an alias | 59.5 |
+| a rig's word as a one-command alias over it | 55.6 |
+| a rig's word as a function taking `"$@"` | 87.2 |
+
+One frame instead of two, and the words expanded once instead of twice, is
+where the difference sits. A rig's word costs nothing extra while it is an
+alias, since an alias is text at the call site; written as a function it pays a
+frame and a copy of `"$@"`, which is the price of being callable from an
+answer.
+
 Message assembly dominates either way, and a tool reading real state costs
 far more: a full `bashcap` snapshot is ~480 µs. Nothing about the shell rides
 on a message — its pid, `$SHLVL`, `$BASH_SUBSHELL` and version are in the
@@ -148,8 +164,8 @@ extra call per measurement, the END being inline in the word, costs about
 
 ## What a callee's frame gives back
 
-`local` restores what was there, unset included. A callee taking
-`local IFS=' '` leaves an unset `IFS` unset and an empty one empty, so the
+`declare` restores what was there, unset included. A callee taking
+`declare IFS=' '` leaves an unset `IFS` unset and an empty one empty, so the
 distinction a manual restore has to make by hand, bash makes itself.
 
 A command-prefix assignment scopes to the call, restores the previous state,
@@ -187,7 +203,7 @@ mechanism that cannot be checked by reading the source. One file per subject.
 | `a_shell_that_speaks_once_and_leaves_loses_nothing` | a `bash -c` that joins, says one thing and exits within microseconds loses nothing: the blocking open is the rendezvous |
 | `a_fork_that_speaks_is_a_shell_of_its_own_and_parts_on_its_own` | a fork takes a pipe of its own, its `parted` precedes the parent's, and the parent's words stay the parent's |
 | `two_labels_in_one_process_are_two_shells` | two `BC_JOIN`s in one rig's bash are two pipes and two shells with one pid |
-| `a_label_nobody_joined_is_an_error_by_absence` | `BC_INSTR NOPE …` names the label and the call site, returns 125, and the run knows nothing |
+| `a_label_nobody_joined_is_an_error_by_absence` | a word on an unjoined label names it and the call site, returns 125, and the run knows nothing |
 | `an_account_of_any_size_arrives_whole` | a `bash -c` with a 21 KB command of `€` — six frames, cut inside characters — reads back byte for byte as `Invocation::command` |
 | `many_shells_announce_at_once` | 16 shells with 6 KB commands announce together; every account whole and its own |
 | `the_words_a_join_brings_are_on_the_shell` | `BC_JOIN KEEP <dir> role worker …` lands verbatim on `Shell::brought`, in the fork too; `field` reads the pairs |
@@ -247,7 +263,6 @@ mechanism that cannot be checked by reading the source. One file per subject.
 |---|---|
 | `a_rig_that_cannot_answer_ends_the_run_and_kills_the_subject` | `run` yields the rig's reason, and the shell blocked on the ask does not outlive it |
 | `a_failure_while_hearing_ends_the_run_and_kills_the_subject` | the same for a message nobody was waiting on, promptly, while another shell asks in a loop |
-| `an_unknown_verb_is_reported_rather_than_ignored` | a verb the protocol does not define is named on stderr and returns 125 |
 
 Bash-level invariants that hold without running anything are asserted against
 the shipped text instead, and live beside it: the protocol's in
@@ -281,7 +296,7 @@ has to be the subject's, so its join comes before the trap.
 
 `local LC_ALL=C` counts bytes, and the subject's locale is back on return.
 `${#s}` and `${s:a:b}` count characters in the shell's locale; under `LC_ALL=C`
-they count bytes, an assignment to `LC_ALL` takes effect at once, `local`
+they count bytes, an assignment to `LC_ALL` takes effect at once, `declare`
 included, and returning restores the outer value, unset included. Measured
 with and without `set -o posix` on bash 5.3.9. This is what bounds a frame in
 bytes.

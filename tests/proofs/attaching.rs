@@ -15,7 +15,7 @@ use bash_interop::scratch::{Scripts, bash};
 #[tokio::test]
 async fn a_shell_that_speaks_once_and_leaves_loses_nothing() {
     for round in 0..10 {
-        let ran = script("bash -c 'BC_INSTR KEEP say REC quick'\n").await;
+        let ran = script("bash -c 'REC quick'\n").await;
 
         assert_eq!(
             behind(&ran.shells, "REC"),
@@ -37,10 +37,10 @@ async fn a_shell_that_speaks_once_and_leaves_loses_nothing() {
 async fn a_fork_that_speaks_is_a_shell_of_its_own_and_parts_on_its_own() {
     let ran = script(
         r#"
-        BC_INSTR KEEP say REC parent "$BASHPID"
-        ( BC_INSTR KEEP say REC fork "$BASHPID" )
+        REC parent "$BASHPID"
+        ( REC fork "$BASHPID" )
         sleep 0.2
-        BC_INSTR KEEP say REC still-here
+        REC still-here
         "#,
     )
     .await;
@@ -91,8 +91,10 @@ struct Twice;
 impl Rig for Twice {
     type Reaction = Vec<Message>;
 
+    /// One word per label, both leading `REC`: which label a word speaks on
+    /// is the whole point here.
     fn bash(&self, _at: &Layout) -> String {
-        String::new()
+        crate::saying_as("ONE_REC", "REC", "ONE") + &crate::saying_as("TWO_REC", "REC", "TWO")
     }
 
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Vec<Message>, Failure> {
@@ -107,9 +109,9 @@ async fn two_labels_in_one_process_are_two_shells() {
     let scripts = Scripts::of(&[(
         ENTRY,
         r#"
-        BC_INSTR ONE say REC one
-        BC_INSTR TWO say REC two
-        BC_INSTR ONE say REC one-again
+        ONE_REC one
+        TWO_REC two
+        ONE_REC one-again
         "#,
     )]);
 
@@ -151,8 +153,10 @@ async fn a_label_nobody_joined_is_an_error_by_absence() {
     let ran = running(&[(
         ENTRY,
         r#"
-        complaint="$(BC_INSTR NOPE say REC lost 2>&1)"
-        BC_INSTR KEEP say REC "returned $?" "$complaint"
+        declare -- BC_SAY__ARG_LABEL=NOPE
+        complaint="$(BC_SAY REC lost 2>&1)"
+        declare -i rc=$?
+        REC "returned $rc" "$complaint"
         "#,
     )])
     .await;
@@ -172,7 +176,7 @@ async fn a_label_nobody_joined_is_an_error_by_absence() {
         said[0][1]
     );
     assert!(
-        said[0][1].contains(&format!("{ENTRY}:2")),
+        said[0][1].contains(&format!("{ENTRY}:3")),
         "and where: {:?}",
         said[0][1]
     );
@@ -189,7 +193,7 @@ async fn an_account_of_any_size_arrives_whole() {
         ENTRY,
         &format!(
             r#"
-            bash -c ": {euros}; BC_INSTR KEEP say REC done"
+            bash -c ": {euros}; REC done"
             "#
         ),
     )]);
@@ -217,7 +221,7 @@ async fn an_account_of_any_size_arrives_whole() {
         .unwrap();
     assert_eq!(
         child.shell.bash.invocation.command.as_deref(),
-        Some(format!(": {euros}; BC_INSTR KEEP say REC done").as_str()),
+        Some(format!(": {euros}; REC done").as_str()),
         "21 KB, across six frames"
     );
 }
@@ -232,7 +236,7 @@ async fn many_shells_announce_at_once() {
         &format!(
             r#"
             for i in $(seq 16); do
-                bash -c ": $i {pad}; BC_INSTR KEEP say REC $i" &
+                bash -c ": $i {pad}; REC $i" &
             done
             wait
             "#
@@ -268,7 +272,7 @@ async fn many_shells_announce_at_once() {
 
         assert_eq!(
             command,
-            format!(": {i} {pad}; BC_INSTR KEEP say REC {i}"),
+            format!(": {i} {pad}; REC {i}"),
             "shell {i}'s own"
         );
     }
@@ -281,7 +285,7 @@ impl Rig for Bringing {
     type Reaction = Vec<Message>;
 
     fn bash(&self, _at: &Layout) -> String {
-        String::new()
+        crate::saying("REC", "KEEP")
     }
 
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Vec<Message>, Failure> {
@@ -300,8 +304,8 @@ async fn the_words_a_join_brings_are_on_the_shell() {
     let scripts = Scripts::of(&[(
         ENTRY,
         r#"
-        BC_INSTR KEEP say REC subject
-        ( BC_INSTR KEEP say REC fork )
+        REC subject
+        ( REC fork )
         "#,
     )]);
 

@@ -24,10 +24,7 @@ impl Rig for Attaching {
     type Reaction = Vec<Message>;
 
     fn bash(&self, _at: &Layout) -> String {
-        r#"
-        TELL() { BC_INSTR TELL say TELL "$@"; }
-        "#
-        .to_string()
+        crate::saying("TELL", "TELL")
     }
 
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Vec<Message>, Failure> {

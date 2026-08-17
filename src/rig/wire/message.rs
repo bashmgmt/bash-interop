@@ -205,15 +205,21 @@ impl Answer {
         Self(words)
     }
 
-    /// The command `return code`.
+    /// A status for the ask, leaving the frame that asked to carry on.
     pub fn status(code: u8) -> Self {
-        Self::of("return", [code.to_string()])
+        Self::of("__bc_status", [code.to_string()])
     }
 
-    /// A word this rig has no answer for: `return 127`, bash's own "command
-    /// not found".
+    /// A word this rig has no answer for: 127, bash's own "command not found".
     pub fn unknown() -> Self {
         Self::status(127)
+    }
+
+    /// `return code` in the frame that asked, so the function holding the call
+    /// site returns — where [`status`](Answer::status) only gives the ask a
+    /// status to test.
+    pub fn returning(code: u8) -> Self {
+        Self::of("return", [code.to_string()])
     }
 }
 

@@ -1,8 +1,12 @@
 //! Run bash under instrumentation, and hear what it says.
 //!
 //! ```bash
-//! BC_INSTR DEPLOY say REC compiled "$target"    # ship an arglist and carry on
-//! BC_INSTR DEPLOY ask which target              # ship one, block, run the answer
+//! declare -- BC_SAY__ARG_LABEL=DEPLOY
+//! BC_SAY REC compiled "$target"                 # ship an arglist and carry on
+//!
+//! declare -- BC_ASK__ARG_LABEL=DEPLOY           # ask: block, then run the
+//! declare -a BC_ASK__ARGS=(which target)        # answer here, in this frame
+//! BC_ASK
 //! ```
 //!
 //! A [`Rig`] is a **description**: the bash it gives the subject, where the
@@ -27,10 +31,11 @@
 //! impl Rig for Deploying {
 //!     type Reaction = Told;
 //!
-//!     /// A word the subject's scripts can call. Definitions only:
+//!     /// A word the subject's scripts can call, as one command over the
+//!     /// core's, so it composes where any command does. Definitions only:
 //!     /// sourcing this joins nothing.
 //!     fn bash(&self, _at: &Layout) -> String {
-//!         "STAGE() { BC_INSTR DEPLOY say STAGE \"$@\"; }\n".to_string()
+//!         "alias STAGE='BC_SAY__ARG_LABEL=DEPLOY BC_SAY STAGE'\n".to_string()
 //!     }
 //!
 //!     async fn joined(&self, _at: &Layout, shell: Arc<Shell>) -> Result<Told, Failure> {
@@ -54,7 +59,7 @@
 //!
 //!     async fn answer(&mut self, asked: Message) -> Result<Answer, Failure> {
 //!         Ok(match asked.words.first().map(String::as_str) {
-//!             Some("target") => Answer::of("declare", ["-g", "target=staging"]),
+//!             Some("target") => Answer::of("declare", ["target=staging"]),
 //!             _ => Answer::unknown(),
 //!         })
 //!     }

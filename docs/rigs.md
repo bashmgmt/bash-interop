@@ -34,7 +34,7 @@ impl Rig for Deploying {
 
     // definitions only: a word scripts can call; nothing joins here
     fn bash(&self, _at: &Layout) -> String {
-        "STAGE() { BC_INSTR DEPLOY say STAGE \"$@\"; }\n".to_string()
+        "alias STAGE='BC_SAY__ARG_LABEL=DEPLOY BC_SAY STAGE'\n".to_string()
     }
 
     // a shell joined: build its reaction from what it said of itself
@@ -161,8 +161,11 @@ The two common whole behaviours ship as types instead: name one as your
 | `Vec<Message>` | push | `hear` it, then `Answer::unknown()` | `Ok(self)` |
 | `()` | drop it | `Answer::unknown()` | `Ok(())` |
 
-`Answer::unknown()` is `return 127`, bash's own command-not-found, so a script
-asking a question no rig answers sees an ordinary, testable failure status.
+`Answer::unknown()` gives the ask status 127, bash's own command-not-found, so
+a script asking a question no rig answers sees an ordinary, testable failure.
+It goes through the prelude's `__bc_status` rather than bash's `return`,
+because the answer runs in the frame that asked and a bare `return` there would
+end the function holding the call site — which `Answer::returning` is for.
 
 ### Sharing between shells
 

@@ -31,8 +31,8 @@ states about itself. These are the shipped bytes:
 
 ```bash
 __bc_account() {
-    local __bc_out=$1 IFS=' '
-    local -a __bc_meta="(${__BC__META[$2]-})"
+    declare __bc_out=$1 IFS=' '
+    declare -a __bc_meta="(${__BC__META[$2]-})"
     set -- "at=$EPOCHREALTIME" \
         pid       "$BASHPID" \
         shlvl     "$SHLVL" \

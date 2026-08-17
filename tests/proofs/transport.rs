@@ -12,18 +12,18 @@ async fn every_descendant_shell_reaches_the_run() {
         (
             ENTRY,
             r#"
-            BC_INSTR KEEP say REC top
-            ( BC_INSTR KEEP say REC paren )
-            value=$( BC_INSTR KEEP say REC cmdsubst; echo hi )
+            REC top
+            ( REC paren )
+            value=$( REC cmdsubst; echo hi )
             bash "${BASH_SOURCE[0]%/*}/child.bash"
-            BC_INSTR KEEP say REC after
+            REC after
             "#,
         ),
         (
             "child.bash",
             r#"
-            BC_INSTR KEEP say REC child
-            ( BC_INSTR KEEP say REC grandchild )
+            REC child
+            ( REC grandchild )
             "#,
         ),
     ])
@@ -78,8 +78,8 @@ async fn many_shells_at_once_arrive_whole_and_apart() {
             small="$(printf 'S%.0s' {1..500})"
             large="$(printf 'L%.0s' {1..9000})"
             for index in $(seq 1 40); do
-                BC_INSTR KEEP say REC "$1" "$index" "$small"
-                BC_INSTR KEEP say REC "$1" "$index" "$large"
+                REC "$1" "$index" "$small"
+                REC "$1" "$index" "$large"
             done
             "#,
         ),
@@ -118,7 +118,7 @@ async fn a_message_of_wide_characters_arrives_whole() {
     let ran = script(
         r#"
         wide="$(printf '€%.0s' {1..6000})"
-        for name in a b c d; do ( BC_INSTR KEEP say REC "$name" "$wide" ) & done
+        for name in a b c d; do ( REC "$name" "$wide" ) & done
         wait
         "#,
     )
@@ -152,7 +152,7 @@ async fn nothing_is_lost_at_the_end() {
     for _ in 0..10 {
         let ran = script(
             r#"
-            for i in $(seq 1 200); do BC_INSTR KEEP say REC "r$i"; done
+            for i in $(seq 1 200); do REC "r$i"; done
             exit 3
             "#,
         )
@@ -169,7 +169,7 @@ async fn a_newline_inside_a_value_is_escaped_not_a_line() {
     let ran = script(
         r#"
         payload=$'first\nsecond\tthird\\fourth'
-        BC_INSTR KEEP say REC "$payload" plain
+        REC "$payload" plain
         "#,
     )
     .await;

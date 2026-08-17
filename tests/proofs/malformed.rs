@@ -18,8 +18,8 @@ async fn a_line_cut_short_by_a_shell_that_left_ends_the_run() {
     let scripts = Scripts::of(&[(
         ENTRY,
         r#"
-        BC_INSTR KEEP say REC first
-        ( BC_INSTR KEEP say REC fork; printf '(never finished' >&"${__BC__FD[KEEP]}" )
+        REC first
+        ( REC fork; printf '(never finished' >&"${__BC__FD[KEEP]}" )
         sleep 5
         "#,
     )]);
@@ -46,7 +46,7 @@ async fn a_line_cut_short_at_the_end_is_reported_beside_the_subjects_status() {
     let scripts = Scripts::of(&[(
         ENTRY,
         r#"
-        setsid bash -c 'BC_INSTR KEEP say REC outsider $BASHPID; printf "(never finished" >&"${__BC__FD[KEEP]}"; sleep 30' &
+        setsid bash -c 'REC outsider $BASHPID; printf "(never finished" >&"${__BC__FD[KEEP]}"; sleep 30' &
         sleep 0.3
         exit 3
         "#,
@@ -84,9 +84,9 @@ async fn a_line_that_will_not_read_ends_the_run() {
     let scripts = Scripts::of(&[(
         ENTRY,
         r#"
-        BC_INSTR KEEP say REC first
+        REC first
         printf '(junk\n' >&"${__BC__FD[KEEP]}"
-        BC_INSTR KEEP say REC second
+        REC second
         sleep 5
         "#,
     )]);
@@ -114,7 +114,7 @@ async fn a_frame_the_protocol_did_not_write_ends_the_run() {
     let scripts = Scripts::of(&[(
         ENTRY,
         r#"
-        BC_INSTR KEEP say REC first
+        REC first
         printf 'nonsense\n' >"${__BC__DIR[KEEP]}/join"
         sleep 5
         "#,
@@ -139,8 +139,8 @@ async fn a_frame_the_protocol_did_not_write_ends_the_run() {
 async fn a_fault_on_one_pipe_touches_no_other() {
     let ran = script(
         r#"
-        BC_INSTR KEEP say REC first
-        BC_INSTR KEEP say REC second
+        REC first
+        REC second
         "#,
     )
     .await;

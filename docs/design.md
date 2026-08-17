@@ -45,8 +45,8 @@ property of the shell, and the shell is what knows it.
 
 ## Messages are arglists
 
-`BC_INSTR L say a b c` ships three words, and a rig receives three words. Any
-width, zero included, and the protocol reads no position of one.
+`BC_SAY a b c` ships three words, and a rig receives three words. Any width,
+zero included, and the protocol reads no position of one.
 
 Several tools can therefore share one wire. The sender picks its own leading
 discriminator — `TIMETHIS`, `__BASHCAP__` — and a decoder opts in with
@@ -55,10 +55,16 @@ registry and nothing to coordinate.
 
 An answer is an arglist too, and the shell that asked runs it as a command in
 its own frame — bash parses the reply as an array literal and invokes it, with
-no `eval` involved. `["return", "1"]` refuses, `["declare", "-g", "x=1"]` sets
-a variable in the asking shell, `["source", path]` runs bash of any length the
-rig wrote to a file, `["exit", "9"]` ends the subject, and `["echo", value]`
-hands a value back through a command substitution the script already wrote.
+no `eval` involved. `["__bc_status", "1"]` refuses, `["declare", "x=1"]` binds
+a variable in the frame that asked, `["source", path]` runs bash of any length
+the rig wrote to a file, `["exit", "9"]` ends the subject, and `["echo",
+value]` hands a value back through a command substitution the script already
+wrote.
+
+The words run where the call was written, which is what `BC_SAY` and `BC_ASK`
+being aliases buys: an answer's `declare` binds in the asking function rather
+than in a frame of the protocol's, so nothing needs `-g` to be seen, and
+`return` there ends the function that asked.
 
 Two consequences follow, and together they are why there is no second protocol
 here. Bash supplies the expressiveness, so no answer type has to grow. And
@@ -229,7 +235,7 @@ reports that it could not do its work.
 
 One exception: `expand_aliases` is turned on and stays on, because the error
 guards are aliases — `return` has to act in the frame that failed. `IFS` is
-taken `local` inside two of the protocol's own functions so `[*]` joins with a
+scoped inside two of the protocol's own functions so `[*]` joins with a
 space, and the subject's, unset included, is back on return.
 
 The protocol may not use `set -e`, so every command in it that can fail is
