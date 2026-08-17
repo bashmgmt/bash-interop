@@ -19,8 +19,17 @@ async fn a_signalled_subject_is_reported_and_loses_nothing() {
     .await;
 
     assert_eq!(ran.subject, ExitStatus::Signal(15));
-    assert_eq!(ran.subject.shell_code(), 143, "128 + signal, the shell convention");
-    assert_eq!(behind(&ran.shells, "REC"), [["before"]], "{}", report(&ran.shells));
+    assert_eq!(
+        ran.subject.shell_code(),
+        143,
+        "128 + signal, the shell convention"
+    );
+    assert_eq!(
+        behind(&ran.shells, "REC"),
+        [["before"]],
+        "{}",
+        report(&ran.shells)
+    );
 }
 
 /// The subject keeps its own trap and its own `IFS`. The prelude installs no
@@ -38,7 +47,12 @@ async fn a_clients_own_trap_and_ifs_are_untouched() {
     )
     .await;
 
-    assert_eq!(behind(&ran.shells, "REC"), [["one", "two"]], "{}", report(&ran.shells));
+    assert_eq!(
+        behind(&ran.shells, "REC"),
+        [["one", "two"]],
+        "{}",
+        report(&ran.shells)
+    );
     assert!(
         ran.shells[0].shell.bash.version.at_least(4, 4, 0),
         "the version is an array, and it read back{}",
@@ -65,6 +79,16 @@ async fn a_clients_own_locale_is_untouched_by_a_wide_message() {
     .await;
 
     let said = behind(&ran.shells, "REC");
-    assert_eq!(said[0], ["before", "1", "C.UTF-8"], "{}", report(&ran.shells));
-    assert_eq!(said[2], ["after", "1", "C.UTF-8"], "{}", report(&ran.shells));
+    assert_eq!(
+        said[0],
+        ["before", "1", "C.UTF-8"],
+        "{}",
+        report(&ran.shells)
+    );
+    assert_eq!(
+        said[2],
+        ["after", "1", "C.UTF-8"],
+        "{}",
+        report(&ran.shells)
+    );
 }

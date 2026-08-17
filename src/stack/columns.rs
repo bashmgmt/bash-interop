@@ -38,10 +38,10 @@
 
 use std::path::Path;
 
+use crate::failure::{Doing, Failure};
 use crate::rig::field;
 use crate::shell::Shell;
 use bash_strings::parse_array;
-use crate::failure::{Doing, Failure};
 
 use super::{Frame, Site, Source, Stack};
 
@@ -78,15 +78,24 @@ impl<'a> Columns<'a> {
         let skip = at("skip")?;
 
         Ok(Self {
-            skip: skip.parse().map_err(|_| broken(format!("skip {skip:?} is not a count")))?,
+            skip: skip
+                .parse()
+                .map_err(|_| broken(format!("skip {skip:?} is not a count")))?,
             pwd: at("pwd")?,
             funcs: at("funcs")?,
             sources: at("sources")?,
             lines: at("lines")?,
-            args: match (field(words, "argc"), field(words, "argv")) {
+            args: match (
+                field(words, "argc"),
+                field(words, "argv"),
+            ) {
                 (Some(argc), Some(argv)) => Some(Args { argc, argv }),
                 (None, None) => None,
-                _ => return Err(broken("one of \"argc\"/\"argv\" without the other")),
+                _ => {
+                    return Err(broken(
+                        "one of \"argc\"/\"argv\" without the other",
+                    ));
+                }
             },
         })
     }
@@ -97,9 +106,7 @@ impl<'a> Columns<'a> {
     /// needed because `BASH_SOURCE` alone cannot say what its own words mean:
     /// `$0` is a path in one shell and a stand-in for code in another.
     pub fn frames(&self, shell: &Shell) -> Result<Stack, Failure> {
-        let column = |name: &str, text: &str| {
-            parse_array(text).doing(|| format!("reading the {name:?} column"))
-        };
+        let column = |name: &str, text: &str| parse_array(text).doing(|| format!("reading the {name:?} column"));
 
         let funcs = column("funcs", self.funcs)?;
         let sources = column("sources", self.sources)?;
@@ -119,11 +126,16 @@ impl<'a> Columns<'a> {
         // the end is every reported frame being the instrument's, which happens
         // where bash pushed none of its own — the entry line is what is left.
         if self.skip < 1 || self.skip > funcs.len() {
-            return Err(broken(format!("skip {} of {} frames", self.skip, funcs.len())));
+            return Err(broken(format!(
+                "skip {} of {} frames",
+                self.skip,
+                funcs.len()
+            )));
         }
 
         let numbered = |what: &str, text: &str| {
-            text.parse::<u32>().map_err(|_| broken(format!("{what} {text:?}")))
+            text.parse::<u32>()
+                .map_err(|_| broken(format!("{what} {text:?}")))
         };
         let entered_at = numbered("entry line", &lines[funcs.len() - 1])?;
 
@@ -179,12 +191,18 @@ fn arguments(args: &Args<'_>, frames: usize) -> Result<Option<Vec<Vec<String>>>,
     let mut from = 0usize;
 
     for width in &widths {
-        let width: usize =
-            width.parse().map_err(|_| broken(format!("argument count {width:?}")))?;
+        let width: usize = width
+            .parse()
+            .map_err(|_| broken(format!("argument count {width:?}")))?;
         let upto = from
             .checked_add(width)
             .filter(|&upto| upto <= flat.len())
-            .ok_or_else(|| broken(format!("a group of {width} past {} arguments", flat.len())))?;
+            .ok_or_else(|| {
+                broken(format!(
+                    "a group of {width} past {} arguments",
+                    flat.len()
+                ))
+            })?;
 
         // A group is reversed within itself, so counting back down undoes it.
         groups.push(flat[from..upto].iter().rev().cloned().collect());
@@ -192,7 +210,10 @@ fn arguments(args: &Args<'_>, frames: usize) -> Result<Option<Vec<Vec<String>>>,
     }
 
     if from != flat.len() {
-        return Err(broken(format!("{} arguments belong to no frame", flat.len() - from)));
+        return Err(broken(format!(
+            "{} arguments belong to no frame",
+            flat.len() - from
+        )));
     }
 
     Ok(Some(groups))
@@ -201,4 +222,3 @@ fn arguments(args: &Args<'_>, frames: usize) -> Result<Option<Vec<Vec<String>>>,
 fn broken(what: impl Into<String>) -> Failure {
     Failure::new("reading a call stack", what.into())
 }
-

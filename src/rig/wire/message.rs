@@ -11,8 +11,8 @@ use std::vec;
 
 use serde::{Deserialize, Serialize};
 
-use bash_strings::{emit_array, parse_array};
 use crate::failure::{Doing, Failure};
+use bash_strings::{emit_array, parse_array};
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 pub struct Micros(pub u64);
@@ -33,7 +33,9 @@ impl Micros {
             return None;
         }
 
-        Some(Self(seconds.parse::<u64>().ok()? * 1_000_000 + micros.parse::<u64>().ok()?))
+        Some(Self(
+            seconds.parse::<u64>().ok()? * 1_000_000 + micros.parse::<u64>().ok()?,
+        ))
     }
 }
 
@@ -88,17 +90,33 @@ impl Message {
 
     /// One line off a shell's pipe: the verb, the clock, the words.
     pub(crate) fn read(line: Line) -> Result<Self, Failure> {
-        let refused = |why: &str| Failure::new(format!("reading the line {:?}", line.text), why);
+        let refused = |why: &str| {
+            Failure::new(
+                format!("reading the line {:?}", line.text),
+                why,
+            )
+        };
         let mut ahead = Ahead::over(&line.text).map_err(|why| refused(&why))?;
 
         let verb = match ahead.word().map_err(refused)?.as_str() {
             "SAY" => Verb::Say,
             "ASK" => Verb::Ask,
-            other => return Err(refused(&format!("{other} is not a verb"))),
+            other => {
+                return Err(refused(&format!(
+                    "{other} is not a verb"
+                )));
+            }
         };
         let sent_at = ahead.clock().map_err(refused)?;
 
-        Ok(Self { verb, stamp: Stamp { sent_at, heard_at: line.heard_at }, words: ahead.rest() })
+        Ok(Self {
+            verb,
+            stamp: Stamp {
+                sent_at,
+                heard_at: line.heard_at,
+            },
+            words: ahead.rest(),
+        })
     }
 }
 
@@ -112,11 +130,19 @@ pub(crate) struct Account {
 
 impl Account {
     pub(crate) fn read(text: &str, heard_at: Micros) -> Result<Self, Failure> {
-        let refused = |why: &str| Failure::new(format!("reading the account {text:?}"), why);
+        let refused = |why: &str| {
+            Failure::new(
+                format!("reading the account {text:?}"),
+                why,
+            )
+        };
         let mut ahead = Ahead::over(text).map_err(|why| refused(&why))?;
         let sent_at = ahead.clock().map_err(refused)?;
 
-        Ok(Self { stamp: Stamp { sent_at, heard_at }, words: ahead.rest() })
+        Ok(Self {
+            stamp: Stamp { sent_at, heard_at },
+            words: ahead.rest(),
+        })
     }
 }
 
@@ -132,7 +158,9 @@ struct Ahead(vec::IntoIter<String>);
 
 impl Ahead {
     fn over(text: &str) -> Result<Self, String> {
-        parse_array(text).map(|words| Self(words.into_iter())).map_err(|why| why.to_string())
+        parse_array(text)
+            .map(|words| Self(words.into_iter()))
+            .map_err(|why| why.to_string())
     }
 
     fn word(&mut self) -> Result<String, &'static str> {
@@ -156,7 +184,10 @@ impl Ahead {
 /// write their payload in, unrelated to the `key=value` headers the protocol
 /// puts in front of one.
 pub fn field<'a>(words: &'a [String], key: &str) -> Option<&'a str> {
-    words.chunks_exact(2).find(|pair| pair[0] == key).map(|pair| pair[1].as_str())
+    words
+        .chunks_exact(2)
+        .find(|pair| pair[0] == key)
+        .map(|pair| pair[1].as_str())
 }
 
 /// What a blocked shell is told to run next: one command, as an arglist — the
@@ -167,10 +198,7 @@ pub struct Answer(Vec<String>);
 impl Answer {
     /// A command and the arguments it is given. The command word stands apart
     /// because a command of no words is not one.
-    pub fn of(
-        command: impl Into<String>,
-        args: impl IntoIterator<Item = impl Into<String>>,
-    ) -> Self {
+    pub fn of(command: impl Into<String>, args: impl IntoIterator<Item = impl Into<String>>) -> Self {
         let mut words = vec![command.into()];
         words.extend(args.into_iter().map(Into::into));
 
@@ -209,7 +237,10 @@ mod tests {
         let mut all = words(&[kind, "at=1.000002"]);
         all.extend(words(payload));
 
-        Line { text: emit_array(&all), heard_at: Micros(50) }
+        Line {
+            text: emit_array(&all),
+            heard_at: Micros(50),
+        }
     }
 
     fn spoke(payload: &[&str]) -> Message {
@@ -222,9 +253,20 @@ mod tests {
 
         assert_eq!(message.verb, Verb::Say);
         assert_eq!(message.stamp.sent_at, Micros(1_000_002));
-        assert_eq!(message.stamp.heard_at, Micros(50), "the run's clock, from the read");
-        assert_eq!(message.words, words(&["REC", "a space", ""]), "the payload alone");
-        assert_eq!(message.behind("REC"), Some(words(&["a space", ""]).as_slice()));
+        assert_eq!(
+            message.stamp.heard_at,
+            Micros(50),
+            "the run's clock, from the read"
+        );
+        assert_eq!(
+            message.words,
+            words(&["REC", "a space", ""]),
+            "the payload alone"
+        );
+        assert_eq!(
+            message.behind("REC"),
+            Some(words(&["a space", ""]).as_slice())
+        );
     }
 
     #[test]
@@ -238,14 +280,32 @@ mod tests {
     /// An account has no verb: the clock comes first.
     #[test]
     fn an_account_is_the_clock_and_the_pairs() {
-        let text = emit_array(&words(&["at=1.000002", "zero", "x.bash", "flags", "hB"]));
+        let text = emit_array(&words(&[
+            "at=1.000002",
+            "zero",
+            "x.bash",
+            "flags",
+            "hB",
+        ]));
         let account = Account::read(&text, Micros(50)).unwrap();
 
-        assert_eq!(account.stamp, Stamp { sent_at: Micros(1_000_002), heard_at: Micros(50) });
-        assert_eq!(field(&account.words, "zero"), Some("x.bash"));
+        assert_eq!(
+            account.stamp,
+            Stamp {
+                sent_at: Micros(1_000_002),
+                heard_at: Micros(50)
+            }
+        );
+        assert_eq!(
+            field(&account.words, "zero"),
+            Some("x.bash")
+        );
 
         let verbed = emit_array(&words(&["JOIN", "at=1.000002"]));
-        assert!(Account::read(&verbed, Micros(0)).is_err(), "a verb where the clock goes");
+        assert!(
+            Account::read(&verbed, Micros(0)).is_err(),
+            "a verb where the clock goes"
+        );
     }
 
     #[test]
@@ -259,8 +319,14 @@ mod tests {
             "(unquoted".to_string(),
         ];
         for text in bad {
-            let refused = Message::read(Line { text: text.clone(), heard_at: Micros(0) });
-            assert!(refused.is_err(), "{text} should not read");
+            let refused = Message::read(Line {
+                text: text.clone(),
+                heard_at: Micros(0),
+            });
+            assert!(
+                refused.is_err(),
+                "{text} should not read"
+            );
         }
     }
 
@@ -272,11 +338,18 @@ mod tests {
         let carried = ["%s", "two\nlines", "a\ttab", "\u{ff}", "it's", ""];
         let message = Answer::of("printf", carried).to_string();
 
-        assert!(!message.contains('\n'), "a raw newline would truncate the read: {message}");
+        assert!(
+            !message.contains('\n'),
+            "a raw newline would truncate the read: {message}"
+        );
 
         let mut expected = vec!["printf".to_string()];
         expected.extend(carried.iter().map(|word| word.to_string()));
-        assert_eq!(parse_array(&message).unwrap(), expected, "and it still reads back");
+        assert_eq!(
+            parse_array(&message).unwrap(),
+            expected,
+            "and it still reads back"
+        );
     }
 
     /// A word may itself be a message, decoded one level at a time.
@@ -285,7 +358,13 @@ mod tests {
         let nested = emit_array(&words(&["INNER", "x y"]));
         let message = spoke(&["TAG", "quote'inside", "two\nlines", &nested]);
 
-        assert_eq!(message.words, words(&["TAG", "quote'inside", "two\nlines", &nested]));
-        assert_eq!(parse_array(&nested).unwrap(), words(&["INNER", "x y"]));
+        assert_eq!(
+            message.words,
+            words(&["TAG", "quote'inside", "two\nlines", &nested])
+        );
+        assert_eq!(
+            parse_array(&nested).unwrap(),
+            words(&["INNER", "x y"])
+        );
     }
 }

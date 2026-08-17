@@ -6,11 +6,9 @@
 
 use std::sync::Arc;
 
-use crate::rig::{
-    Answer, Driving, Failure, Layout, Message, Provision, Reacting, Rig, Shell,
-};
+use crate::rig::{Answer, Driving, Failure, Layout, Message, Provision, Reacting, Rig, Shell};
+use crate::scratch::{Scripts, bash};
 use crate::stack::{self, Columns, Site, Source, Stack};
-use crate::scratch::{bash, Scripts};
 
 /// The whole instrument: a word that walks and says what it found. The 2 is
 /// `__bc_stack`'s own frame and `WALK`'s, so the walk starts at the subject.
@@ -40,7 +38,10 @@ impl Rig for Walking {
     }
 
     async fn joined(&self, _at: &Layout, shell: Arc<Shell>) -> Result<Walks, Failure> {
-        Ok(Walks { shell, seen: Vec::new() })
+        Ok(Walks {
+            shell,
+            seen: Vec::new(),
+        })
     }
 }
 
@@ -48,7 +49,9 @@ impl Reacting for Walks {
     type Kept = Vec<Stack>;
 
     async fn hear(&mut self, said: Message) -> Result<(), Failure> {
-        let Some(words) = said.behind("WALK") else { return Ok(()) };
+        let Some(words) = said.behind("WALK") else {
+            return Ok(());
+        };
 
         self.seen.push(Columns::of(words)?.frames(&self.shell)?);
 
@@ -71,11 +74,20 @@ impl Driving for Walking {}
 /// Every walk a command line produced, shell by shell in the order they joined.
 async fn walks_in<A: AsRef<std::ffi::OsStr>>(argv: &[A]) -> Vec<Stack> {
     let ran = Walking
-        .run(argv, |at| Ok(vec![at.bash_env(Provision::Joining(&Walking.joining(at)))?]))
+        .run(argv, |at| {
+            Ok(vec![at.bash_env(
+                Provision::Joining(&Walking.joining(at)),
+            )?])
+        })
         .await
         .unwrap_or_else(|e| panic!("{e}"));
 
-    ran.whole().unwrap().shells.into_iter().flat_map(|at| at.kept).collect()
+    ran.whole()
+        .unwrap()
+        .shells
+        .into_iter()
+        .flat_map(|at| at.kept)
+        .collect()
 }
 
 /// The same over a script — and the scripts, which stay alive: a source path
@@ -104,13 +116,19 @@ async fn bashs_own_words_for_a_frame_come_back_as_what_they_are() {
     ])
     .await;
 
-    let sites = |at: usize| -> Vec<Site> {
-        seen[at].frames().map(|frame| frame.site.clone()).collect()
-    };
+    let sites = |at: usize| -> Vec<Site> { seen[at].frames().map(|frame| frame.site.clone()).collect() };
 
     assert_eq!(seen.len(), 2);
-    assert_eq!(sites(0), [Site::Sourced, Site::Script], "the sourced file, then the script");
-    assert_eq!(sites(1), [Site::Script], "the script's own body alone");
+    assert_eq!(
+        sites(0),
+        [Site::Sourced, Site::Script],
+        "the sourced file, then the script"
+    );
+    assert_eq!(
+        sites(1),
+        [Site::Script],
+        "the script's own body alone"
+    );
 }
 
 /// Bash pushes a frame for the top level of a script file and for nothing
@@ -122,17 +140,30 @@ async fn a_shell_given_no_script_file_ends_at_the_frame_bash_never_pushed() {
     let inline = "outer() { WALK; }; outer";
     let on_stdin = format!("bash -s <<< {inline:?}");
 
-    for (form, code) in [("a command line", inline), ("standard input", on_stdin.as_str())] {
+    for (form, code) in [
+        ("a command line", inline),
+        ("standard input", on_stdin.as_str()),
+    ] {
         let seen = walks_in(&["bash", "-c", code]).await;
         assert_eq!(seen.len(), 1, "{form}");
 
         let sites: Vec<Site> = seen[0].frames().map(|frame| frame.site.clone()).collect();
-        assert_eq!(sites, [Site::Function("outer".into()), Site::Shell], "{form}");
+        assert_eq!(
+            sites,
+            [Site::Function("outer".into()), Site::Shell],
+            "{form}"
+        );
 
         let entered = &seen[0].below()[0];
         assert_eq!(entered.source, Source::Shell, "{form}");
-        assert!(entered.lineno > 0, "the line the walk was entered from: {form}");
-        assert!(entered.args.is_none(), "bash keeps no argument group for it: {form}");
+        assert!(
+            entered.lineno > 0,
+            "the line the walk was entered from: {form}"
+        );
+        assert!(
+            entered.args.is_none(),
+            "bash keeps no argument group for it: {form}"
+        );
     }
 }
 
@@ -173,7 +204,11 @@ async fn a_relative_source_comes_back_absolute() {
     };
 
     assert!(path.is_absolute(), "{}", path.display());
-    assert!(path.ends_with("sub/../lib.bash"), "bash's own text, uncollapsed: {}", path.display());
+    assert!(
+        path.ends_with("sub/../lib.bash"),
+        "bash's own text, uncollapsed: {}",
+        path.display()
+    );
     assert_eq!(
         seen[0].top().source.found(),
         Some(path.as_path()),
@@ -202,13 +237,26 @@ async fn a_subject_that_moved_leaves_a_source_that_is_not_there() {
 
     let source = &seen[0].top().source;
 
-    assert_eq!(source, &Source::File("/lib.bash".into()), "joined onto the $PWD it now has");
-    assert!(source.found().is_none(), "and there is nothing there");
-    assert_eq!(source.missing(), Some(std::path::Path::new("/lib.bash")));
+    assert_eq!(
+        source,
+        &Source::File("/lib.bash".into()),
+        "joined onto the $PWD it now has"
+    );
+    assert!(
+        source.found().is_none(),
+        "and there is nothing there"
+    );
+    assert_eq!(
+        source.missing(),
+        Some(std::path::Path::new("/lib.bash"))
+    );
 }
 
 impl Walking {
     fn joining(&self, at: &Layout) -> String {
-        format!("BC_JOIN WALK {}\n", bash_strings::emit_scalar(at.text()))
+        format!(
+            "BC_JOIN WALK {}\n",
+            bash_strings::emit_scalar(at.text())
+        )
     }
 }

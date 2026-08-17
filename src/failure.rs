@@ -16,7 +16,10 @@ pub struct Failure {
 
 impl Failure {
     pub fn new(doing: impl Into<String>, cause: impl Into<Cause>) -> Self {
-        Self { doing: doing.into(), cause: cause.into() }
+        Self {
+            doing: doing.into(),
+            cause: cause.into(),
+        }
     }
 }
 

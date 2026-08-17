@@ -15,9 +15,9 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::rig::wire::{field, Account, Pid, Stamp};
-use bash_strings::parse_array;
 use crate::failure::Failure;
+use crate::rig::wire::{Account, Pid, Stamp, field};
+use bash_strings::parse_array;
 
 /// `$BASH_VERSINFO`, all six elements. What bash behaves like is a function of
 /// this, so a reading that has to bend for an older shell has what it needs.
@@ -43,14 +43,19 @@ impl Version {
     }
 
     fn of(literal: &str) -> Result<Self, Failure> {
-        let parts = parse_array(literal)
-            .map_err(|cause| broken(format!("the version {literal:?}: {cause}")))?;
+        let parts = parse_array(literal).map_err(|cause| {
+            broken(format!(
+                "the version {literal:?}: {cause}"
+            ))
+        })?;
 
         let [major, minor, patch, build, status, machine] = parts.as_slice() else {
-            return Err(broken(format!("a version of {} parts", parts.len())));
+            return Err(broken(format!(
+                "a version of {} parts",
+                parts.len()
+            )));
         };
-        let count =
-            |what: &str, text: &str| text.parse().map_err(|_| broken(format!("{what} {text:?}")));
+        let count = |what: &str, text: &str| text.parse().map_err(|_| broken(format!("{what} {text:?}")));
 
         Ok(Self {
             major: count("a major version", major)?,
@@ -65,7 +70,11 @@ impl Version {
 
 impl fmt::Display for Version {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}.{}.{}({})-{}", self.major, self.minor, self.patch, self.build, self.status)
+        write!(
+            f,
+            "{}.{}.{}({})-{}",
+            self.major, self.minor, self.patch, self.build, self.status
+        )
     }
 }
 
@@ -180,22 +189,30 @@ pub struct Shell {
 impl Shell {
     /// Read off the words a shell wrote about itself.
     pub(crate) fn of(nth: usize, account: Account) -> Result<Self, Failure> {
-        let Account { stamp: joined, words } = account;
+        let Account {
+            stamp: joined,
+            words,
+        } = account;
         let word = |key: &str| {
-            field(&words, key).ok_or_else(|| broken(format!("no {key:?}"))).map(str::to_string)
+            field(&words, key)
+                .ok_or_else(|| broken(format!("no {key:?}")))
+                .map(str::to_string)
         };
         let count = |key: &str| -> Result<u32, Failure> {
             let text = word(key)?;
             text.parse().map_err(|_| broken(format!("{key} {text:?}")))
         };
         let split = |key: &str| -> Result<Vec<String>, Failure> {
-            Ok(word(key)?.split(':').filter(|opt| !opt.is_empty()).map(String::from).collect())
+            Ok(word(key)?
+                .split(':')
+                .filter(|opt| !opt.is_empty())
+                .map(String::from)
+                .collect())
         };
 
         let flags = word("flags")?;
         let command = word("command")?;
-        let brought = parse_array(&word("brought")?)
-            .map_err(|cause| broken(format!("the brought words: {cause}")))?;
+        let brought = parse_array(&word("brought")?).map_err(|cause| broken(format!("the brought words: {cause}")))?;
 
         Ok(Self {
             nth,
@@ -224,5 +241,8 @@ impl Shell {
 }
 
 fn broken(what: String) -> Failure {
-    Failure::new("reading what a shell said of itself", what)
+    Failure::new(
+        "reading what a shell said of itself",
+        what,
+    )
 }

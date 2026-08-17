@@ -5,19 +5,17 @@
 //! applies to its process group — with the difference that this side owns
 //! nothing it could kill.
 
-use std::io::{pipe, Write};
+use std::io::{Write, pipe};
 use std::os::fd::OwnedFd;
 use std::os::unix::process::ExitStatusExt;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 
-use bash_interop::rig::{
-    Attended, Failure, Layout, Message, Rig, Serving, Shell,
-};
+use bash_interop::rig::{Attended, Failure, Layout, Message, Rig, Serving, Shell};
 
+use crate::{ENTRY, behind, report};
 use bash_interop::scratch::Scripts;
-use crate::{behind, report, ENTRY};
 
 /// Keeps what it hears, and has no say in when the session ends.
 struct Attaching;
@@ -74,16 +72,37 @@ fn joining(dir: &Path, script: &Path, handle: OwnedFd) -> Child {
 /// holds — and hand back the shells that joined beside how that shell ended.
 /// The join fifo brackets the session: absent before, present exactly while
 /// it serves, gone when it is over.
-async fn joined(scripts: &Scripts) -> (Vec<Attended<Vec<Message>>>, std::process::ExitStatus) {
+async fn joined(
+    scripts: &Scripts,
+) -> (
+    Vec<Attended<Vec<Message>>>,
+    std::process::ExitStatus,
+) {
     let workspace = tempfile::tempdir().expect("a workspace to prescribe");
     let (held, handle) = pipe().expect("a handle");
-    assert!(!workspace.path().join("join").exists(), "nothing serves yet");
+    assert!(
+        !workspace.path().join("join").exists(),
+        "nothing serves yet"
+    );
 
-    let mut child = joining(workspace.path(), &scripts.at(ENTRY), handle.into());
-    let served = Attaching.serve(workspace.path(), held.into()).await.expect("the session");
+    let mut child = joining(
+        workspace.path(),
+        &scripts.at(ENTRY),
+        handle.into(),
+    );
+    let served = Attaching
+        .serve(workspace.path(), held.into())
+        .await
+        .expect("the session");
 
-    assert!(served.failed.is_none(), "the session closed up cleanly");
-    assert!(!workspace.path().join("join").exists(), "the liveness signal went with it");
+    assert!(
+        served.failed.is_none(),
+        "the session closed up cleanly"
+    );
+    assert!(
+        !workspace.path().join("join").exists(),
+        "the liveness signal went with it"
+    );
 
     let status = child.wait().expect("reaping the shell");
 
@@ -110,12 +129,23 @@ async fn a_shell_that_joined_is_heard_until_it_lets_go() {
 
     assert_eq!(
         behind(&shells, "TELL"),
-        [["first"].as_slice(), ["from-a-subshell"].as_slice(), ["last"].as_slice()],
+        [
+            ["first"].as_slice(),
+            ["from-a-subshell"].as_slice(),
+            ["last"].as_slice()
+        ],
         "{}",
         report(&shells)
     );
-    assert_eq!(status.code(), Some(3), "the initiator's own status, which is not ours to hold");
-    assert!(shells[1].parted.is_some(), "the subshell parted long before the handle went");
+    assert_eq!(
+        status.code(),
+        Some(3),
+        "the initiator's own status, which is not ours to hold"
+    );
+    assert!(
+        shells[1].parted.is_some(),
+        "the subshell parted long before the handle went"
+    );
 }
 
 /// A client that lets go while still running is a shell the session outlived,
@@ -135,9 +165,21 @@ async fn a_shell_the_session_outlived_is_left_to_its_own_devices() {
 
     let (shells, status) = joined(&scripts).await;
 
-    assert_eq!(behind(&shells, "TELL"), [["before"]], "{}", report(&shells));
-    assert!(shells[0].parted.is_none(), "still running when the handle went");
-    assert_eq!(status.signal(), Some(libc::SIGPIPE), "the word after the session took SIGPIPE");
+    assert_eq!(
+        behind(&shells, "TELL"),
+        [["before"]],
+        "{}",
+        report(&shells)
+    );
+    assert!(
+        shells[0].parted.is_none(),
+        "still running when the handle went"
+    );
+    assert_eq!(
+        status.signal(),
+        Some(libc::SIGPIPE),
+        "the word after the session took SIGPIPE"
+    );
 }
 
 /// How far a session reaches is the client's decision — the startup file
@@ -172,11 +214,29 @@ async fn a_joined_shell_may_publish_to_its_children() {
     let (shells, status) = joined(&scripts).await;
     let said = behind(&shells, "TELL");
 
-    assert_eq!(status.code(), Some(0), "{}", report(&shells));
-    assert_eq!(said.len(), 2, "the script and the bash it started: {}", report(&shells));
+    assert_eq!(
+        status.code(),
+        Some(0),
+        "{}",
+        report(&shells)
+    );
+    assert_eq!(
+        said.len(),
+        2,
+        "the script and the bash it started: {}",
+        report(&shells)
+    );
     assert_eq!(said[0][0], "parent");
-    assert_eq!(said[1][0], "child", "{}", report(&shells));
-    assert_ne!(said[0][1], said[1][1], "a process of its own");
+    assert_eq!(
+        said[1][0],
+        "child",
+        "{}",
+        report(&shells)
+    );
+    assert_ne!(
+        said[0][1], said[1][1],
+        "a process of its own"
+    );
 }
 
 /// The coordinate travels only as an argument, and initiation is the
@@ -209,11 +269,27 @@ async fn a_child_may_be_told_the_workspace_as_an_argument() {
     let (shells, status) = joined(&scripts).await;
     let said = behind(&shells, "TELL");
 
-    assert_eq!(status.code(), Some(0), "{}", report(&shells));
+    assert_eq!(
+        status.code(),
+        Some(0),
+        "{}",
+        report(&shells)
+    );
     assert_eq!(said.len(), 2, "{}", report(&shells));
-    assert_eq!(said[1][0], "child", "{}", report(&shells));
-    assert_eq!(said[1][2], "unset", "no environment carried anything");
-    assert_ne!(said[0][1], said[1][1], "a process of its own");
+    assert_eq!(
+        said[1][0],
+        "child",
+        "{}",
+        report(&shells)
+    );
+    assert_eq!(
+        said[1][2], "unset",
+        "no environment carried anything"
+    );
+    assert_ne!(
+        said[0][1], said[1][1],
+        "a process of its own"
+    );
 }
 
 /// A shell nothing started, joining because it wants to.
@@ -241,7 +317,12 @@ fn interactively(dir: &Path, handle: OwnedFd) -> Child {
         TELL at-the-prompt
         "#
     );
-    shell.stdin.take().expect("its input").write_all(typed.as_bytes()).expect("typing at it");
+    shell
+        .stdin
+        .take()
+        .expect("its input")
+        .write_all(typed.as_bytes())
+        .expect("typing at it");
 
     shell
 }
@@ -259,21 +340,44 @@ async fn a_shell_says_what_it_is_rather_than_being_guessed_at() {
     let (held, handle) = pipe().expect("a handle");
 
     let mut child = interactively(workspace.path(), handle.into());
-    let served = Attaching.serve(workspace.path(), held.into()).await.expect("the session");
+    let served = Attaching
+        .serve(workspace.path(), held.into())
+        .await
+        .expect("the session");
 
     child.wait().expect("reaping the shell");
-    assert!(served.failed.is_none(), "the session closed up cleanly");
+    assert!(
+        served.failed.is_none(),
+        "the session closed up cleanly"
+    );
 
-    assert_eq!(behind(&served.shells, "TELL"), [["at-the-prompt"]], "{}", report(&served.shells));
+    assert_eq!(
+        behind(&served.shells, "TELL"),
+        [["at-the-prompt"]],
+        "{}",
+        report(&served.shells)
+    );
     assert_eq!(served.shells.len(), 1);
 
     let shell = &served.shells[0].shell;
     let started = &shell.bash.invocation;
 
-    assert!(started.interactive, "it said so: {started:?}");
-    assert!(started.standard_input, "and where its code came from");
-    assert!(started.command.is_none(), "which was not a command line");
-    assert!(shell.bash.version.at_least(5, 0, 0), "$EPOCHREALTIME is bash 5");
+    assert!(
+        started.interactive,
+        "it said so: {started:?}"
+    );
+    assert!(
+        started.standard_input,
+        "and where its code came from"
+    );
+    assert!(
+        started.command.is_none(),
+        "which was not a command line"
+    );
+    assert!(
+        shell.bash.version.at_least(5, 0, 0),
+        "$EPOCHREALTIME is bash 5"
+    );
     assert_eq!(shell.subshell, 0);
 
     // Interactive is not something the options can be turned into: `set`
@@ -301,8 +405,16 @@ async fn an_occupied_workspace_is_refused() {
             .await
             .err()
             .expect("the second server must be refused");
-        assert!(refused.to_string().contains("already held by a live session"), "{refused}");
-        assert!(workspace.path().join("join").exists(), "the first session is undisturbed");
+        assert!(
+            refused
+                .to_string()
+                .contains("already held by a live session"),
+            "{refused}"
+        );
+        assert!(
+            workspace.path().join("join").exists(),
+            "the first session is undisturbed"
+        );
 
         drop(handle);
     };
@@ -320,7 +432,11 @@ async fn a_killed_predecessors_leavings_are_swept() {
     let temp = tempfile::tempdir().unwrap();
     let at = temp.path();
     for stale in ["join", "up.GHOST", "rep.GHOST"] {
-        nix::unistd::mkfifo(&at.join(stale), nix::sys::stat::Mode::S_IRWXU).unwrap();
+        nix::unistd::mkfifo(
+            &at.join(stale),
+            nix::sys::stat::Mode::S_IRWXU,
+        )
+        .unwrap();
     }
 
     let scripts = Scripts::of(&[(ENTRY, "TELL revived\n")]);
@@ -329,14 +445,23 @@ async fn a_killed_predecessors_leavings_are_swept() {
     let served = Attaching.serve(at, held.into()).await.expect("the session");
     child.wait().expect("reaping the shell");
 
-    assert_eq!(behind(&served.shells, "TELL"), [["revived"]], "{}", report(&served.shells));
+    assert_eq!(
+        behind(&served.shells, "TELL"),
+        [["revived"]],
+        "{}",
+        report(&served.shells)
+    );
 
     let mut left: Vec<String> = std::fs::read_dir(at)
         .unwrap()
         .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
         .collect();
     left.sort();
-    assert_eq!(left, ["lock", "prelude.bash", "rig.bash"], "swept and closed");
+    assert_eq!(
+        left,
+        ["lock", "prelude.bash", "rig.bash"],
+        "swept and closed"
+    );
 }
 
 /// A workspace nobody made is nobody's to invent: the prescribed directory
@@ -352,6 +477,11 @@ async fn a_missing_workspace_is_a_refusal() {
         .await
         .err()
         .expect("a missing workspace must be refused");
-    assert!(refused.to_string().contains("opening the prescribed workspace"), "{refused}");
+    assert!(
+        refused
+            .to_string()
+            .contains("opening the prescribed workspace"),
+        "{refused}"
+    );
     assert!(!at.exists(), "and it was not invented");
 }

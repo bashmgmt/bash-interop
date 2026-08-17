@@ -14,7 +14,10 @@ fn environment<E: FnOnce(&Layout) -> Result<Vec<(OsString, OsString)>, Failure>>
 /// The standard initiation — data the run's closure hands to `bash_env`;
 /// run only where a client or a provisioned file says so.
 fn deploy_join(at: &Layout) -> String {
-    format!("BC_JOIN DEPLOY {}\n", bash_strings::emit_scalar(at.text()))
+    format!(
+        "BC_JOIN DEPLOY {}\n",
+        bash_strings::emit_scalar(at.text())
+    )
 }
 // ANCHOR_END: deploy-join
 
@@ -26,7 +29,11 @@ fn the_three_usual_sentences() {
         // bash in the subject's tree joins as it starts — the right default
         // for subjects that know nothing of the session. The line is the
         // wrapper's own statement (rigs.md: the sketch's deploy_join).
-        |at| Ok(vec![at.bash_env(Provision::Joining(&deploy_join(at)))?]),
+        |at| {
+            Ok(vec![at.bash_env(
+                Provision::Joining(&deploy_join(at)),
+            )?])
+        },
         // ANCHOR_END: env-joining
     );
     environment(
@@ -38,7 +45,10 @@ fn the_three_usual_sentences() {
         |at| {
             Ok(vec![
                 at.bash_env(Provision::Definitions)?,
-                ("DEPLOY_SESSION".into(), at.text().into()),
+                (
+                    "DEPLOY_SESSION".into(),
+                    at.text().into(),
+                ),
             ])
         },
         // ANCHOR_END: env-definitions

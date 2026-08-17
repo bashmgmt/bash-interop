@@ -61,7 +61,11 @@ The three usual sentences, each a complete answer:
 // bash in the subject's tree joins as it starts — the right default
 // for subjects that know nothing of the session. The line is the
 // wrapper's own statement (rigs.md: the sketch's deploy_join).
-|at| Ok(vec![at.bash_env(Provision::Joining(&deploy_join(at)))?]),
+|at| {
+    Ok(vec![at.bash_env(
+        Provision::Joining(&deploy_join(at)),
+    )?])
+},
 ```
 
 <!-- quote: tests/book.rs anchor=env-definitions -->
@@ -73,7 +77,10 @@ The three usual sentences, each a complete answer:
 |at| {
     Ok(vec![
         at.bash_env(Provision::Definitions)?,
-        ("DEPLOY_SESSION".into(), at.text().into()),
+        (
+            "DEPLOY_SESSION".into(),
+            at.text().into(),
+        ),
     ])
 },
 ```

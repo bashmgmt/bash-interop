@@ -53,5 +53,8 @@ pub fn bash(script: PathBuf) -> Vec<OsString> {
 pub fn sourcing(path: &Path, body: &str) -> Result<Answer, Failure> {
     fs::write(path, body).doing(|| format!("writing {}", path.display()))?;
 
-    Ok(Answer::of("source", [path.to_string_lossy()]))
+    Ok(Answer::of(
+        "source",
+        [path.to_string_lossy()],
+    ))
 }

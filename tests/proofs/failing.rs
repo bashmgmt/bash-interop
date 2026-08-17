@@ -6,13 +6,10 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use bash_interop::rig::{
-    Answer, Driving, ExitStatus, Failure, Layout, Message, Reacting, Rig, Shell,
-    Verb,
-};
+use bash_interop::rig::{Answer, Driving, ExitStatus, Failure, Layout, Message, Reacting, Rig, Shell, Verb};
 
-use bash_interop::scratch::{bash, Scripts};
-use crate::{behind, gone, provisioned, report, script, ENTRY};
+use crate::{ENTRY, behind, gone, provisioned, report, script};
+use bash_interop::scratch::{Scripts, bash};
 
 /// Fails the first time it is given a message of the kind it breaks on.
 struct Breaking {
@@ -32,7 +29,10 @@ impl Rig for Breaking {
     }
 
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Breaks, Failure> {
-        Ok(Breaks { on: self.on, heard: Vec::new() })
+        Ok(Breaks {
+            on: self.on,
+            heard: Vec::new(),
+        })
     }
 }
 
@@ -43,7 +43,10 @@ impl Reacting for Breaks {
 
     async fn hear(&mut self, said: Message) -> Result<(), Failure> {
         if self.on == Verb::Say {
-            return Err(Failure::new("keeping what was said", "the sink is on fire"));
+            return Err(Failure::new(
+                "keeping what was said",
+                "the sink is on fire",
+            ));
         }
         self.heard.push(said);
 
@@ -52,7 +55,10 @@ impl Reacting for Breaks {
 
     async fn answer(&mut self, _: Message) -> Result<Answer, Failure> {
         match self.on {
-            Verb::Ask => Err(Failure::new("deciding an answer", "the operator is on fire")),
+            Verb::Ask => Err(Failure::new(
+                "deciding an answer",
+                "the operator is on fire",
+            )),
             Verb::Say => Ok(Answer::status(0)),
         }
     }
@@ -81,17 +87,29 @@ fn blocked(scripts: &Scripts) -> i32 {
 /// is no command that means "the operator broke".
 #[tokio::test]
 async fn a_rig_that_cannot_answer_ends_the_run_and_kills_the_subject() {
-    let scripts = Scripts::of(&[(ENTRY, &format!("{REPORTING}BC_INSTR KEEP ask anything"))]);
+    let scripts = Scripts::of(&[(
+        ENTRY,
+        &format!("{REPORTING}BC_INSTR KEEP ask anything"),
+    )]);
 
     let breaking = Breaking { on: Verb::Ask };
     let failure = breaking
-        .run(&bash(scripts.at(ENTRY)), provisioned(&breaking))
+        .run(
+            &bash(scripts.at(ENTRY)),
+            provisioned(&breaking),
+        )
         .await
         .err()
         .expect("the run must end in the rig's failure");
 
-    assert!(failure.to_string().contains("the operator is on fire"), "{failure}");
-    assert!(gone(blocked(&scripts)), "the shell was left waiting for an answer never coming");
+    assert!(
+        failure.to_string().contains("the operator is on fire"),
+        "{failure}"
+    );
+    assert!(
+        gone(blocked(&scripts)),
+        "the shell was left waiting for an answer never coming"
+    );
 }
 
 /// `hear` has nobody waiting on it, so there was never anything to write back.
@@ -114,14 +132,26 @@ async fn a_failure_while_hearing_ends_the_run_and_kills_the_subject() {
     let started = Instant::now();
     let breaking = Breaking { on: Verb::Say };
     let failure = breaking
-        .run(&bash(scripts.at(ENTRY)), provisioned(&breaking))
+        .run(
+            &bash(scripts.at(ENTRY)),
+            provisioned(&breaking),
+        )
         .await
         .err()
         .expect("the run must end in the rig's failure");
 
-    assert!(failure.to_string().contains("the sink is on fire"), "{failure}");
-    assert!(started.elapsed().as_secs() < 5, "the run must not wait the subject out");
-    assert!(gone(blocked(&scripts)), "the subject outlived the run");
+    assert!(
+        failure.to_string().contains("the sink is on fire"),
+        "{failure}"
+    );
+    assert!(
+        started.elapsed().as_secs() < 5,
+        "the run must not wait the subject out"
+    );
+    assert!(
+        gone(blocked(&scripts)),
+        "the subject outlived the run"
+    );
 }
 
 /// A verb the protocol does not define is the client's mistake and stays in
@@ -137,12 +167,25 @@ async fn an_unknown_verb_is_reported_rather_than_ignored() {
     )
     .await;
 
-    assert_eq!(ran.subject, ExitStatus::Code(0), "the subject carries on");
+    assert_eq!(
+        ran.subject,
+        ExitStatus::Code(0),
+        "the subject carries on"
+    );
 
     let said = behind(&ran.shells, "REC");
     assert_eq!(said.len(), 1, "{}", report(&ran.shells));
-    assert_eq!(said[0][0], "returned 125", "the instrumentation failed{}", report(&ran.shells));
-    assert!(said[0][1].contains("unknown verb mumble"), "it says which: {:?}", said[0][1]);
+    assert_eq!(
+        said[0][0],
+        "returned 125",
+        "the instrumentation failed{}",
+        report(&ran.shells)
+    );
+    assert!(
+        said[0][1].contains("unknown verb mumble"),
+        "it says which: {:?}",
+        said[0][1]
+    );
 }
 
 impl crate::Joins for Breaking {

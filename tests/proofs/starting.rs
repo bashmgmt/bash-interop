@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use bash_interop::rig::{Driving, ExitStatus, Failure, Layout, Message, Provision, Rig, Shell};
 
-use bash_interop::scratch::{bash, Scripts};
-use crate::{behind, provisioned, report, Joins, Keeping, ENTRY};
+use crate::{ENTRY, Joins, Keeping, behind, provisioned, report};
+use bash_interop::scratch::{Scripts, bash};
 
 /// Hands the subject a word of its own, and a variable of its own.
 struct Deploying;
@@ -53,12 +53,18 @@ async fn the_closures_return_is_the_subjects_whole_environment() {
     ]);
 
     let mut argv = vec!["env".to_string(), "DEPLOY_TARGET=staging".to_string()];
-    argv.extend(bash(scripts.at(ENTRY)).iter().map(|word| word.to_string_lossy().to_string()));
+    argv.extend(
+        bash(scripts.at(ENTRY))
+            .iter()
+            .map(|word| word.to_string_lossy().to_string()),
+    );
 
     let ran = Deploying
         .run(&argv, |at| {
             Ok(vec![
-                at.bash_env(Provision::Joining(&Deploying.joining(at)))?,
+                at.bash_env(Provision::Joining(
+                    &Deploying.joining(at),
+                ))?,
                 ("DEPLOY_STAGE".into(), "canary".into()),
             ])
         })
@@ -67,7 +73,12 @@ async fn the_closures_return_is_the_subjects_whole_environment() {
         .whole()
         .unwrap();
 
-    assert_eq!(ran.subject, ExitStatus::Code(0), "{}", report(&ran.shells));
+    assert_eq!(
+        ran.subject,
+        ExitStatus::Code(0),
+        "{}",
+        report(&ran.shells)
+    );
     assert_eq!(
         behind(&ran.shells, "TELL"),
         [
@@ -85,9 +96,15 @@ async fn the_closures_return_is_the_subjects_whole_environment() {
 /// front of it, and no argument the caller did not write.
 #[tokio::test]
 async fn the_command_line_is_run_as_asked() {
-    let scripts = Scripts::of(&[(ENTRY, "BC_INSTR KEEP say REC \"$0\" \"$#\"")]);
+    let scripts = Scripts::of(&[(
+        ENTRY,
+        "BC_INSTR KEEP say REC \"$0\" \"$#\"",
+    )]);
     let ran = Keeping
-        .run(&bash(scripts.at(ENTRY)), provisioned(&Keeping))
+        .run(
+            &bash(scripts.at(ENTRY)),
+            provisioned(&Keeping),
+        )
         .await
         .unwrap()
         .whole()
@@ -96,7 +113,10 @@ async fn the_command_line_is_run_as_asked() {
     assert_eq!(ran.subject, ExitStatus::Code(0));
     assert_eq!(
         behind(&ran.shells, "REC"),
-        [[scripts.at(ENTRY).to_string_lossy().to_string(), "0".to_string()]],
+        [[
+            scripts.at(ENTRY).to_string_lossy().to_string(),
+            "0".to_string()
+        ]],
         "the program it names, and nothing appended{}",
         report(&ran.shells)
     );
@@ -121,18 +141,33 @@ async fn a_subject_may_join_by_hand_where_it_chooses() {
             bash "${BASH_SOURCE[0]%/*}/other.bash"
             "#,
         ),
-        ("other.bash", "type BC_INSTR >/dev/null 2>&1 && BC_INSTR KEEP say REC never\n"),
+        (
+            "other.bash",
+            "type BC_INSTR >/dev/null 2>&1 && BC_INSTR KEEP say REC never\n",
+        ),
     ]);
 
     let ran = Keeping
-        .run(&bash(scripts.at(ENTRY)), |at| Ok(vec![crate::deploy_session(at)]))
+        .run(&bash(scripts.at(ENTRY)), |at| {
+            Ok(vec![crate::deploy_session(at)])
+        })
         .await
         .unwrap()
         .whole()
         .unwrap();
 
-    assert_eq!(behind(&ran.shells, "REC"), [["by-hand"]], "{}", report(&ran.shells));
-    assert_eq!(ran.shells.len(), 1, "the children never joined{}", report(&ran.shells));
+    assert_eq!(
+        behind(&ran.shells, "REC"),
+        [["by-hand"]],
+        "{}",
+        report(&ran.shells)
+    );
+    assert_eq!(
+        ran.shells.len(),
+        1,
+        "the children never joined{}",
+        report(&ran.shells)
+    );
 }
 
 /// `Provision::Definitions` — the words exist in every shell, and nothing is
@@ -155,7 +190,10 @@ async fn a_definitions_file_leaves_initiation_to_the_script() {
 
     let ran = Deploying
         .run(&bash(scripts.at(ENTRY)), |at| {
-            Ok(vec![at.bash_env(Provision::Definitions)?, crate::deploy_session(at)])
+            Ok(vec![
+                at.bash_env(Provision::Definitions)?,
+                crate::deploy_session(at),
+            ])
         })
         .await
         .unwrap()
@@ -172,6 +210,9 @@ async fn a_definitions_file_leaves_initiation_to_the_script() {
 
 impl crate::Joins for Deploying {
     fn joining(&self, at: &Layout) -> String {
-        format!("BC_JOIN TELL {}\n", bash_strings::emit_scalar(at.text()))
+        format!(
+            "BC_JOIN TELL {}\n",
+            bash_strings::emit_scalar(at.text())
+        )
     }
 }

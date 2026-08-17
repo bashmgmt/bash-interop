@@ -15,23 +15,33 @@ use crate::rig::{Micros, Shell, Stamp};
 /// The pairs an announcement carries. `zero` is the shell's `$0` and `flags`
 /// its `$-`, which between them decide how a walk taken in it reads.
 pub fn account(pid: u32, zero: &str, flags: &str) -> Vec<String> {
-    let versinfo =
-        emit_array(&["5", "3", "9", "1", "release", "x86_64-pc-linux-gnu"].map(String::from));
+    let versinfo = emit_array(&["5", "3", "9", "1", "release", "x86_64-pc-linux-gnu"].map(String::from));
     let command = if flags.contains('c') { "true" } else { "" };
     let pid = pid.to_string();
 
     [
-        "pid", pid.as_str(),
-        "shlvl", "5",
-        "subshell", "0",
-        "versinfo", versinfo.as_str(),
-        "bash", "/usr/bin/bash",
-        "zero", zero,
-        "flags", flags,
-        "shellopts", "braceexpand:hashall",
-        "bashopts", "checkwinsize",
-        "command", command,
-        "brought", "()",
+        "pid",
+        pid.as_str(),
+        "shlvl",
+        "5",
+        "subshell",
+        "0",
+        "versinfo",
+        versinfo.as_str(),
+        "bash",
+        "/usr/bin/bash",
+        "zero",
+        zero,
+        "flags",
+        flags,
+        "shellopts",
+        "braceexpand:hashall",
+        "bashopts",
+        "checkwinsize",
+        "command",
+        command,
+        "brought",
+        "()",
     ]
     .iter()
     .map(ToString::to_string)
@@ -40,9 +50,21 @@ pub fn account(pid: u32, zero: &str, flags: &str) -> Vec<String> {
 
 /// A shell, as one would arrive.
 pub fn shell(nth: usize, pid: u32, zero: &str, flags: &str) -> Arc<Shell> {
-    let stamp = Stamp { sent_at: Micros(100), heard_at: Micros(101) };
+    let stamp = Stamp {
+        sent_at: Micros(100),
+        heard_at: Micros(101),
+    };
 
-    Arc::new(Shell::of(nth, Account { stamp, words: account(pid, zero, flags) }).expect("an account"))
+    Arc::new(
+        Shell::of(
+            nth,
+            Account {
+                stamp,
+                words: account(pid, zero, flags),
+            },
+        )
+        .expect("an account"),
+    )
 }
 
 /// A shell bash was handed a file to read.

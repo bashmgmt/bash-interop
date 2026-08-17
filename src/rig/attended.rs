@@ -157,7 +157,12 @@ pub struct Said<'a> {
 pub fn heard<K: AsRef<[Message]>>(shells: &[Attended<K>]) -> Vec<Said<'_>> {
     let mut said: Vec<Said<'_>> = shells
         .iter()
-        .flat_map(|at| at.kept.as_ref().iter().map(|message| Said { shell: &at.shell, message }))
+        .flat_map(|at| {
+            at.kept.as_ref().iter().map(|message| Said {
+                shell: &at.shell,
+                message,
+            })
+        })
         .collect();
 
     said.sort_by_key(|said| said.message.stamp.sent_at);

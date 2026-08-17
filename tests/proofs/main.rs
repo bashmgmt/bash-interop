@@ -30,17 +30,14 @@ mod starting;
 mod transparency;
 mod transport;
 
-
 use std::ffi::OsString;
 use std::sync::Arc;
 
 use bash_strings::emit_scalar;
 
-use bash_interop::rig::{
-    heard, Attended, Driving, Failure, Layout, Message, Provision, Rig, Shell, Whole,
-};
+use bash_interop::rig::{Attended, Driving, Failure, Layout, Message, Provision, Rig, Shell, Whole, heard};
 
-use bash_interop::scratch::{bash, Scripts};
+use bash_interop::scratch::{Scripts, bash};
 
 /// Every proof starts the same script, beside whatever else it wrote.
 pub const ENTRY: &str = "main.bash";
@@ -64,17 +61,22 @@ pub trait Joins {
 
 /// The usual driven environment: a provisioned file that initiates with the
 /// rig's own joining — the one auto-join there is, stated at each run.
-pub fn provisioned<R: Joins>(
-    rig: &R,
-) -> impl Fn(&Layout) -> Result<Vec<(OsString, OsString)>, Failure> + '_ {
-    |at| Ok(vec![at.bash_env(Provision::Joining(&rig.joining(at)))?])
+pub fn provisioned<R: Joins>(rig: &R) -> impl Fn(&Layout) -> Result<Vec<(OsString, OsString)>, Failure> + '_ {
+    |at| {
+        Ok(vec![at.bash_env(
+            Provision::Joining(&rig.joining(at)),
+        )?])
+    }
 }
 
 /// The convention a by-hand client reads: the workspace under a name of
 /// the client's own choice, the laid files sourced from it. A spelling,
 /// not a mechanism: the core adds nothing to any environment.
 pub fn deploy_session(at: &Layout) -> (OsString, OsString) {
-    (OsString::from("DEPLOY_SESSION"), OsString::from(at.text()))
+    (
+        OsString::from("DEPLOY_SESSION"),
+        OsString::from(at.text()),
+    )
 }
 
 /// Keeps every message, and answers nothing.
@@ -102,7 +104,10 @@ pub type Ran = Whole<Vec<Message>>;
 pub async fn running(files: &[(&str, &str)]) -> Ran {
     let scripts = Scripts::of(files);
     let ran = Keeping
-        .run(&bash(scripts.at(ENTRY)), provisioned(&Keeping))
+        .run(
+            &bash(scripts.at(ENTRY)),
+            provisioned(&Keeping),
+        )
         .await
         .unwrap_or_else(|error| panic!("{error}"));
 
@@ -122,12 +127,18 @@ pub fn lines<K: AsRef<[Message]>>(shells: &[Attended<K>]) -> Vec<&Message> {
 /// Every message that begins with `lead`, as the words behind it. Words, not
 /// a joined string: the boundaries are what the wire is for.
 pub fn behind<'a, K: AsRef<[Message]>>(shells: &'a [Attended<K>], lead: &str) -> Vec<&'a [String]> {
-    lines(shells).into_iter().filter_map(|message| message.behind(lead)).collect()
+    lines(shells)
+        .into_iter()
+        .filter_map(|message| message.behind(lead))
+        .collect()
 }
 
 /// How many of those begin with `word`.
 pub fn beginning(messages: &[&[String]], word: &str) -> usize {
-    messages.iter().filter(|words| words.first().is_some_and(|first| first == word)).count()
+    messages
+        .iter()
+        .filter(|words| words.first().is_some_and(|first| first == word))
+        .count()
 }
 
 /// Whether a pid is gone. The kill is immediate; the reaping is init's and
@@ -146,7 +157,13 @@ pub fn gone(pid: i32) -> bool {
 pub fn report<K: AsRef<[Message]>>(shells: &[Attended<K>]) -> String {
     let lines: Vec<String> = heard(shells)
         .iter()
-        .map(|said| format!("  pid {:>7} | {}", said.shell.pid, said.message.words.join(" ")))
+        .map(|said| {
+            format!(
+                "  pid {:>7} | {}",
+                said.shell.pid,
+                said.message.words.join(" ")
+            )
+        })
         .collect();
 
     format!("\ncapture:\n{}", lines.join("\n"))

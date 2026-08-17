@@ -9,7 +9,7 @@ use tempfile::TempDir;
 use tokio::sync::watch;
 use tokio::task::JoinSet;
 
-use super::attend::{attend, Attendance};
+use super::attend::{Attendance, attend};
 use super::watch::Watch;
 use super::wire::{self, Announced, Control, Pipe};
 use super::{Attended, Kept, Layout, Rig, Shell};
@@ -46,16 +46,18 @@ impl<'r, R: Rig> Session<'r, R> {
     pub(super) fn open(rig: &'r R, at: Option<&Path>) -> Result<Self, Failure> {
         let (dir, temporary) = match at {
             Some(at) => {
-                let dir = fs::canonicalize(at)
-                    .doing(|| format!("opening the prescribed workspace {}", at.display()))?;
+                let dir = fs::canonicalize(at).doing(|| {
+                    format!(
+                        "opening the prescribed workspace {}",
+                        at.display()
+                    )
+                })?;
 
                 (dir, None)
             }
             None => {
-                let temp =
-                    tempfile::tempdir().doing(|| "opening a workspace for the run".into())?;
-                let dir = fs::canonicalize(temp.path())
-                    .doing(|| "opening a workspace for the run".into())?;
+                let temp = tempfile::tempdir().doing(|| "opening a workspace for the run".into())?;
+                let dir = fs::canonicalize(temp.path()).doing(|| "opening a workspace for the run".into())?;
 
                 (dir, Some(temp))
             }
@@ -106,7 +108,10 @@ impl<'r, R: Rig> Session<'r, R> {
     /// the shell's pipe is opened, so it exists before the shell is released;
     /// nothing here awaits the shell.
     async fn announced(&mut self, Announced { token, account }: Announced) -> Result<(), Failure> {
-        let (up, rep) = (self.layout.up(&token), self.layout.rep(&token));
+        let (up, rep) = (
+            self.layout.up(&token),
+            self.layout.rep(&token),
+        );
         wire::mkfifo(Path::new(&rep))?;
         let pipe = Pipe::open(up.into(), rep.into())?;
 
@@ -114,7 +119,12 @@ impl<'r, R: Rig> Session<'r, R> {
         self.joined += 1;
         let reaction = self.rig.joined(&self.layout, Arc::clone(&shell)).await?;
 
-        self.attending.spawn_local(attend(shell, pipe, reaction, self.closing.subscribe()));
+        self.attending.spawn_local(attend(
+            shell,
+            pipe,
+            reaction,
+            self.closing.subscribe(),
+        ));
 
         Ok(())
     }
@@ -141,9 +151,7 @@ impl<'r, R: Rig> Session<'r, R> {
 }
 
 /// A task's outcome. A panic in a reaction is a defect and stays one.
-fn finished<K>(
-    done: Result<Result<Attendance<K>, Failure>, tokio::task::JoinError>,
-) -> Result<Attendance<K>, Failure> {
+fn finished<K>(done: Result<Result<Attendance<K>, Failure>, tokio::task::JoinError>) -> Result<Attendance<K>, Failure> {
     match done {
         Ok(outcome) => outcome,
         Err(join) => std::panic::resume_unwind(join.into_panic()),
@@ -165,12 +173,19 @@ impl Lock {
         let holding = || format!("holding the workspace {}", at.text());
         let file = fs::File::create(at.lock()).doing(holding)?;
 
-        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } < 0 {
+        if unsafe {
+            libc::flock(
+                file.as_raw_fd(),
+                libc::LOCK_EX | libc::LOCK_NB,
+            )
+        } < 0
+        {
             let error = std::io::Error::last_os_error();
             return match error.kind() {
-                std::io::ErrorKind::WouldBlock => {
-                    Err(Failure::new(holding(), "it is already held by a live session"))
-                }
+                std::io::ErrorKind::WouldBlock => Err(Failure::new(
+                    holding(),
+                    "it is already held by a live session",
+                )),
                 _ => Err(error).doing(holding),
             };
         }
@@ -188,8 +203,12 @@ fn sweep(at: &Layout) -> Result<(), Failure> {
     for entry in fs::read_dir(at.path()).doing(sweeping)? {
         let entry = entry.doing(sweeping)?;
         if entry.file_type().doing(sweeping)?.is_fifo() {
-            fs::remove_file(entry.path())
-                .doing(|| format!("removing the stale fifo {}", entry.path().display()))?;
+            fs::remove_file(entry.path()).doing(|| {
+                format!(
+                    "removing the stale fifo {}",
+                    entry.path().display()
+                )
+            })?;
         }
     }
 
@@ -198,7 +217,10 @@ fn sweep(at: &Layout) -> Result<(), Failure> {
 
 fn raise_descriptor_limit() -> Result<(), Failure> {
     let raising = || "raising the descriptor limit".to_string();
-    let mut limit = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+    let mut limit = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
 
     if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut limit) } < 0 {
         return Err(std::io::Error::last_os_error()).doing(raising);

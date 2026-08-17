@@ -36,7 +36,10 @@ impl<K> Run<K> {
     pub fn whole(self) -> Result<Whole<K>, Failure> {
         match self.failed {
             Some(why) => Err(why),
-            None => Ok(Whole { shells: self.shells, subject: self.subject }),
+            None => Ok(Whole {
+                shells: self.shells,
+                subject: self.subject,
+            }),
         }
     }
 }
@@ -82,12 +85,7 @@ pub trait Driving: Rig {
     /// The caller's directory instead — it exists, and is the caller's to
     /// have made — left behind: a reading taken later may follow source
     /// paths into it.
-    async fn run_at<A, E>(
-        &self,
-        at: &Path,
-        argv: &[A],
-        environment: E,
-    ) -> Result<Run<Kept<Self>>, Failure>
+    async fn run_at<A, E>(&self, at: &Path, argv: &[A], environment: E) -> Result<Run<Kept<Self>>, Failure>
     where
         A: AsRef<OsStr>,
         E: FnOnce(&Layout) -> Result<Vec<(OsString, OsString)>, Failure>,
@@ -98,12 +96,7 @@ pub trait Driving: Rig {
 }
 
 /// The one driven orchestration behind both entries.
-async fn driven<R, A, E>(
-    rig: &R,
-    at: Option<&Path>,
-    argv: &[A],
-    environment: E,
-) -> Result<Run<Kept<R>>, Failure>
+async fn driven<R, A, E>(rig: &R, at: Option<&Path>, argv: &[A], environment: E) -> Result<Run<Kept<R>>, Failure>
 where
     R: Rig,
     A: AsRef<OsStr>,
@@ -126,7 +119,11 @@ where
             let (shells, failed) = session.close().await;
             let subject = subject?;
 
-            Ok(Run { shells, subject: ExitStatus::from(subject), failed })
+            Ok(Run {
+                shells,
+                subject: ExitStatus::from(subject),
+                failed,
+            })
         })
         .await
 }
@@ -138,17 +135,21 @@ struct Subject {
 }
 
 impl Subject {
-    fn spawn<A: AsRef<OsStr>>(
-        argv: &[A],
-        environment: Vec<(OsString, OsString)>,
-    ) -> Result<Self, Failure> {
+    fn spawn<A: AsRef<OsStr>>(argv: &[A], environment: Vec<(OsString, OsString)>) -> Result<Self, Failure> {
         use std::os::unix::process::CommandExt;
 
-        let said =
-            || argv.iter().map(|word| word.as_ref().to_string_lossy()).collect::<Vec<_>>().join(" ");
-        let (program, rest) = argv
-            .split_first()
-            .ok_or_else(|| Failure::new("starting the subject", "the command line is empty"))?;
+        let said = || {
+            argv.iter()
+                .map(|word| word.as_ref().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        let (program, rest) = argv.split_first().ok_or_else(|| {
+            Failure::new(
+                "starting the subject",
+                "the command line is empty",
+            )
+        })?;
 
         let mut command = Command::new(program);
         command.args(rest).envs(environment).process_group(0);

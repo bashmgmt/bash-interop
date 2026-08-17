@@ -14,15 +14,14 @@ use crate::failure::{Doing, Failure};
 
 pub(crate) use control::{Announced, Control};
 pub(crate) use message::{Account, Line};
+pub use message::{Answer, Message, Micros, Pid, Stamp, Verb, field};
 pub(crate) use pipe::Pipe;
-pub use message::{field, Answer, Message, Micros, Pid, Stamp, Verb};
 
 /// The client half, shipped verbatim.
 const PRELUDE: &str = include_str!("prelude.bash");
 
 pub(crate) fn mkfifo(path: &Path) -> Result<(), Failure> {
-    nix::unistd::mkfifo(path, nix::sys::stat::Mode::S_IRWXU)
-        .doing(|| format!("making the fifo {}", path.display()))
+    nix::unistd::mkfifo(path, nix::sys::stat::Mode::S_IRWXU).doing(|| format!("making the fifo {}", path.display()))
 }
 
 /// Lays the session's bash into the workspace: the protocol's half and the
@@ -53,8 +52,10 @@ mod tests {
     /// frame that failed.
     #[test]
     fn the_protocol_half_touches_little_of_the_subject_s() {
-        let code: Vec<&str> =
-            PRELUDE.lines().filter(|line| !line.trim_start().starts_with('#')).collect();
+        let code: Vec<&str> = PRELUDE
+            .lines()
+            .filter(|line| !line.trim_start().starts_with('#'))
+            .collect();
 
         let theirs: Vec<String> = code
             .iter()
@@ -68,25 +69,36 @@ mod tests {
         for forbidden in ["eval", "trap", "export"] {
             let found = theirs.iter().find(|line| line.contains(forbidden));
 
-            assert!(found.is_none(), "the protocol {forbidden}s: {found:?}");
+            assert!(
+                found.is_none(),
+                "the protocol {forbidden}s: {found:?}"
+            );
         }
 
         // `set --` rebinds a function's positional parameters and is scoped to
         // the call; `set -e` and friends change the shell the subject runs in.
         for line in &theirs {
             let after_set = line.split("set -").nth(1);
-            assert!(after_set.is_none_or(|rest| rest.starts_with('-')), "changes an option: {line}");
+            assert!(
+                after_set.is_none_or(|rest| rest.starts_with('-')),
+                "changes an option: {line}"
+            );
         }
 
         // A line that *starts* `NAME=value` and stops there sets a global.
         // `IFS= read …` is a command prefix, binding only for that command.
         for line in &code {
-            let Some((name, rest)) = line.trim_start().split_once('=') else { continue };
+            let Some((name, rest)) = line.trim_start().split_once('=') else {
+                continue;
+            };
             let global = !name.is_empty()
                 && name.chars().all(|c| c.is_alphanumeric() || c == '_')
                 && rest.split_whitespace().count() <= 1;
 
-            assert!(!global || name.contains(OURS), "a name outside {OURS}: {line}");
+            assert!(
+                !global || name.contains(OURS),
+                "a name outside {OURS}: {line}"
+            );
         }
     }
 
@@ -103,7 +115,10 @@ mod tests {
 
         lay(&at, "words\n").unwrap();
         let dir = dir.to_str().unwrap();
-        assert_eq!(std::fs::read_to_string(format!("{dir}/rig.bash")).unwrap(), "words\n");
+        assert_eq!(
+            std::fs::read_to_string(format!("{dir}/rig.bash")).unwrap(),
+            "words\n"
+        );
         assert!(!std::path::Path::new(&format!("{dir}/bash_env.bash")).exists());
 
         let sources = format!(
@@ -112,9 +127,19 @@ mod tests {
         );
         let (name, file) = at.bash_env(crate::rig::Provision::Definitions).unwrap();
         assert_eq!(name, "BASH_ENV");
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), sources);
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            sources
+        );
 
-        let (_, file) = at.bash_env(crate::rig::Provision::Joining("JOIN 'it'\n")).unwrap();
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), format!("{sources}JOIN 'it'\n"));
+        let (_, file) = at
+            .bash_env(crate::rig::Provision::Joining(
+                "JOIN 'it'\n",
+            ))
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            format!("{sources}JOIN 'it'\n")
+        );
     }
 }

@@ -5,7 +5,7 @@ use std::fmt;
 use std::iter::once;
 use std::path::{Path, PathBuf};
 
-use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
 use crate::shell::Shell;
 use bash_strings::emit_q_words;
@@ -112,9 +112,10 @@ impl Source {
 impl fmt::Display for Source {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::File(path) => {
-                f.write_str(path.file_name().map_or("?", |name| name.to_str().unwrap_or("?")))
-            }
+            Self::File(path) => f.write_str(
+                path.file_name()
+                    .map_or("?", |name| name.to_str().unwrap_or("?")),
+            ),
             Self::Environment => f.write_str("environment"),
             Self::Prompt => f.write_str("main"),
             Self::Shell => f.write_str("-"),
@@ -138,7 +139,11 @@ pub struct Frame {
 
 impl fmt::Display for Frame {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}@{}:{}", self.site, self.source, self.lineno)?;
+        write!(
+            f,
+            "{}@{}:{}",
+            self.site, self.source, self.lineno
+        )?;
 
         match &self.args {
             Some(args) => write!(f, " ({})", emit_q_words(args)),
@@ -164,7 +169,10 @@ impl Stack {
     pub fn of(frames: Vec<Frame>) -> Option<Self> {
         let mut frames = frames.into_iter();
 
-        Some(Self { at: frames.next()?, outer: frames.collect() })
+        Some(Self {
+            at: frames.next()?,
+            outer: frames.collect(),
+        })
     }
 
     /// The frame the walk was taken in.
@@ -190,7 +198,6 @@ impl Serialize for Stack {
 
 impl<'de> Deserialize<'de> for Stack {
     fn deserialize<D: Deserializer<'de>>(from: D) -> Result<Self, D::Error> {
-        Stack::of(Vec::deserialize(from)?)
-            .ok_or_else(|| de::Error::custom("a call stack with no frames"))
+        Stack::of(Vec::deserialize(from)?).ok_or_else(|| de::Error::custom("a call stack with no frames"))
     }
 }

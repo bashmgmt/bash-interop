@@ -122,14 +122,14 @@ pub(crate) mod wire;
 
 use std::sync::Arc;
 
-pub use attended::{heard, Attended, Kept, Layout, Provision, Said};
+pub use attended::{Attended, Kept, Layout, Provision, Said, heard};
 pub use driving::{Driving, ExitStatus, Run, Whole};
 pub use serving::{Served, Serving};
 
-pub use wire::{field, Answer, Message, Micros, Pid, Stamp, Verb};
+pub use wire::{Answer, Message, Micros, Pid, Stamp, Verb, field};
 
-pub use crate::shell::Shell;
 pub use crate::failure::{Doing, Failure};
+pub use crate::shell::Shell;
 
 /// What bash a rig gives the subject, and how a reaction is made once a
 /// shell is there.

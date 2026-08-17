@@ -47,7 +47,9 @@ impl Lines {
     /// `O_RDWR`: this process counts as a writer, so the fifo never reaches
     /// end of input however many writers come and go.
     pub(crate) fn open_read_write(path: &Path) -> Result<Self, Failure> {
-        let receiver = pipe::OpenOptions::new().read_write(true).open_receiver(path);
+        let receiver = pipe::OpenOptions::new()
+            .read_write(true)
+            .open_receiver(path);
 
         Self::over(receiver, path)
     }
@@ -56,7 +58,12 @@ impl Lines {
         let what = path.display().to_string();
         let receiver = receiver.doing(|| format!("opening {what}"))?;
 
-        Ok(Self { receiver, bytes: Vec::new(), ready: VecDeque::new(), what })
+        Ok(Self {
+            receiver,
+            bytes: Vec::new(),
+            ready: VecDeque::new(),
+            what,
+        })
     }
 
     /// The fifo, as it names itself in a complaint.
@@ -74,7 +81,10 @@ impl Lines {
                 Read::Some => continue,
                 Read::End => return Ok(None),
                 Read::Nothing => {
-                    self.receiver.readable().await.doing(|| format!("waiting on {}", self.what))?;
+                    self.receiver
+                        .readable()
+                        .await
+                        .doing(|| format!("waiting on {}", self.what))?;
                 }
             }
         }
@@ -94,7 +104,10 @@ impl Lines {
         }
         let text = String::from_utf8_lossy(&self.bytes);
 
-        Err(Failure::new(format!("closing {}", self.what), format!("a line was cut short: {text:?}")))
+        Err(Failure::new(
+            format!("closing {}", self.what),
+            format!("a line was cut short: {text:?}"),
+        ))
     }
 
     fn read(&mut self) -> Result<Read, Failure> {
@@ -119,7 +132,10 @@ impl Lines {
         while let Some(offset) = self.bytes[from..].iter().position(|byte| *byte == b'\n') {
             let end = from + offset;
 
-            self.ready.push_back(Raw { bytes: self.bytes[from..end].to_vec(), heard_at });
+            self.ready.push_back(Raw {
+                bytes: self.bytes[from..end].to_vec(),
+                heard_at,
+            });
             from = end + 1;
         }
         self.bytes.drain(..from);

@@ -8,8 +8,8 @@
 
 use bash_interop::rig::{Driving, ExitStatus};
 
-use bash_interop::scratch::{bash, Scripts};
-use crate::{behind, provisioned, report, script, Keeping, ENTRY};
+use crate::{ENTRY, Keeping, behind, provisioned, report, script};
+use bash_interop::scratch::{Scripts, bash};
 
 /// A shell that goes leaving a line without its newline is a fault, and it is
 /// reported where the run stands: while the run is being served, it ends it.
@@ -25,12 +25,18 @@ async fn a_line_cut_short_by_a_shell_that_left_ends_the_run() {
     )]);
 
     let failure = Keeping
-        .run(&bash(scripts.at(ENTRY)), provisioned(&Keeping))
+        .run(
+            &bash(scripts.at(ENTRY)),
+            provisioned(&Keeping),
+        )
         .await
         .err()
         .expect("the half-read line must be reported");
 
-    assert!(failure.to_string().contains("never finished"), "{failure}");
+    assert!(
+        failure.to_string().contains("never finished"),
+        "{failure}"
+    );
 }
 
 /// The same line, left by a shell the session outlived, is reported when the
@@ -46,16 +52,29 @@ async fn a_line_cut_short_at_the_end_is_reported_beside_the_subjects_status() {
         "#,
     )]);
     let ran = Keeping
-        .run(&bash(scripts.at(ENTRY)), provisioned(&Keeping))
+        .run(
+            &bash(scripts.at(ENTRY)),
+            provisioned(&Keeping),
+        )
         .await
         .unwrap();
 
     let outsider: i32 = behind(&ran.shells, "REC")[0][1].parse().unwrap();
     let _ = unsafe { libc::kill(outsider, libc::SIGKILL) };
 
-    let failed = ran.failed.as_ref().expect("the half-read line must be reported");
-    assert!(failed.to_string().contains("never finished"), "{failed}");
-    assert_eq!(ran.subject, ExitStatus::Code(3), "and the subject's own status survives it");
+    let failed = ran
+        .failed
+        .as_ref()
+        .expect("the half-read line must be reported");
+    assert!(
+        failed.to_string().contains("never finished"),
+        "{failed}"
+    );
+    assert_eq!(
+        ran.subject,
+        ExitStatus::Code(3),
+        "and the subject's own status survives it"
+    );
 }
 
 /// A line that will not read as a message ends the run — nothing was seen out,
@@ -73,12 +92,18 @@ async fn a_line_that_will_not_read_ends_the_run() {
     )]);
 
     let failure = Keeping
-        .run(&bash(scripts.at(ENTRY)), provisioned(&Keeping))
+        .run(
+            &bash(scripts.at(ENTRY)),
+            provisioned(&Keeping),
+        )
         .await
         .err()
         .expect("a line that will not read must end the run");
 
-    assert!(failure.to_string().contains("(junk"), "it quotes what it could not read: {failure}");
+    assert!(
+        failure.to_string().contains("(junk"),
+        "it quotes what it could not read: {failure}"
+    );
 }
 
 /// A line on the control fifo that is not a frame ends the run, naming what
@@ -96,11 +121,17 @@ async fn a_frame_the_protocol_did_not_write_ends_the_run() {
     )]);
 
     let failure = Keeping
-        .run(&bash(scripts.at(ENTRY)), provisioned(&Keeping))
+        .run(
+            &bash(scripts.at(ENTRY)),
+            provisioned(&Keeping),
+        )
         .await
         .err()
         .expect("a line that is not a frame must end the run");
-    assert!(failure.to_string().contains("\"nonsense\" is not a frame"), "{failure}");
+    assert!(
+        failure.to_string().contains("\"nonsense\" is not a frame"),
+        "{failure}"
+    );
 }
 
 /// The lines around a fault arrive untouched: a shell's pipe is its own.
@@ -114,5 +145,10 @@ async fn a_fault_on_one_pipe_touches_no_other() {
     )
     .await;
 
-    assert_eq!(behind(&ran.shells, "REC"), [["first"], ["second"]], "{}", report(&ran.shells));
+    assert_eq!(
+        behind(&ran.shells, "REC"),
+        [["first"], ["second"]],
+        "{}",
+        report(&ran.shells)
+    );
 }

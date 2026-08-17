@@ -2,7 +2,7 @@
 
 use bash_interop::rig::ExitStatus;
 
-use crate::{behind, report, running, script, ENTRY};
+use crate::{ENTRY, behind, report, running, script};
 
 /// Every kind of descendant is a shell of its own: a subshell, a command
 /// substitution, a child process, and its subshell.
@@ -31,15 +31,32 @@ async fn every_descendant_shell_reaches_the_run() {
 
     assert_eq!(
         behind(&ran.shells, "REC"),
-        [["top"], ["paren"], ["cmdsubst"], ["child"], ["grandchild"], ["after"]],
+        [
+            ["top"],
+            ["paren"],
+            ["cmdsubst"],
+            ["child"],
+            ["grandchild"],
+            ["after"]
+        ],
         "{}",
         report(&ran.shells)
     );
-    assert_eq!(ran.shells.len(), 5, "the shell, two subshells, the child, its subshell");
+    assert_eq!(
+        ran.shells.len(),
+        5,
+        "the shell, two subshells, the child, its subshell"
+    );
 
     let shlvl: Vec<u32> = ran.shells.iter().map(|at| at.shell.shlvl).collect();
-    assert!(shlvl[3] > shlvl[0], "the child is one level down: {shlvl:?}");
-    assert_eq!(shlvl[1], shlvl[0], "a subshell is not: {shlvl:?}");
+    assert!(
+        shlvl[3] > shlvl[0],
+        "the child is one level down: {shlvl:?}"
+    );
+    assert_eq!(
+        shlvl[1], shlvl[0],
+        "a subshell is not: {shlvl:?}"
+    );
 }
 
 /// Many shells at once, each on a pipe of its own, each writing lines far
@@ -71,12 +88,25 @@ async fn many_shells_at_once_arrive_whole_and_apart() {
 
     let records = behind(&ran.shells, "REC");
     assert_eq!(records.len(), 8 * 80);
-    assert_eq!(records.iter().filter(|words| words[2].len() == 9000).count(), 8 * 40);
+    assert_eq!(
+        records
+            .iter()
+            .filter(|words| words[2].len() == 9000)
+            .count(),
+        8 * 40
+    );
 
     for at in &ran.shells[1..] {
-        let names: std::collections::HashSet<&str> =
-            at.kept.iter().map(|message| message.words[1].as_str()).collect();
-        assert_eq!(names.len(), 1, "one shell's pipe carries one shell's words: {names:?}");
+        let names: std::collections::HashSet<&str> = at
+            .kept
+            .iter()
+            .map(|message| message.words[1].as_str())
+            .collect();
+        assert_eq!(
+            names.len(),
+            1,
+            "one shell's pipe carries one shell's words: {names:?}"
+        );
     }
 }
 
@@ -95,11 +125,23 @@ async fn a_message_of_wide_characters_arrives_whole() {
     .await;
 
     let records = behind(&ran.shells, "REC");
-    assert_eq!(records.len(), 4, "one per writer{}", report(&ran.shells));
+    assert_eq!(
+        records.len(),
+        4,
+        "one per writer{}",
+        report(&ran.shells)
+    );
 
     for words in &records {
-        assert_eq!(words[1].chars().count(), 6000, "every character back, and only those");
-        assert!(words[1].chars().all(|glyph| glyph == '€'), "and each of them itself");
+        assert_eq!(
+            words[1].chars().count(),
+            6000,
+            "every character back, and only those"
+        );
+        assert!(
+            words[1].chars().all(|glyph| glyph == '€'),
+            "and each of them itself"
+        );
     }
 }
 

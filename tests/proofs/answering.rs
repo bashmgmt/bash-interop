@@ -6,14 +6,11 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
-use bash_interop::rig::{
-    Answer, Driving, ExitStatus, Failure, Layout, Message, Reacting, Rig, Run,
-    Shell,
-};
+use bash_interop::rig::{Answer, Driving, ExitStatus, Failure, Layout, Message, Reacting, Rig, Run, Shell};
 use tokio::sync::Notify;
 
-use bash_interop::scratch::{bash, sourcing, Scripts};
-use crate::{beginning, behind, provisioned, report, ENTRY};
+use crate::{ENTRY, beginning, behind, provisioned, report};
+use bash_interop::scratch::{Scripts, bash, sourcing};
 
 /// Answers each question a different way, cycling through every form.
 struct Answering {
@@ -47,7 +44,11 @@ impl Rig for Answering {
     }
 
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Soak, Failure> {
-        Ok(Soak { steps: self.steps.clone(), heard: Vec::new(), answered: 0 })
+        Ok(Soak {
+            steps: self.steps.clone(),
+            heard: Vec::new(),
+            answered: 0,
+        })
     }
 }
 
@@ -63,25 +64,41 @@ impl Reacting for Soak {
     }
 
     async fn answer(&mut self, asked: Message) -> Result<Answer, Failure> {
-        let step: usize = asked.words.last().and_then(|word| word.parse().ok()).unwrap_or(0);
+        let step: usize = asked
+            .words
+            .last()
+            .and_then(|word| word.parse().ok())
+            .unwrap_or(0);
 
         self.answered += 1;
         self.heard.push(asked);
 
         Ok(match step % 7 {
             0 => Answer::status(0),
-            1 => Answer::of("declare", ["-g".to_string(), format!("mark_{step}=set")]),
+            1 => Answer::of(
+                "declare",
+                ["-g".to_string(), format!("mark_{step}=set")],
+            ),
             2 => Answer::of("eval", [format!("NOTE eval {step}")]),
-            3 => Answer::of("NOTE", ["call".to_string(), step.to_string()]),
+            3 => Answer::of(
+                "NOTE",
+                ["call".to_string(), step.to_string()],
+            ),
             4 => {
                 let step_bash = self.steps.join(format!("step.{step}.bash"));
-                return sourcing(&step_bash, &format!("NOTE source {step}"));
+                return sourcing(
+                    &step_bash,
+                    &format!("NOTE source {step}"),
+                );
             }
             5 => {
                 std::thread::sleep(Duration::from_millis(2));
                 Answer::status(0)
             }
-            6 => Answer::of("printf", ["%s".to_string(), "x".repeat(100_000)]),
+            6 => Answer::of(
+                "printf",
+                ["%s".to_string(), "x".repeat(100_000)],
+            ),
             _ => Answer::status(3),
         })
     }
@@ -128,16 +145,29 @@ async fn a_session_survives_every_way_of_answering() {
         ),
     ]);
 
-    let answering = Answering { steps: scripts.dir().to_path_buf() };
+    let answering = Answering {
+        steps: scripts.dir().to_path_buf(),
+    };
     let ran = answering
-        .run(&bash(scripts.at(ENTRY)), provisioned(&answering))
+        .run(
+            &bash(scripts.at(ENTRY)),
+            provisioned(&answering),
+        )
         .await
         .and_then(Run::whole)
         .unwrap_or_else(|error| panic!("{error}"));
 
-    assert_eq!(ran.subject, ExitStatus::Code(0), "{}", report(&ran.shells));
     assert_eq!(
-        ran.shells.iter().map(|at| at.kept.answered).collect::<Vec<_>>(),
+        ran.subject,
+        ExitStatus::Code(0),
+        "{}",
+        report(&ran.shells)
+    );
+    assert_eq!(
+        ran.shells
+            .iter()
+            .map(|at| at.kept.answered)
+            .collect::<Vec<_>>(),
         [48, 1, 1, 1, 1, 1, 1, 1, 1, 1],
         "each shell's own questions, counted where they were answered — the \
          eight command substitutions are shells of their own, then the child"
@@ -146,17 +176,35 @@ async fn a_session_survives_every_way_of_answering() {
     let said = behind(&ran.shells, "REC");
     assert_eq!(beginning(&said, "tick"), 56);
     assert_eq!(beginning(&said, "refused"), 0);
-    assert_eq!(beginning(&said, "big"), 8, "{}", report(&ran.shells));
-    assert!(said.iter().filter(|words| words[0] == "big").all(|words| words[1] == "100000"));
-    assert_eq!(beginning(&said, "other"), 1, "the second shell got its answer too");
+    assert_eq!(
+        beginning(&said, "big"),
+        8,
+        "{}",
+        report(&ran.shells)
+    );
     assert!(
-        said.iter().any(|words| words.iter().any(|word| word.len() == 9000)),
+        said.iter()
+            .filter(|words| words[0] == "big")
+            .all(|words| words[1] == "100000")
+    );
+    assert_eq!(
+        beginning(&said, "other"),
+        1,
+        "the second shell got its answer too"
+    );
+    assert!(
+        said.iter()
+            .any(|words| words.iter().any(|word| word.len() == 9000)),
         "the wide message arrived as exactly what was written"
     );
 
     let notes = behind(&ran.shells, "NOTE");
     for form in ["eval", "call", "source"] {
-        assert!(beginning(&notes, form) > 0, "no answer arrived by {form}{}", report(&ran.shells));
+        assert!(
+            beginning(&notes, form) > 0,
+            "no answer arrived by {form}{}",
+            report(&ran.shells)
+        );
     }
 
     let marks = said
@@ -188,7 +236,9 @@ impl Rig for Gated {
     }
 
     async fn joined(&self, _at: &Layout, _shell: Arc<Shell>) -> Result<Gate, Failure> {
-        Ok(Gate { open: Rc::clone(&self.open) })
+        Ok(Gate {
+            open: Rc::clone(&self.open),
+        })
     }
 }
 
@@ -231,27 +281,42 @@ async fn an_answer_may_wait_on_another_shells_word() {
         wait
         "#,
     )]);
-    let gated = Gated { open: Rc::new(Notify::new()) };
+    let gated = Gated {
+        open: Rc::new(Notify::new()),
+    };
     let argv = bash(scripts.at(ENTRY));
 
-    let ran = tokio::time::timeout(Duration::from_secs(10), gated.run(&argv, provisioned(&gated)))
-        .await
-        .expect("served concurrently, or this would never return")
-        .unwrap();
+    let ran = tokio::time::timeout(
+        Duration::from_secs(10),
+        gated.run(&argv, provisioned(&gated)),
+    )
+    .await
+    .expect("served concurrently, or this would never return")
+    .unwrap();
 
     assert_eq!(ran.subject, ExitStatus::Code(0));
-    assert_eq!(ran.shells.len(), 2, "the asker in its subshell, and the script");
+    assert_eq!(
+        ran.shells.len(),
+        2,
+        "the asker in its subshell, and the script"
+    );
     assert!(ran.failed.is_none());
 }
 
 impl crate::Joins for Answering {
     fn joining(&self, at: &Layout) -> String {
-        format!("BC_JOIN SOAK {}\n", bash_strings::emit_scalar(at.text()))
+        format!(
+            "BC_JOIN SOAK {}\n",
+            bash_strings::emit_scalar(at.text())
+        )
     }
 }
 
 impl crate::Joins for Gated {
     fn joining(&self, at: &Layout) -> String {
-        format!("BC_JOIN GATE {}\n", bash_strings::emit_scalar(at.text()))
+        format!(
+            "BC_JOIN GATE {}\n",
+            bash_strings::emit_scalar(at.text())
+        )
     }
 }

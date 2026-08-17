@@ -49,7 +49,12 @@ impl Control {
         super::mkfifo(Path::new(&join))?;
         let _guard = JoinFifo(join.clone());
 
-        Ok(Self { lines: Lines::open_read_write(Path::new(&join))?, at, _guard, partial: HashMap::new() })
+        Ok(Self {
+            lines: Lines::open_read_write(Path::new(&join))?,
+            at,
+            _guard,
+            partial: HashMap::new(),
+        })
     }
 
     /// The next shell announced whole. Never end of input: the fifo is held
@@ -57,11 +62,12 @@ impl Control {
     /// frame already read is in `partial`.
     pub(crate) async fn next(&mut self) -> Result<Announced, Failure> {
         loop {
-            let raw = self
-                .lines
-                .next()
-                .await?
-                .ok_or_else(|| Failure::new("reading the control fifo", "it reached end of input"))?;
+            let raw = self.lines.next().await?.ok_or_else(|| {
+                Failure::new(
+                    "reading the control fifo",
+                    "it reached end of input",
+                )
+            })?;
 
             if let Some(announced) = self.frame(raw)? {
                 return Ok(announced);
@@ -104,11 +110,18 @@ impl Control {
             self.partial.insert(frame.token.to_string(), bytes);
             return Ok(None);
         }
-        let text = String::from_utf8(bytes)
-            .doing(|| format!("reading the announcement of {} as text", frame.token))?;
+        let text = String::from_utf8(bytes).doing(|| {
+            format!(
+                "reading the announcement of {} as text",
+                frame.token
+            )
+        })?;
         let account = Account::read(&text, raw.heard_at)?;
 
-        Ok(Some(Announced { token: frame.token.to_string(), account }))
+        Ok(Some(Announced {
+            token: frame.token.to_string(),
+            account,
+        }))
     }
 }
 
@@ -124,12 +137,17 @@ impl<'a> Frame<'a> {
     fn read(bytes: &'a [u8]) -> Result<Self, Failure> {
         let refused = || {
             let shown = String::from_utf8_lossy(bytes);
-            Failure::new("reading the control fifo", format!("{shown:?} is not a frame"))
+            Failure::new(
+                "reading the control fifo",
+                format!("{shown:?} is not a frame"),
+            )
         };
-        let space = bytes.iter().position(|byte| *byte == b' ').ok_or_else(refused)?;
+        let space = bytes
+            .iter()
+            .position(|byte| *byte == b' ')
+            .ok_or_else(refused)?;
         let token = std::str::from_utf8(&bytes[..space]).map_err(|_| refused())?;
-        let names_a_file =
-            !token.is_empty() && !token.contains(['/', '\0']) && !token.contains(char::is_whitespace);
+        let names_a_file = !token.is_empty() && !token.contains(['/', '\0']) && !token.contains(char::is_whitespace);
         if !names_a_file {
             return Err(refused());
         }
@@ -147,11 +165,14 @@ impl<'a> Frame<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rig::wire::{field, Micros};
+    use crate::rig::wire::{Micros, field};
     use bash_strings::emit_array;
 
     fn raw(text: impl AsRef<[u8]>) -> Raw {
-        Raw { bytes: text.as_ref().to_vec(), heard_at: Micros(7) }
+        Raw {
+            bytes: text.as_ref().to_vec(),
+            heard_at: Micros(7),
+        }
     }
 
     fn account(zero: &str) -> String {
@@ -167,30 +188,59 @@ mod tests {
         let at = Layout::new(dir.path().to_path_buf()).unwrap();
         let mut control = Control::open(at).unwrap();
 
-        let (one, two) = (account("€uro.bash"), account("plain.bash"));
+        let (one, two) = (
+            account("€uro.bash"),
+            account("plain.bash"),
+        );
         let split = one.find('€').unwrap() + 1;
         let (head, tail) = one.as_bytes().split_at(split);
 
         let mut frame = |line: Vec<u8>| control.frame(raw(line)).unwrap();
-        assert!(frame([b"A + ".as_slice(), head].concat()).is_none(), "more to come");
+        assert!(
+            frame([b"A + ".as_slice(), head].concat()).is_none(),
+            "more to come"
+        );
         assert!(frame([b"B + ".as_slice(), &two.as_bytes()[..3]].concat()).is_none());
         let a = frame([b"A . ".as_slice(), tail].concat()).expect("A is whole");
         let b = frame([b"B . ".as_slice(), &two.as_bytes()[3..]].concat()).expect("B is whole");
 
         assert_eq!(a.token, "A");
-        assert_eq!(field(&a.account.words, "zero"), Some("€uro.bash"));
+        assert_eq!(
+            field(&a.account.words, "zero"),
+            Some("€uro.bash")
+        );
         assert_eq!(b.token, "B");
-        assert_eq!(field(&b.account.words, "zero"), Some("plain.bash"));
-        assert!(control.partial.is_empty(), "nothing left over");
+        assert_eq!(
+            field(&b.account.words, "zero"),
+            Some("plain.bash")
+        );
+        assert!(
+            control.partial.is_empty(),
+            "nothing left over"
+        );
     }
 
     /// The token has to name two files, and the frame has to be one.
     #[test]
     fn a_frame_the_protocol_did_not_write_is_refused() {
-        for bad in ["", "A", "A +", "A x chunk", " . chunk", "a/b . chunk", "a\tb . chunk"] {
-            assert!(Frame::read(bad.as_bytes()).is_err(), "{bad:?} should not read as a frame");
+        for bad in [
+            "",
+            "A",
+            "A +",
+            "A x chunk",
+            " . chunk",
+            "a/b . chunk",
+            "a\tb . chunk",
+        ] {
+            assert!(
+                Frame::read(bad.as_bytes()).is_err(),
+                "{bad:?} should not read as a frame"
+            );
         }
         let frame = Frame::read(b"A . ").unwrap();
-        assert!(frame.last && frame.chunk.is_empty(), "an empty last chunk is a frame");
+        assert!(
+            frame.last && frame.chunk.is_empty(),
+            "an empty last chunk is a frame"
+        );
     }
 }

@@ -40,7 +40,14 @@ pub(super) async fn attend<A: Reacting>(
     };
     let kept = reaction.finish().await?;
 
-    Ok(Attendance { attended: Attended { shell, kept, parted }, cut: pipe.close().err() })
+    Ok(Attendance {
+        attended: Attended {
+            shell,
+            kept,
+            parted,
+        },
+        cut: pipe.close().err(),
+    })
 }
 
 async fn react<A: Reacting>(reaction: &mut A, pipe: &Pipe, line: Line) -> Result<(), Failure> {

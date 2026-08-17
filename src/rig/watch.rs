@@ -32,12 +32,18 @@ impl Watch {
     }
 
     fn over(fd: OwnedFd) -> Result<Self, Failure> {
-        AsyncFd::new(fd).map(Self).doing(|| "registering the watch".into())
+        AsyncFd::new(fd)
+            .map(Self)
+            .doing(|| "registering the watch".into())
     }
 
     /// Resolves once, when the end has come. A pidfd reports readable when its
     /// process exits; a handle reports hangup, which readiness includes.
     pub(super) async fn fired(&self) -> Result<(), Failure> {
-        self.0.readable().await.map(|_| ()).doing(|| "waiting for the end".into())
+        self.0
+            .readable()
+            .await
+            .map(|_| ())
+            .doing(|| "waiting for the end".into())
     }
 }
