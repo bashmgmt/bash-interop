@@ -185,7 +185,9 @@ impl Ahead {
 /// puts in front of one.
 pub fn field<'a>(words: &'a [String], key: &str) -> Option<&'a str> {
     words
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .find(|pair| pair[0] == key)
         .map(|pair| pair[1].as_str())
 }
